@@ -67,6 +67,18 @@ public class UserService {
         usersRepository.removeUser(username);
     }
 
+    public Boolean verifyUser(String username, char[] password, Response response) throws UsersRepositoryException {
+        usernamePreconditions(username);
+        User user = usersRepository.getUserByName(username);
+        try {
+            return user.verifyPassword(new String(password));
+        } catch (NullPointerException e) {
+            LOGGER.info("Error verifying User password, user doesn't exist : {}", e.getMessage());
+            response.status(HttpStatus.CONFLICT_409);
+        }
+        return false;
+    }
+
     public String upsertUser(String username, char[] password, Response response) throws UsersRepositoryException {
         usernamePreconditions(username);
         User user = usersRepository.getUserByName(username);

@@ -1,6 +1,9 @@
 target/
+*.iml
 dependency-reduced-pom.xml
+swagger/
 dockerfiles/run/**/*.lib
 dockerfiles/run/**/*.jar
 dockerfiles/run/**/keystore
+dockerfiles/run/guice/cassandra/destination/glowroot/*
 .m2

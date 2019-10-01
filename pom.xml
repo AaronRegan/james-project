@@ -2729,7 +2729,6 @@
                         <optimize>true</optimize>
                         <source>${target.jdk}</source>
                         <target>${target.jdk}</target>
-                        <release>${target.jdk}</release>
                     </configuration>
                 </plugin>
                 <plugin>

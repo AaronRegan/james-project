@@ -32,6 +32,7 @@ import org.apache.james.user.api.UsersRepositoryException;
 import org.apache.james.webadmin.Routes;
 import org.apache.james.webadmin.dto.AddUserRequest;
 import org.apache.james.webadmin.dto.UserResponse;
+import org.apache.james.webadmin.dto.VerifyUserRequest;
 import org.apache.james.webadmin.service.UserService;
 import org.apache.james.webadmin.utils.ErrorResponder;
 import org.apache.james.webadmin.utils.ErrorResponder.ErrorType;
@@ -65,7 +66,8 @@ public class UserRoutes implements Routes {
 
     private final UserService userService;
     private final JsonTransformer jsonTransformer;
-    private final JsonExtractor<AddUserRequest> jsonExtractor;
+    private final JsonExtractor<AddUserRequest> jsonExtractorAdd;
+    private final JsonExtractor<VerifyUserRequest> jsonExtractorVerify;
 
     private Service service;
 
@@ -73,7 +75,8 @@ public class UserRoutes implements Routes {
     public UserRoutes(UserService userService, JsonTransformer jsonTransformer) {
         this.userService = userService;
         this.jsonTransformer = jsonTransformer;
-        this.jsonExtractor = new JsonExtractor<>(AddUserRequest.class);
+        this.jsonExtractorAdd = new JsonExtractor<>(AddUserRequest.class);
+        this.jsonExtractorVerify = new JsonExtractor<>(VerifyUserRequest.class);
     }
 
     @Override
@@ -90,7 +93,28 @@ public class UserRoutes implements Routes {
         defineCreateUser();
 
         defineDeleteUser();
+
+        defineVerifyUsers();
     }
+
+    @GET
+    @Path("/{username}")
+    @ApiOperation(value = "Verifying User Password")
+    @ApiImplicitParams({
+            @ApiImplicitParam(required = true, dataType = "string", name = "username", paramType = "path"),
+            @ApiImplicitParam(required = true, dataType = "org.apache.james.webadmin.dto.VerifyUserRequest", paramType = "body")
+    })
+    @ApiResponses(value = {
+            @ApiResponse(code = HttpStatus.NO_CONTENT_204, message = "Verification Succeded", response = UserResponse.class),
+            @ApiResponse(code = HttpStatus.EXPECTATION_FAILED_417, message = "Verification Failed"),
+            @ApiResponse(code = HttpStatus.BAD_REQUEST_400, message = "Invalid input user."),
+            @ApiResponse(code = HttpStatus.INTERNAL_SERVER_ERROR_500,
+                    message = "Internal server error - Something went bad on the server side.")
+    })
+    public void defineVerifyUsers() {
+        service.get(USERS + SEPARATOR + USER_NAME, this::verifyUser);
+    }
+
 
     @DELETE
     @Path("/{username}")
@@ -164,7 +188,7 @@ public class UserRoutes implements Routes {
     private String upsertUser(Request request, Response response) throws UsersRepositoryException {
         try {
             return userService.upsertUser(request.params(USER_NAME),
-                jsonExtractor.parse(request.body()).getPassword(),
+                jsonExtractorAdd.parse(request.body()).getPassword(),
                 response);
         } catch (JsonExtractException e) {
             LOGGER.info("Error while deserializing addUser request", e);
@@ -182,6 +206,38 @@ public class UserRoutes implements Routes {
                 .message("Invalid user path")
                 .cause(e)
                 .haltError();
+        }
+    }
+
+    private String verifyUser(Request request, Response response) throws UsersRepositoryException {
+        try {
+            if (userService.verifyUser(request.params(USER_NAME),
+                    jsonExtractorVerify.parse(request.body()).getPassword(),
+                    response)) {
+                return Responses.returnNoContent(response);
+            } else {
+                throw ErrorResponder.builder()
+                        .statusCode(HttpStatus.EXPECTATION_FAILED_417)
+                        .type(ErrorType.INVALID_ARGUMENT)
+                        .message("Password verification failed for User")
+                        .haltError();
+            }
+        } catch (JsonExtractException e) {
+            LOGGER.info("Error while deserializing addUser request", e);
+            throw ErrorResponder.builder()
+                    .statusCode(HttpStatus.BAD_REQUEST_400)
+                    .type(ErrorType.INVALID_ARGUMENT)
+                    .message("Error while deserializing verifyUser request")
+                    .cause(e)
+                    .haltError();
+        } catch (IllegalArgumentException e) {
+            LOGGER.info("Invalid user path", e);
+            throw ErrorResponder.builder()
+                    .statusCode(HttpStatus.BAD_REQUEST_400)
+                    .type(ErrorType.INVALID_ARGUMENT)
+                    .message("Invalid user path")
+                    .cause(e)
+                    .haltError();
         }
     }
 }
