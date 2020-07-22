@@ -41,13 +41,11 @@ import static org.apache.james.mailbox.store.mail.model.StandardNames.MIME_MIME_
 import static org.apache.james.mailbox.store.mail.model.StandardNames.MIME_SUB_TYPE_NAME;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.function.Predicate;
 
 import org.apache.james.mailbox.store.mail.model.Property;
 
@@ -57,25 +55,16 @@ import com.github.steveash.guavate.Guavate;
  * Builds properties
  */
 public class PropertyBuilder {
-
     private static final int INITIAL_CAPACITY = 32;
-    public static final String JAMES_INTERNALS = "JAMES_INTERNALS";
-    public static final String HAS_ATTACHMENT = "HAS_ATTACHMENT";
-
-    public static Predicate<Property> isHasAttachmentProperty() {
-        return property -> property.getNamespace().equals(PropertyBuilder.JAMES_INTERNALS)
-            && property.getLocalName().equals(PropertyBuilder.HAS_ATTACHMENT)
-            && property.getValue().equals("true");
-    }
 
     private Long textualLineCount;
-    private final List<SimpleProperty> properties;
+    private final List<Property> properties;
 
     public PropertyBuilder(List<Property> props) {
         textualLineCount = null;
         properties = new ArrayList<>(props.size());
         for (Property property:props) {
-            properties.add(new SimpleProperty(property));
+            properties.add(new Property(property));
         }
     }
     
@@ -114,7 +103,7 @@ public class PropertyBuilder {
         return properties.stream()
             .filter(property -> property.isNamed(namespace, localName))
             .findFirst()
-            .map(SimpleProperty::getValue)
+            .map(Property::getValue)
             .orElse(null);
     }
     
@@ -127,7 +116,7 @@ public class PropertyBuilder {
     public List<String> getValues(String namespace, String localName) {
         return properties.stream()
             .filter(property -> property.isNamed(namespace, localName))
-            .map(SimpleProperty::getValue)
+            .map(Property::getValue)
             .collect(Guavate.toImmutableList());
     }
     
@@ -138,15 +127,10 @@ public class PropertyBuilder {
      * @param value null to remove property
      */
     public void setProperty(String namespace, String localName, String value) {
-        for (Iterator<SimpleProperty> it = properties.iterator();it.hasNext();) {
-            final SimpleProperty property = it.next();
-            if (property.isNamed(namespace, localName)) {
-                it.remove();
-            }
-        }
+        properties.removeIf(property -> property.isNamed(namespace, localName));
         
         if (value != null) {
-            properties.add(new SimpleProperty(namespace, localName, value));
+            properties.add(new Property(namespace, localName, value));
         }
     }
     
@@ -157,15 +141,10 @@ public class PropertyBuilder {
      * @param values null to remove property
      */
     public void setProperty(String namespace, String localName, List<String> values) {
-        for (Iterator<SimpleProperty> it = properties.iterator();it.hasNext();) {
-            final SimpleProperty property = it.next();
-            if (property.isNamed(namespace, localName)) {
-                it.remove();
-            }
-        }
+        properties.removeIf(property -> property.isNamed(namespace, localName));
         if (values != null) {
             for (String value:values) {
-                properties.add(new SimpleProperty(namespace, localName, value));
+                properties.add(new Property(namespace, localName, value));
             }
         }
     }
@@ -177,7 +156,7 @@ public class PropertyBuilder {
      */
     public SortedMap<String,String> getProperties(String namespace) {
         final SortedMap<String, String> parameters = new TreeMap<>();
-        for (SimpleProperty property : properties) {
+        for (Property property : properties) {
             if (property.isInSpace(namespace)) {
                 parameters.put(property.getLocalName(), property.getValue());
             }
@@ -193,14 +172,9 @@ public class PropertyBuilder {
      * @param valuesByLocalName not null
      */
     public void setProperties(String namespace, Map<String,String> valuesByLocalName) {
-        for (Iterator<SimpleProperty> it = properties.iterator();it.hasNext();) {
-            final SimpleProperty property = it.next();
-            if (property.isInSpace(namespace)) {
-                it.remove();
-            }
-        }
+        properties.removeIf(property -> property.isInSpace(namespace));
         for (Map.Entry<String, String> valueByLocalName:valuesByLocalName.entrySet()) {
-            properties.add(new SimpleProperty(namespace, valueByLocalName.getKey().toLowerCase(Locale.US), valueByLocalName.getValue()));
+            properties.add(new Property(namespace, valueByLocalName.getKey().toLowerCase(Locale.US), valueByLocalName.getValue()));
         }
     }
     
@@ -221,10 +195,6 @@ public class PropertyBuilder {
      */
     public void setMediaType(String value) {
         setProperty(MIME_MIME_TYPE_SPACE, MIME_MEDIA_TYPE_NAME, value);
-    }
-
-    public void setHasAttachment(boolean value) {
-        setProperty(JAMES_INTERNALS, HAS_ATTACHMENT, Boolean.toString(value));
     }
 
     /**

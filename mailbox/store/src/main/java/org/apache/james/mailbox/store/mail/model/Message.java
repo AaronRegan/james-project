@@ -23,7 +23,7 @@ import java.io.InputStream;
 import java.util.Date;
 import java.util.List;
 
-import org.apache.james.mailbox.model.MessageAttachment;
+import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mailbox.model.MessageId;
 
 public interface Message {
@@ -57,22 +57,16 @@ public interface Message {
 
     /**
      * The number of octets contained in the body of this document.
-     *
-     * @return number of octets
      */
     long getBodyOctets();
 
     /**
      * The number of octets contained in the full content of this document.
-     *
-     * @return number of octets
      */
     long getFullContentOctets();
 
     /**
      * The number of octets contained in the header content of this document.
-     *
-     * @return number of octets
      */
     long getHeaderOctets();
 
@@ -88,20 +82,14 @@ public interface Message {
      *
      * Be aware that this method need to return a new fresh {@link InputStream}
      * on every call
-     *
-     * @return header
-     * @throws IOException
      */
     InputStream getHeaderContent() throws IOException;
 
     /**
-     *Returns the full raw content of the MailboxMessage via an {@link InputStream}.
+     * Returns the full raw content of the MailboxMessage via an {@link InputStream}.
      *
      * Be aware that this method need to return a new fresh {@link InputStream}
      * on every call
-     *
-     * @return content
-     * @throws IOException
      */
     InputStream getFullContent() throws IOException;
 
@@ -119,6 +107,6 @@ public interface Message {
      * 
      * @return a read only list of attachments
      */
-    List<MessageAttachment> getAttachments();
+    List<MessageAttachmentMetadata> getAttachments();
 
 }

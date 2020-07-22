@@ -26,13 +26,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BinaryOperator;
+import java.util.function.Predicate;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.james.mailbox.MailboxSession;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxACL.EntryKey;
 import org.apache.james.mailbox.model.MailboxACL.Rfc4314Rights;
-import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.util.GuavaUtils;
 import org.apache.james.util.OptionalUtils;
 import org.slf4j.Logger;
@@ -93,43 +93,6 @@ public class Rights {
         }
     }
 
-    public static class Username {
-        public static Username forMailboxPath(MailboxPath mailboxPath) {
-            return new Username(mailboxPath.getUser());
-        }
-
-        public static Username fromSession(MailboxSession mailboxSession) {
-            return new Username(mailboxSession.getUser().asString());
-        }
-
-        private final String value;
-
-        public Username(String value) {
-            this.value = value;
-        }
-
-        @JsonValue
-        public String getValue() {
-            return value;
-        }
-
-        @Override
-        public final boolean equals(Object o) {
-            if (o instanceof Username) {
-                Username username = (Username) o;
-
-                return Objects.equals(this.value, username.value);
-            }
-            return false;
-        }
-
-        @Override
-        public final int hashCode() {
-            return Objects.hash(value);
-        }
-
-    }
-
     public static class Builder {
         private Multimap<Username, Right> rights;
 
@@ -173,14 +136,14 @@ public class Rights {
 
     private static Builder toRightsBuilder(Map.Entry<EntryKey, MailboxACL.Rfc4314Rights> entry) {
         return builder().delegateTo(
-            new Username(entry.getKey().getName()),
+            Username.of(entry.getKey().getName()),
             fromACL(entry.getValue()));
     }
 
     private static List<Right> fromACL(MailboxACL.Rfc4314Rights rights) {
         return rights.list()
             .stream()
-            .flatMap(right -> OptionalUtils.toStream(Right.forRight(right)))
+            .flatMap(right -> Right.forRight(right).stream())
             .collect(Guavate.toImmutableList());
     }
 
@@ -239,7 +202,7 @@ public class Rights {
             .stream()
             .map(entry -> new MailboxACL(
                 ImmutableMap.of(
-                    EntryKey.createUserEntryKey(entry.getKey().value),
+                    EntryKey.createUserEntryKey(entry.getKey()),
                     toMailboxAclRights(entry.getValue()))))
             .reduce(MailboxACL.EMPTY, union);
     }
@@ -270,7 +233,7 @@ public class Rights {
 
     private Optional<Boolean> containsRight(Username username, Right right) {
         return Optional.ofNullable(rights.get(username))
-            .filter(rightList -> !rightList.isEmpty())
+            .filter(Predicate.not(Collection::isEmpty))
             .map(rightList -> rightList.contains(right));
     }
 

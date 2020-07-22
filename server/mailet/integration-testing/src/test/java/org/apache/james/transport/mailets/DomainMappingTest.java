@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import javax.mail.internet.MimeMessage;
 
+import org.apache.james.core.Username;
 import org.apache.james.core.builder.MimeMessageBuilder;
 import org.apache.james.mailbox.model.MailboxConstants;
 import org.apache.james.mailbox.model.MailboxPath;
@@ -38,9 +39,9 @@ import org.apache.james.modules.MailboxProbeImpl;
 import org.apache.james.modules.protocols.ImapGuiceProbe;
 import org.apache.james.modules.protocols.SmtpGuiceProbe;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.MailRepositoryProbeImpl;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.apache.james.utils.WebAdminGuiceProbe;
 import org.apache.james.webadmin.WebAdminUtils;
 import org.apache.mailet.base.test.FakeMail;
@@ -71,19 +72,20 @@ public class DomainMappingTest {
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
     @Rule
     public SMTPMessageSender messageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
 
     @Before
     public void setup() throws Exception {
-        MailetContainer.Builder mailetContainer = TemporaryJamesServer.SIMPLE_MAILET_CONTAINER_CONFIGURATION
+        MailetContainer.Builder mailetContainer = TemporaryJamesServer.simpleMailetContainerConfiguration()
             .putProcessor(CommonProcessors.rrtErrorEnabledTransport())
             .putProcessor(CommonProcessors.rrtErrorProcessor());
 
         jamesServer = TemporaryJamesServer.builder()
             .withMailetContainer(mailetContainer)
             .build(temporaryFolder.newFolder());
+        jamesServer.start();
 
         jamesServer.getProbe(DataProbeImpl.class).fluent()
             .addDomain(DOMAIN1)
@@ -91,8 +93,8 @@ public class DomainMappingTest {
             .addUser(SENDER, PASSWORD)
             .addUser(USER_DOMAIN1, PASSWORD);
 
-        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.forUser(USER_DOMAIN1, MailboxConstants.INBOX));
-        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.forUser(USER_DOMAIN2, MailboxConstants.INBOX));
+        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.forUser(Username.of(USER_DOMAIN1), MailboxConstants.INBOX));
+        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.forUser(Username.of(USER_DOMAIN2), MailboxConstants.INBOX));
 
         webAdminApi = WebAdminUtils.spec(jamesServer.getProbe(WebAdminGuiceProbe.class).getWebAdminPort());
 
@@ -118,11 +120,11 @@ public class DomainMappingTest {
                 .sender(SENDER)
                 .recipient(USER_DOMAIN2));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(USER_DOMAIN1, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -136,11 +138,11 @@ public class DomainMappingTest {
                 .sender(SENDER)
                 .recipient(USER_DOMAIN2));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(USER_DOMAIN1, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -193,11 +195,11 @@ public class DomainMappingTest {
                 .sender(SENDER)
                 .recipient(USER_DOMAIN2));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_DOMAIN1, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -214,10 +216,10 @@ public class DomainMappingTest {
                 .sender(SENDER)
                 .recipient(USER_DOMAIN2));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_DOMAIN1, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 }

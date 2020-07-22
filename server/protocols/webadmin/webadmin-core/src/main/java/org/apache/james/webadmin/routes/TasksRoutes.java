@@ -23,20 +23,25 @@ import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 
+import org.apache.james.json.DTOConverter;
+import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
 import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.task.TaskId;
 import org.apache.james.task.TaskManager;
 import org.apache.james.task.TaskNotFoundException;
 import org.apache.james.util.DurationParser;
 import org.apache.james.webadmin.Routes;
+import org.apache.james.webadmin.dto.DTOModuleInjections;
 import org.apache.james.webadmin.dto.ExecutionDetailsDto;
 import org.apache.james.webadmin.utils.ErrorResponder;
 import org.apache.james.webadmin.utils.JsonTransformer;
@@ -60,14 +65,18 @@ import spark.Service;
 @Produces("application/json")
 public class TasksRoutes implements Routes {
     private static final Duration MAXIMUM_AWAIT_TIMEOUT = Duration.ofDays(365);
-    private final TaskManager taskManager;
-    private final JsonTransformer jsonTransformer;
     public static final String BASE = "/tasks";
 
+    private final TaskManager taskManager;
+    private final JsonTransformer jsonTransformer;
+    private final DTOConverter<TaskExecutionDetails.AdditionalInformation, AdditionalInformationDTO> additionalInformationDTOConverter;
+
     @Inject
-    public TasksRoutes(TaskManager taskManager, JsonTransformer jsonTransformer) {
+    public TasksRoutes(TaskManager taskManager, JsonTransformer jsonTransformer,
+                       @Named(DTOModuleInjections.WEBADMIN_DTO) DTOConverter<TaskExecutionDetails.AdditionalInformation, AdditionalInformationDTO> additionalInformationDTOConverter) {
         this.taskManager = taskManager;
         this.jsonTransformer = jsonTransformer;
+        this.additionalInformationDTOConverter = additionalInformationDTOConverter;
     }
 
     @Override
@@ -105,7 +114,7 @@ public class TasksRoutes implements Routes {
     })
     public Object list(Request req, Response response) {
         try {
-            return ExecutionDetailsDto.from(
+            return ExecutionDetailsDto.from(additionalInformationDTOConverter,
                 Optional.ofNullable(req.queryParams("status"))
                 .map(TaskManager.Status::fromString)
                 .map(taskManager::list)
@@ -153,10 +162,10 @@ public class TasksRoutes implements Routes {
     private Object respondStatus(TaskId taskId, Supplier<TaskExecutionDetails> executionDetailsSupplier) {
         try {
             TaskExecutionDetails executionDetails = executionDetailsSupplier.get();
-            return ExecutionDetailsDto.from(executionDetails);
+            return ExecutionDetailsDto.from(additionalInformationDTOConverter, executionDetails);
         } catch (TaskNotFoundException e) {
             throw ErrorResponder.builder()
-                .message(String.format("%s can not be found", taskId.getValue()))
+                .message("%s can not be found", taskId.getValue())
                 .statusCode(HttpStatus.NOT_FOUND_404)
                 .type(ErrorResponder.ErrorType.NOT_FOUND)
                 .haltError();
@@ -193,7 +202,7 @@ public class TasksRoutes implements Routes {
     private Duration getTimeout(Request req) {
         try {
             Duration timeout =  Optional.ofNullable(req.queryParams("timeout"))
-                .filter(parameter -> !parameter.isEmpty())
+                .filter(Predicate.not(String::isEmpty))
                 .map(rawString -> DurationParser.parse(rawString, ChronoUnit.SECONDS))
                 .orElse(MAXIMUM_AWAIT_TIMEOUT);
 

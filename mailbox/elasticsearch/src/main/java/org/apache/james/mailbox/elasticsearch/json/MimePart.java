@@ -30,6 +30,9 @@ import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.james.mailbox.extractor.ParsedContent;
 import org.apache.james.mailbox.extractor.TextExtractor;
+import org.apache.james.mailbox.model.ContentType;
+import org.apache.james.mailbox.model.ContentType.MediaType;
+import org.apache.james.mailbox.model.ContentType.SubType;
 import org.apache.james.mailbox.store.extractor.DefaultTextExtractor;
 import org.apache.james.mime4j.stream.Field;
 import org.slf4j.Logger;
@@ -40,7 +43,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Multimap;
 
 public class MimePart {
 
@@ -49,8 +51,8 @@ public class MimePart {
         private final HeaderCollection.Builder headerCollectionBuilder;
         private Optional<InputStream> bodyContent;
         private final List<MimePart> children;
-        private Optional<String> mediaType;
-        private Optional<String> subType;
+        private Optional<MediaType> mediaType;
+        private Optional<SubType> subType;
         private Optional<String> fileName;
         private Optional<String> fileExtension;
         private Optional<String> contentDisposition;
@@ -96,14 +98,14 @@ public class MimePart {
         }
 
         @Override
-        public Builder addMediaType(String mediaType) {
+        public Builder addMediaType(MediaType mediaType) {
             this.mediaType = Optional.ofNullable(mediaType);
             return this;
         }
 
         @Override
-        public Builder addSubType(String subType) {
-            this.subType = Optional.ofNullable(subType);
+        public Builder addSubType(SubType subType) {
+            this.subType = Optional.of(subType);
             return this;
         }
 
@@ -152,23 +154,33 @@ public class MimePart {
         }
 
         private ParsedContent extractText(TextExtractor textExtractor, InputStream bodyContent) throws Exception {
-            if (isTextBody()) {
-                return new ParsedContent(
-                        Optional.ofNullable(IOUtils.toString(bodyContent, charset.orElse(StandardCharsets.UTF_8))),
-                        ImmutableMap.of());
+            if (shouldPerformTextExtraction()) {
+                return textExtractor.extractContent(
+                    bodyContent,
+                    computeContentType().orElse(null));
             }
-            return textExtractor.extractContent(
-                bodyContent,
-                computeContentType().orElse(null));
+            return new ParsedContent(
+                Optional.ofNullable(IOUtils.toString(bodyContent, charset.orElse(StandardCharsets.UTF_8))),
+                ImmutableMap.of());
+        }
+
+        private boolean shouldPerformTextExtraction() {
+            return !isTextBody() || isHtml();
         }
 
         private Boolean isTextBody() {
-            return mediaType.map("text"::equals).orElse(false);
+            return mediaType.map(MediaType.of("text")::equals).orElse(false);
         }
 
-        private Optional<String> computeContentType() {
+        private Boolean isHtml() {
+            return isTextBody() && subType.map(SubType.of("html")::equals).orElse(false);
+        }
+
+        private Optional<ContentType> computeContentType() {
             if (mediaType.isPresent() && subType.isPresent()) {
-                return Optional.of(mediaType.get() + "/" + subType.get());
+                return Optional.of(ContentType.of(
+                    ContentType.MimeType.of(mediaType.get(), subType.get()),
+                    charset));
             } else {
                 return Optional.empty();
             }
@@ -184,15 +196,15 @@ public class MimePart {
 
     private final HeaderCollection headerCollection;
     private final Optional<String> bodyTextContent;
-    private final Optional<String> mediaType;
-    private final Optional<String> subType;
+    private final Optional<MediaType> mediaType;
+    private final Optional<SubType> subType;
     private final Optional<String> fileName;
     private final Optional<String> fileExtension;
     private final Optional<String> contentDisposition;
     private final List<MimePart> attachments;
 
-    private MimePart(HeaderCollection headerCollection, Optional<String> bodyTextContent, Optional<String> mediaType,
-                    Optional<String> subType, Optional<String> fileName, Optional<String> fileExtension,
+    private MimePart(HeaderCollection headerCollection, Optional<String> bodyTextContent, Optional<MediaType> mediaType,
+                    Optional<SubType> subType, Optional<String> fileName, Optional<String> fileExtension,
                     Optional<String> contentDisposition, List<MimePart> attachments) {
         this.headerCollection = headerCollection;
         this.mediaType = mediaType;
@@ -214,11 +226,6 @@ public class MimePart {
         return headerCollection;
     }
 
-    @JsonProperty(JsonMessageConstants.HEADERS)
-    public Multimap<String, String> getHeaders() {
-        return headerCollection.getHeaders();
-    }
-
     @JsonProperty(JsonMessageConstants.Attachment.FILENAME)
     public Optional<String> getFileName() {
         return fileName;
@@ -231,12 +238,12 @@ public class MimePart {
 
     @JsonProperty(JsonMessageConstants.Attachment.MEDIA_TYPE)
     public Optional<String> getMediaType() {
-        return mediaType;
+        return mediaType.map(MediaType::asString);
     }
 
     @JsonProperty(JsonMessageConstants.Attachment.SUBTYPE)
     public Optional<String> getSubType() {
-        return subType;
+        return subType.map(SubType::asString);
     }
 
     @JsonProperty(JsonMessageConstants.Attachment.CONTENT_DISPOSITION)
@@ -263,10 +270,9 @@ public class MimePart {
 
     private Optional<String> firstBody(Stream<MimePart> mimeParts) {
         return mimeParts
-                .map((mimePart) -> mimePart.bodyTextContent)
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .findFirst();
+            .map(mimePart -> mimePart.bodyTextContent)
+            .flatMap(Optional::stream)
+            .findFirst();
     }
 
     private Stream<MimePart> textAttachments() {

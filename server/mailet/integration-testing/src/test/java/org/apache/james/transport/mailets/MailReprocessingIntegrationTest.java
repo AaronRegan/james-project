@@ -57,8 +57,8 @@ import com.google.inject.util.Modules;
 import io.restassured.specification.RequestSpecification;
 
 public class MailReprocessingIntegrationTest {
-    private static final MailRepositoryUrl REPOSITORY_A = MailRepositoryUrl.from("file://var/mail/a");
-    private static final MailRepositoryUrl REPOSITORY_B = MailRepositoryUrl.from("file://var/mail/b");
+    private static final MailRepositoryUrl REPOSITORY_A = MailRepositoryUrl.from("memory://var/mail/a");
+    private static final MailRepositoryUrl REPOSITORY_B = MailRepositoryUrl.from("memory://var/mail/b");
 
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
@@ -71,7 +71,7 @@ public class MailReprocessingIntegrationTest {
 
     @Before
     public void createJamesServer() throws Exception {
-        MailetContainer.Builder mailets = TemporaryJamesServer.DEFAULT_MAILET_CONTAINER_CONFIGURATION
+        MailetContainer.Builder mailets = TemporaryJamesServer.defaultMailetContainerConfiguration()
             .putProcessor(ProcessorConfiguration.transport()
                     .addMailet(MailetConfiguration.BCC_STRIPPER)
                     .addMailet(MailetConfiguration.builder()
@@ -88,6 +88,7 @@ public class MailReprocessingIntegrationTest {
             .withBase(Modules.combine(MemoryJamesServerMain.SMTP_AND_IMAP_MODULE, MemoryJamesServerMain.WEBADMIN_TESTING))
             .withMailetContainer(mailets)
             .build(folder.newFolder());
+        jamesServer.start();
 
         jamesServer.getProbe(DataProbeImpl.class)
             .fluent()
@@ -123,7 +124,7 @@ public class MailReprocessingIntegrationTest {
         given()
             .spec(specification)
             .param("action", "reprocess")
-            .param("queue", MailQueueFactory.SPOOL)
+            .param("queue", MailQueueFactory.SPOOL.asString())
             .param("processor", TRANSPORT_PROCESSOR)
         .patch("/mailRepositories/" + REPOSITORY_B.getPath().urlEncoded() + "/mails");
 
@@ -151,7 +152,7 @@ public class MailReprocessingIntegrationTest {
         given()
             .spec(specification)
             .param("action", "reprocess")
-            .param("queue", MailQueueFactory.SPOOL)
+            .param("queue", MailQueueFactory.SPOOL.asString())
             .param("processor", TRANSPORT_PROCESSOR)
         .patch("/mailRepositories/" + REPOSITORY_B.getPath().urlEncoded() + "/mails");
 
@@ -162,7 +163,7 @@ public class MailReprocessingIntegrationTest {
         String taskId = given()
             .spec(specification)
             .param("action", "reprocess")
-            .param("queue", MailQueueFactory.SPOOL)
+            .param("queue", MailQueueFactory.SPOOL.asString())
         .patch("/mailRepositories/" + REPOSITORY_A.getPath().urlEncoded() + "/mails")
             .jsonPath()
             .get("taskId");
@@ -195,7 +196,7 @@ public class MailReprocessingIntegrationTest {
         given()
             .spec(specification)
             .param("action", "reprocess")
-            .param("queue", MailQueueFactory.SPOOL)
+            .param("queue", MailQueueFactory.SPOOL.asString())
             .param("processor", "unknown")
             .patch("/mailRepositories/" + REPOSITORY_B.getPath().urlEncoded() + "/mails");
 

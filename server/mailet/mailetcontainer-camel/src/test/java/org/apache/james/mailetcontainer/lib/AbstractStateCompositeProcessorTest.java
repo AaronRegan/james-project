@@ -26,8 +26,6 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
-import javax.mail.MessagingException;
-
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
@@ -50,12 +48,10 @@ public abstract class AbstractStateCompositeProcessorTest {
         AbstractStateCompositeProcessor processor = new AbstractStateCompositeProcessor() {
 
             @Override
-            protected MailProcessor createMailProcessor(final String state, HierarchicalConfiguration<ImmutableNode> config) throws
-                Exception {
+            protected MailProcessor createMailProcessor(String state, HierarchicalConfiguration<ImmutableNode> config) {
                 return new MockMailProcessor("") {
-
                     @Override
-                    public void service(Mail mail) throws MessagingException {
+                    public void service(Mail mail) {
                         // check if the right processor wasAbstractStateMailetProcessorTest selected depending on the state
                         assertThat(mail.getState()).isEqualTo(state);
                         super.service(mail);

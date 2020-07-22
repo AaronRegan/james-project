@@ -21,9 +21,11 @@ package org.apache.james.jmap.draft.utils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
+import org.apache.james.mailbox.model.MailboxConstants;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.junit.Before;
@@ -33,13 +35,13 @@ public class MailboxUtilsTest {
 
     private MailboxManager mailboxManager;
     private MailboxSession mailboxSession;
-    private String user;
+    private Username user;
     private MailboxUtils sut;
 
     @Before
     public void setup() throws Exception {
         mailboxManager = InMemoryIntegrationResources.defaultResources().getMailboxManager();
-        user = "user@domain.org";
+        user = Username.of("user@domain.org");
         mailboxSession = mailboxManager.createSystemSession(user);
         sut = new MailboxUtils(mailboxManager);
     }
@@ -55,11 +57,11 @@ public class MailboxUtilsTest {
 
     @Test
     public void hasChildrenShouldReturnTrueWhenHasAChild() throws Exception {
-        MailboxPath parentMailboxPath = MailboxPath.forUser(user, "inbox");
+        MailboxPath parentMailboxPath = MailboxPath.forUser(user, MailboxConstants.INBOX);
         mailboxManager.createMailbox(parentMailboxPath, mailboxSession);
         MailboxId parentId = mailboxManager.getMailbox(parentMailboxPath, mailboxSession).getId();
 
-        MailboxPath mailboxPath = MailboxPath.forUser(user, "inbox.myBox");
+        MailboxPath mailboxPath = MailboxPath.forUser(user, "INBOX.myBox");
         mailboxManager.createMailbox(mailboxPath, mailboxSession);
 
         assertThat(sut.hasChildren(parentId, mailboxSession)).isTrue();

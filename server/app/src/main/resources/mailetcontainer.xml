@@ -31,12 +31,15 @@
  
     <!-- MailAddress used for PostMaster -->
     <context>
-        <postmaster>postmaster@localhost</postmaster>
+        <!-- When the domain part of the postmaster mailAddress is missing, the default domain is appended.
+        You can configure it to (for example) <postmaster>postmaster@myDomain.com</postmaster> -->
+        <postmaster>postmaster</postmaster>
     </context>
 
     <!-- Number of spool threads -->
     <spooler>
       <threads>20</threads>
+        <errorRepository>file://var/mail/error/</errorRepository>
     </spooler>
       
   <processors>
@@ -50,20 +53,28 @@
        <!-- This mailet redirects mail for the user 'postmaster' at any local domain to -->
        <!-- the postmaster address specified for the server. The postmaster address -->
        <!-- is required by rfc822. Do not remove this mailet unless you are meeting -->
-       <!-- this requirement through other means (e.g. a XML/JDBCRecipientRewriteTable defined in recipientrewritetable-store.xml) -->
+       <!-- this requirement through other means  -->
        <mailet match="All" class="PostmasterAlias"/>
 
        <!-- Important check to avoid looping -->
        <mailet match="RelayLimit=30" class="Null"/>
 
-        <mailet matcher="All" class="WithPriority">
-            <value>8</value>
+        <!-- The WithPriority mailet allows to set a priority attribute on the mail. If the
+             attribute is set and priority handling is enabled it will take care of moving the
+             Mails with higher priority to the head of the queue (so the mails are faster handled). -->
+        <!--
+        <mailet match="All" class="WithPriority">
+            <priority>8</priority>
         </mailet>
-
-        <mailet matcher="HasPriority=8" class="Null"/>
-        <mailet matcher="AtLeastPriority=8" class="Null"/>
-        <mailet matcher="AtMostPriority=8" class="Null"/>
-
+        -->
+        <!-- Using the following three matchers you can control the mail processing flow based
+             on the priority attribute. Note that if a mail's priority is set to 8, then all of
+             the below will match. -->
+        <!--
+        <mailet match="HasPriority=8" class="Null"/>
+        <mailet match="AtLeastPriority=8" class="Null"/>
+        <mailet match="AtMostPriority=8" class="Null"/>
+        -->
 
         <!-- Check attachment extensions for possible viruses -->
        <!-- The "-z" option requests the check to be non-recursively applied -->
@@ -308,7 +319,7 @@ Regards, Postmaster XXX.YYY
           <delayTime>4 * 15 minutes, 2 * 3 hours, 18 * 6 hours</delayTime>
           -->
           <delayTime>5000, 100000, 500000</delayTime>
-          <maxRetries>25</maxRetries>
+          <maxRetries>3</maxRetries>
             
           <!-- The max reties which will used if no A or MX record for the domain was found. -->
           <!-- If 0 it will fail on first time -->

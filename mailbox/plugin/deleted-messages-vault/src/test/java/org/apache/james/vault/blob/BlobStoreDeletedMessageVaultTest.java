@@ -25,11 +25,11 @@ import static org.apache.james.vault.DeletedMessageFixture.DELETED_MESSAGE_2;
 import static org.apache.james.vault.DeletedMessageFixture.MESSAGE_ID;
 import static org.apache.james.vault.DeletedMessageFixture.NOW;
 import static org.apache.james.vault.DeletedMessageFixture.OLD_DELETED_MESSAGE;
-import static org.apache.james.vault.DeletedMessageFixture.USER;
+import static org.apache.james.vault.DeletedMessageFixture.USERNAME;
 import static org.apache.james.vault.blob.BlobStoreDeletedMessageVault.APPEND_METRIC_NAME;
+import static org.apache.james.vault.blob.BlobStoreDeletedMessageVault.DELETE_EXPIRED_MESSAGES_METRIC_NAME;
 import static org.apache.james.vault.blob.BlobStoreDeletedMessageVault.DELETE_METRIC_NAME;
 import static org.apache.james.vault.blob.BlobStoreDeletedMessageVault.LOAD_MIME_MESSAGE_METRIC_NAME;
-import static org.apache.james.vault.blob.BlobStoreDeletedMessageVault.DELETE_EXPIRED_MESSAGES_METRIC_NAME;
 import static org.apache.james.vault.blob.BlobStoreDeletedMessageVault.SEARCH_METRIC_NAME;
 import static org.apache.james.vault.search.Query.ALL;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +41,7 @@ import java.time.ZonedDateTime;
 import org.apache.james.blob.api.BucketName;
 import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.memory.MemoryBlobStore;
+import org.apache.james.blob.memory.MemoryDumbBlobStore;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.utils.UpdatableTickingClock;
 import org.apache.james.vault.DeletedMessageVault;
@@ -64,7 +65,7 @@ class BlobStoreDeletedMessageVaultTest implements DeletedMessageVaultContract, D
         clock = new UpdatableTickingClock(NOW.toInstant());
         metricFactory = new RecordingMetricFactory();
         messageVault = new BlobStoreDeletedMessageVault(metricFactory, new MemoryDeletedMessageMetadataVault(),
-            new MemoryBlobStore(new HashBlobId.Factory()),
+            new MemoryBlobStore(new HashBlobId.Factory(), new MemoryDumbBlobStore()),
             new BucketNameGenerator(clock), clock, RetentionConfiguration.DEFAULT);
     }
 
@@ -116,9 +117,9 @@ class BlobStoreDeletedMessageVaultTest implements DeletedMessageVaultContract, D
 
     @Test
     void searchShouldPublishSearchTimerMetrics() {
-        Mono.from(messageVault.search(USER, ALL))
+        Mono.from(messageVault.search(USERNAME, ALL))
             .block();
-        Mono.from(messageVault.search(USER, ALL))
+        Mono.from(messageVault.search(USERNAME, ALL))
             .block();
 
         assertThat(metricFactory.executionTimesFor(SEARCH_METRIC_NAME))
@@ -127,9 +128,9 @@ class BlobStoreDeletedMessageVaultTest implements DeletedMessageVaultContract, D
 
     @Test
     void loadMimeMessageShouldPublishLoadMimeMessageTimerMetrics() {
-        Mono.from(messageVault.loadMimeMessage(USER, MESSAGE_ID))
+        Mono.from(messageVault.loadMimeMessage(USERNAME, MESSAGE_ID))
             .block();
-        Mono.from(messageVault.loadMimeMessage(USER, MESSAGE_ID))
+        Mono.from(messageVault.loadMimeMessage(USERNAME, MESSAGE_ID))
             .block();
 
         assertThat(metricFactory.executionTimesFor(LOAD_MIME_MESSAGE_METRIC_NAME))
@@ -138,9 +139,9 @@ class BlobStoreDeletedMessageVaultTest implements DeletedMessageVaultContract, D
 
     @Test
     void deleteShouldPublishDeleteTimerMetrics() {
-        Mono.from(messageVault.delete(USER, MESSAGE_ID))
+        Mono.from(messageVault.delete(USERNAME, MESSAGE_ID))
             .block();
-        Mono.from(messageVault.delete(USER, MESSAGE_ID))
+        Mono.from(messageVault.delete(USERNAME, MESSAGE_ID))
             .block();
 
         assertThat(metricFactory.executionTimesFor(DELETE_METRIC_NAME))
@@ -150,7 +151,7 @@ class BlobStoreDeletedMessageVaultTest implements DeletedMessageVaultContract, D
     @Test
     void deleteExpiredMessagesTaskShouldPublishRetentionTimerMetrics() throws Exception {
         Mono.from(getVault().append(DELETED_MESSAGE, new ByteArrayInputStream(CONTENT))).block();
-        Mono.from(getVault().delete(USER, DELETED_MESSAGE.getMessageId())).block();
+        Mono.from(getVault().delete(USERNAME, DELETED_MESSAGE.getMessageId())).block();
 
         getVault().deleteExpiredMessagesTask().run();
 

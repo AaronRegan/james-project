@@ -19,6 +19,8 @@
 
 package org.apache.james.webadmin.service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -27,13 +29,14 @@ import javax.mail.MessagingException;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
 import org.apache.james.mailrepository.api.MailRepositoryStore;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.task.TaskType;
 
 public class ReprocessingAllMailsTask implements Task {
 
-    public static final TaskType TYPE = TaskType.of("reprocessingAllTask");
+    public static final TaskType TYPE = TaskType.of("reprocessing-all");
 
     public static class AdditionalInformation implements TaskExecutionDetails.AdditionalInformation {
         private final MailRepositoryPath repositoryPath;
@@ -41,13 +44,15 @@ public class ReprocessingAllMailsTask implements Task {
         private final Optional<String> targetProcessor;
         private final long initialCount;
         private final long remainingCount;
+        private final Instant timestamp;
 
-        public AdditionalInformation(MailRepositoryPath repositoryPath, String targetQueue, Optional<String> targetProcessor, long initialCount, long remainingCount) {
+        public AdditionalInformation(MailRepositoryPath repositoryPath, MailQueueName targetQueue, Optional<String> targetProcessor, long initialCount, long remainingCount, Instant timestamp) {
             this.repositoryPath = repositoryPath;
-            this.targetQueue = targetQueue;
+            this.targetQueue = targetQueue.asString();
             this.targetProcessor = targetProcessor;
             this.initialCount = initialCount;
             this.remainingCount = remainingCount;
+            this.timestamp = timestamp;
         }
 
         public String getTargetQueue() {
@@ -70,6 +75,10 @@ public class ReprocessingAllMailsTask implements Task {
             return initialCount;
         }
 
+        @Override
+        public Instant timestamp() {
+            return timestamp;
+        }
     }
 
     public static class UrlEncodingFailureSerializationException extends RuntimeException {
@@ -88,13 +97,13 @@ public class ReprocessingAllMailsTask implements Task {
 
     private final ReprocessingService reprocessingService;
     private final MailRepositoryPath repositoryPath;
-    private final String targetQueue;
+    private final MailQueueName targetQueue;
     private final Optional<String> targetProcessor;
     private final long repositorySize;
     private final AtomicLong processedCount;
 
     public ReprocessingAllMailsTask(ReprocessingService reprocessingService, long repositorySize,
-                                    MailRepositoryPath repositoryPath, String targetQueue, Optional<String> targetProcessor) {
+                                    MailRepositoryPath repositoryPath, MailQueueName targetQueue, Optional<String> targetProcessor) {
         this.reprocessingService = reprocessingService;
         this.repositoryPath = repositoryPath;
         this.targetQueue = targetQueue;
@@ -130,7 +139,7 @@ public class ReprocessingAllMailsTask implements Task {
         return targetProcessor;
     }
 
-    String getTargetQueue() {
+    MailQueueName getTargetQueue() {
         return targetQueue;
     }
 
@@ -142,7 +151,8 @@ public class ReprocessingAllMailsTask implements Task {
     @Override
     public Optional<TaskExecutionDetails.AdditionalInformation> details() {
         return Optional.of(new AdditionalInformation(
-            repositoryPath, targetQueue, targetProcessor, repositorySize, repositorySize - processedCount.get()));
+            repositoryPath, targetQueue, targetProcessor, repositorySize, repositorySize - processedCount.get(),
+            Clock.systemUTC().instant()));
     }
 
 }

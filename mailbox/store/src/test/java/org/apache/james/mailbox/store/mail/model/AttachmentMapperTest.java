@@ -20,305 +20,215 @@
 package org.apache.james.mailbox.store.mail.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.exception.AttachmentNotFoundException;
-import org.apache.james.mailbox.exception.MailboxException;
-import org.apache.james.mailbox.model.Attachment;
 import org.apache.james.mailbox.model.AttachmentId;
+import org.apache.james.mailbox.model.AttachmentMetadata;
+import org.apache.james.mailbox.model.ContentType;
 import org.apache.james.mailbox.model.MessageId;
+import org.apache.james.mailbox.model.ParsedAttachment;
 import org.apache.james.mailbox.store.mail.AttachmentMapper;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
+import org.assertj.core.api.SoftAssertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableList;
 
+import reactor.core.publisher.Mono;
+
 public abstract class AttachmentMapperTest {
     private static final AttachmentId UNKNOWN_ATTACHMENT_ID = AttachmentId.from("unknown");
-    public static final Username OWNER = Username.fromRawValue("owner");
-    public static final Username ADDITIONAL_OWNER = Username.fromRawValue("additionalOwner");
+    private static final Username OWNER = Username.of("owner");
+    private static final Username ADDITIONAL_OWNER = Username.of("additionalOwner");
 
     private AttachmentMapper attachmentMapper;
-
-    @Rule
-    public ExpectedException expected = ExpectedException.none();
 
     protected abstract AttachmentMapper createAttachmentMapper();
 
     protected abstract MessageId generateMessageId();
 
-    public void setUp() throws MailboxException {
+    @BeforeEach
+    void setUp() {
         this.attachmentMapper = createAttachmentMapper();
     }
 
     @Test
-    public void getAttachmentShouldThrowWhenNullAttachmentId() throws Exception {
-        expected.expect(IllegalArgumentException.class);
-        attachmentMapper.getAttachment(null);
+    void getAttachmentShouldThrowWhenNullAttachmentId() {
+        assertThatThrownBy(() -> attachmentMapper.getAttachment(null))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    public void getAttachmentShouldThrowWhenNonReferencedAttachmentId() throws Exception {
-        expected.expect(AttachmentNotFoundException.class);
-        attachmentMapper.getAttachment(UNKNOWN_ATTACHMENT_ID);
+    void getAttachmentShouldThrowWhenNonReferencedAttachmentId() {
+        assertThatThrownBy(() -> attachmentMapper.getAttachment(UNKNOWN_ATTACHMENT_ID))
+            .isInstanceOf(AttachmentNotFoundException.class);
     }
 
     @Test
-    public void getAttachmentShouldReturnTheAttachmentWhenReferenced() throws Exception {
-        //Given
-        Attachment expected = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = expected.getAttachmentId();
-        attachmentMapper.storeAttachmentForOwner(expected, OWNER);
-        //When
-        Attachment attachment = attachmentMapper.getAttachment(attachmentId);
-        //Then
-        assertThat(attachment).isEqualTo(expected);
+    void storeAttachmentForOwnerShouldReturnSuppliedInformation() throws Exception {
+        ContentType content = ContentType.of("content");
+        byte[] bytes = "payload".getBytes(StandardCharsets.UTF_8);
+
+        AttachmentMetadata stored = Mono.from(attachmentMapper.storeAttachmentForOwner(content, new ByteArrayInputStream(bytes), OWNER)).block();
+
+        SoftAssertions.assertSoftly(solftly -> {
+            solftly.assertThat(stored.getSize()).isEqualTo(bytes.length);
+            solftly.assertThat(stored.getType()).isEqualTo(content);
+        });
     }
 
     @Test
-    public void getAttachmentShouldReturnTheAttachmentsWhenMultipleStored() throws Exception {
-        //Given
-        Attachment expected1 = Attachment.builder()
-                .bytes("payload1".getBytes(StandardCharsets.UTF_8))
-                .type("content1")
-                .build();
-        Attachment expected2 = Attachment.builder()
-                .bytes("payload2".getBytes(StandardCharsets.UTF_8))
-                .type("content2")
-                .build();
-        AttachmentId attachmentId1 = expected1.getAttachmentId();
-        AttachmentId attachmentId2 = expected2.getAttachmentId();
-        //When
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(expected1, expected2), generateMessageId());
-        //Then
-        Attachment attachment1 = attachmentMapper.getAttachment(attachmentId1);
-        Attachment attachment2 = attachmentMapper.getAttachment(attachmentId2);
-        assertThat(attachment1).isEqualTo(expected1);
-        assertThat(attachment2).isEqualTo(expected2);
+    void getAttachmentShouldReturnTheAttachmentWhenReferenced() throws Exception {
+        ContentType content = ContentType.of("content");
+        byte[] bytes = "payload".getBytes(StandardCharsets.UTF_8);
+
+        AttachmentMetadata stored = Mono.from(attachmentMapper.storeAttachmentForOwner(content, new ByteArrayInputStream(bytes), OWNER)).block();
+
+        AttachmentMetadata attachment = attachmentMapper.getAttachment(stored.getAttachmentId());
+
+        SoftAssertions.assertSoftly(solftly -> {
+            solftly.assertThat(attachment.getAttachmentId()).isEqualTo(stored.getAttachmentId());
+            solftly.assertThat(attachment.getSize()).isEqualTo(bytes.length);
+            solftly.assertThat(attachment.getType()).isEqualTo(content);
+        });
     }
 
     @Test
-    public void getAttachmentsShouldThrowWhenNullAttachmentId() {
-        expected.expect(IllegalArgumentException.class);
-        attachmentMapper.getAttachments(null);
+    void loadAttachmentContentShouldReturnStoredContent() throws Exception {
+        ContentType content = ContentType.of("content");
+        byte[] bytes = "payload".getBytes(StandardCharsets.UTF_8);
+
+        AttachmentMetadata stored = Mono.from(attachmentMapper.storeAttachmentForOwner(content, new ByteArrayInputStream(bytes), OWNER)).block();
+
+        assertThat(attachmentMapper.loadAttachmentContent(stored.getAttachmentId()))
+            .hasSameContentAs(new ByteArrayInputStream(bytes));
     }
 
     @Test
-    public void getAttachmentsShouldReturnEmptyListWhenNonReferencedAttachmentId() {
-        List<Attachment> attachments = attachmentMapper.getAttachments(ImmutableList.of(UNKNOWN_ATTACHMENT_ID));
+    void getAttachmentsShouldThrowWhenNullAttachmentId() {
+        assertThatThrownBy(() -> attachmentMapper.getAttachments(null))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void getAttachmentsShouldReturnEmptyListWhenNonReferencedAttachmentId() {
+        List<AttachmentMetadata> attachments = attachmentMapper.getAttachments(ImmutableList.of(UNKNOWN_ATTACHMENT_ID));
 
         assertThat(attachments).isEmpty();
     }
 
     @Test
-    public void getAttachmentsShouldReturnTheAttachmentsWhenSome() throws Exception {
+    void getAttachmentsShouldReturnTheAttachmentsWhenSome() {
         //Given
-        Attachment expected = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = expected.getAttachmentId();
-        attachmentMapper.storeAttachmentForOwner(expected, OWNER);
+        ContentType content1 = ContentType.of("content");
+        byte[] bytes1 = "payload".getBytes(StandardCharsets.UTF_8);
+        AttachmentMetadata stored1 = Mono.from(attachmentMapper.storeAttachmentForOwner(content1, new ByteArrayInputStream(bytes1), OWNER)).block();
+        ContentType content2 = ContentType.of("content");
+        byte[] bytes2 = "payload".getBytes(StandardCharsets.UTF_8);
+        AttachmentMetadata stored2 = Mono.from(attachmentMapper.storeAttachmentForOwner(content2, new ByteArrayInputStream(bytes2), OWNER)).block();
 
-        Attachment expected2 = Attachment.builder()
-                .bytes("payload2".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId2 = expected2.getAttachmentId();
-        attachmentMapper.storeAttachmentForOwner(expected2, OWNER);
-
-        //When
-        List<Attachment> attachments = attachmentMapper.getAttachments(ImmutableList.of(attachmentId, attachmentId2));
-        //Then
-        assertThat(attachments).contains(expected, expected2);
+        assertThat(attachmentMapper.getAttachments(ImmutableList.of(stored1.getAttachmentId(), stored2.getAttachmentId())))
+            .contains(stored1, stored2);
     }
 
     @Test
-    public void getOwnerMessageIdsShouldReturnEmptyWhenNone() throws Exception {
+    void getOwnerMessageIdsShouldReturnEmptyWhenNone() throws Exception {
         Collection<MessageId> messageIds = attachmentMapper.getRelatedMessageIds(UNKNOWN_ATTACHMENT_ID);
 
         assertThat(messageIds).isEmpty();
     }
 
     @Test
-    public void getOwnerMessageIdsShouldReturnEmptyWhenStoredWithoutMessageId() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = attachment.getAttachmentId();
-        attachmentMapper.storeAttachmentForOwner(attachment, OWNER);
-        
-        //When
-        Collection<MessageId> messageIds = attachmentMapper.getRelatedMessageIds(attachmentId);
-        //Then
-        assertThat(messageIds).isEmpty();
+    void getOwnerMessageIdsShouldReturnEmptyWhenStoredWithoutMessageId() throws Exception {
+        ContentType content = ContentType.of("content");
+        byte[] bytes = "payload".getBytes(StandardCharsets.UTF_8);
+        AttachmentMetadata stored = Mono.from(attachmentMapper.storeAttachmentForOwner(content, new ByteArrayInputStream(bytes), OWNER)).block();
+
+        assertThat(attachmentMapper.getRelatedMessageIds(stored.getAttachmentId())).isEmpty();
     }
 
     @Test
-    public void getOwnerMessageIdsShouldReturnMessageIdWhenStoredWithMessageId() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = attachment.getAttachmentId();
+    void getRelatedMessageIdsShouldReturnMessageIdWhenStoredWithMessageId() throws Exception {
         MessageId messageId = generateMessageId();
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment), messageId);
-        
-        //When
-        Collection<MessageId> messageIds = attachmentMapper.getRelatedMessageIds(attachmentId);
-        //Then
-        assertThat(messageIds).containsOnly(messageId);
+        AttachmentId attachmentId = attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(ParsedAttachment.builder()
+            .contentType("content")
+            .content("".getBytes(StandardCharsets.UTF_8))
+            .noName()
+            .noCid()
+            .inline(false)), messageId)
+            .get(0).getAttachmentId();
+
+        assertThat(attachmentMapper.getRelatedMessageIds(attachmentId)).containsOnly(messageId);
     }
 
     @Test
-    public void getOwnerMessageIdsShouldReturnTwoMessageIdsWhenStoredTwice() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = attachment.getAttachmentId();
+    void getOwnerMessageIdsShouldReturnOnlyMatchingMessageId() throws Exception {
         MessageId messageId1 = generateMessageId();
-        MessageId messageId2 = generateMessageId();
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment), messageId1);
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment), messageId2);
-        
-        //When
-        Collection<MessageId> messageIds = attachmentMapper.getRelatedMessageIds(attachmentId);
-        //Then
-        assertThat(messageIds).containsOnly(messageId1, messageId2);
+        AttachmentId attachmentId1 = attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(ParsedAttachment.builder()
+            .contentType("content")
+            .content("".getBytes(StandardCharsets.UTF_8))
+            .noName()
+            .noCid()
+            .inline(false)), messageId1)
+            .get(0).getAttachmentId();
+        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(ParsedAttachment.builder()
+            .contentType("content")
+            .content("".getBytes(StandardCharsets.UTF_8))
+            .noName()
+            .noCid()
+            .inline(false)), generateMessageId())
+            .get(0).getAttachmentId();
+
+        assertThat(attachmentMapper.getRelatedMessageIds(attachmentId1)).containsOnly(messageId1);
     }
 
     @Test
-    public void getOwnerMessageIdsShouldReturnOnlyMatchingMessageId() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        Attachment otherAttachment = Attachment.builder()
-                .bytes("something different".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = attachment.getAttachmentId();
-        MessageId messageId1 = generateMessageId();
-        MessageId messageId2 = generateMessageId();
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment), messageId1);
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(otherAttachment), messageId2);
-        
-        //When
-        Collection<MessageId> messageIds = attachmentMapper.getRelatedMessageIds(attachmentId);
-        //Then
-        assertThat(messageIds).containsOnly(messageId1);
+    void getOwnersShouldBeRetrievedWhenExplicitlySpecified() throws Exception {
+        ContentType content = ContentType.of("content");
+        byte[] bytes = "payload".getBytes(StandardCharsets.UTF_8);
+        AttachmentMetadata stored = Mono.from(attachmentMapper.storeAttachmentForOwner(content, new ByteArrayInputStream(bytes), OWNER)).block();
+
+        Collection<Username> actualOwners = attachmentMapper.getOwners(stored.getAttachmentId());
+
+        assertThat(actualOwners).containsOnly(OWNER);
     }
 
     @Test
-    public void getOwnerMessageIdsShouldReturnOnlyOneMessageIdWhenStoredTwice() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = attachment.getAttachmentId();
-        MessageId messageId = generateMessageId();
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment), messageId);
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment), messageId);
-        
-        //When
-        Collection<MessageId> messageIds = attachmentMapper.getRelatedMessageIds(attachmentId);
-        //Then
-        assertThat(messageIds).containsOnly(messageId);
+    void getOwnersShouldNotReturnUnrelatedOwners() throws Exception {
+        ContentType content = ContentType.of("content");
+        byte[] bytes = "payload".getBytes(StandardCharsets.UTF_8);
+        AttachmentMetadata stored = Mono.from(attachmentMapper.storeAttachmentForOwner(content, new ByteArrayInputStream(bytes), OWNER)).block();
+        ContentType content2 = ContentType.of("content");
+        byte[] bytes2 = "payload".getBytes(StandardCharsets.UTF_8);
+        AttachmentMetadata stored2 = Mono.from(attachmentMapper.storeAttachmentForOwner(content2, new ByteArrayInputStream(bytes2), ADDITIONAL_OWNER)).block();
+
+        Collection<Username> actualOwners = attachmentMapper.getOwners(stored.getAttachmentId());
+
+        assertThat(actualOwners).containsOnly(OWNER);
     }
 
     @Test
-    public void getOwnerMessageIdsShouldReturnMessageIdForTwoAttachmentsWhenBothStoredAtTheSameTime() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-                .bytes("payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        Attachment attachment2 = Attachment.builder()
-                .bytes("other payload".getBytes(StandardCharsets.UTF_8))
-                .type("content")
-                .build();
-        AttachmentId attachmentId = attachment.getAttachmentId();
-        AttachmentId attachmentId2 = attachment2.getAttachmentId();
-        MessageId messageId = generateMessageId();
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment, attachment2), messageId);
-        
-        //When
-        Collection<MessageId> messageIds = attachmentMapper.getRelatedMessageIds(attachmentId);
-        Collection<MessageId> messageIds2 = attachmentMapper.getRelatedMessageIds(attachmentId2);
-        //Then
-        assertThat(messageIds).isEqualTo(messageIds2);
+    void getOwnersShouldReturnEmptyWhenMessageIdReferenced() throws Exception {
+        AttachmentId attachmentId = attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(ParsedAttachment.builder()
+            .contentType("content")
+            .content("".getBytes(StandardCharsets.UTF_8))
+            .noName()
+            .noCid()
+            .inline(false)), generateMessageId())
+            .get(0).getAttachmentId();
+
+        assertThat(attachmentMapper.getOwners(attachmentId)).isEmpty();
     }
 
     @Test
-    public void getOwnersShouldBeRetrievedWhenExplicitlySpecified() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-            .bytes("payload".getBytes(StandardCharsets.UTF_8))
-            .type("content")
-            .build();
-
-        AttachmentId attachmentId = attachment.getAttachmentId();
-        attachmentMapper.storeAttachmentForOwner(attachment, OWNER);
-
-        //When
-        Collection<Username> expectedOwners = ImmutableList.of(OWNER);
-        Collection<Username> actualOwners = attachmentMapper.getOwners(attachmentId);
-        //Then
-        assertThat(actualOwners).containsOnlyElementsOf(expectedOwners);
-    }
-
-    @Test
-    public void getOwnersShouldReturnEmptyWhenMessageIdReferenced() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-            .bytes("payload".getBytes(StandardCharsets.UTF_8))
-            .type("content")
-            .build();
-
-        AttachmentId attachmentId = attachment.getAttachmentId();
-        attachmentMapper.storeAttachmentsForMessage(ImmutableList.of(attachment), generateMessageId());
-
-        //When
-        Collection<Username> actualOwners = attachmentMapper.getOwners(attachmentId);
-        //Then
-        assertThat(actualOwners).isEmpty();
-    }
-
-    @Test
-    public void getOwnersShouldReturnAllOwners() throws Exception {
-        //Given
-        Attachment attachment = Attachment.builder()
-            .bytes("payload".getBytes(StandardCharsets.UTF_8))
-            .type("content")
-            .build();
-
-        AttachmentId attachmentId = attachment.getAttachmentId();
-        attachmentMapper.storeAttachmentForOwner(attachment, OWNER);
-        attachmentMapper.storeAttachmentForOwner(attachment, ADDITIONAL_OWNER);
-
-        //When
-        Collection<Username> expectedOwners = ImmutableList.of(OWNER, ADDITIONAL_OWNER);
-        Collection<Username> actualOwners = attachmentMapper.getOwners(attachmentId);
-        //Then
-        assertThat(actualOwners).containsOnlyElementsOf(expectedOwners);
-    }
-
-    @Test
-    public void getOwnersShouldReturnEmptyWhenUnknownAttachmentId() throws Exception {
+    void getOwnersShouldReturnEmptyWhenUnknownAttachmentId() throws Exception {
         Collection<Username> actualOwners = attachmentMapper.getOwners(AttachmentId.from("any"));
 
         assertThat(actualOwners).isEmpty();

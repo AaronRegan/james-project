@@ -31,7 +31,6 @@ import org.apache.james.protocols.api.ProtocolSession;
 import org.apache.james.protocols.api.ProtocolSessionImpl;
 import org.apache.james.protocols.api.ProtocolTransport;
 import org.apache.james.protocols.api.Response;
-import org.apache.james.protocols.api.future.FutureResponse;
 import org.apache.james.protocols.api.handler.ConnectHandler;
 import org.apache.james.protocols.api.handler.DisconnectHandler;
 import org.apache.james.protocols.api.handler.LineHandler;
@@ -56,15 +55,18 @@ import org.slf4j.LoggerFactory;
 @Sharable
 public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(BasicChannelUpstreamHandler.class);
+
+    private final ProtocolMDCContextFactory mdcContextFactory;
     protected final Protocol protocol;
     protected final ProtocolHandlerChain chain;
     protected final Encryption secure;
 
-    public BasicChannelUpstreamHandler(Protocol protocol) {
-        this(protocol, null);
+    public BasicChannelUpstreamHandler(ProtocolMDCContextFactory mdcContextFactory, Protocol protocol) {
+        this(mdcContextFactory, protocol, null);
     }
 
-    public BasicChannelUpstreamHandler(Protocol protocol, Encryption secure) {
+    public BasicChannelUpstreamHandler(ProtocolMDCContextFactory mdcContextFactory, Protocol protocol, Encryption secure) {
+        this.mdcContextFactory = mdcContextFactory;
         this.protocol = protocol;
         this.chain = protocol.getProtocolChain();
         this.secure = secure;
@@ -73,7 +75,7 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
 
     @Override
     public void channelBound(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        try (Closeable closeable = ProtocolMDCContext.from(protocol, ctx)) {
+        try (Closeable closeable = mdcContextFactory.from(protocol, ctx)) {
             ctx.setAttachment(createSession(ctx));
             super.channelBound(ctx, e);
         }
@@ -87,7 +89,7 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
     @SuppressWarnings({ "unchecked", "rawtypes" })
     @Override
     public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        try (Closeable closeable = ProtocolMDCContext.from(protocol, ctx)) {
+        try (Closeable closeable = mdcContextFactory.from(protocol, ctx)) {
             List<ConnectHandler> connectHandlers = chain.getHandlers(ConnectHandler.class);
             List<ProtocolHandlerResultHandler> resultHandlers = chain.getHandlers(ProtocolHandlerResultHandler.class);
             ProtocolSession session = (ProtocolSession) ctx.getAttachment();
@@ -99,11 +101,6 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
                     long executionTime = System.currentTimeMillis() - start;
 
                     for (ProtocolHandlerResultHandler resultHandler : resultHandlers) {
-                        // Disable till PROTOCOLS-37 is implemented
-                        if (response instanceof FutureResponse) {
-                            LOGGER.debug("ProtocolHandlerResultHandler are not supported for FutureResponse yet");
-                            break;
-                        }
                         resultHandler.onResponse(session, response, executionTime, cHandler);
                     }
                     if (response != null) {
@@ -122,7 +119,7 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
     @SuppressWarnings({ "rawtypes", "unchecked" })
     @Override
     public void channelDisconnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        try (Closeable closeable = ProtocolMDCContext.from(protocol, ctx)) {
+        try (Closeable closeable = mdcContextFactory.from(protocol, ctx)) {
             List<DisconnectHandler> connectHandlers = chain.getHandlers(DisconnectHandler.class);
             ProtocolSession session = (ProtocolSession) ctx.getAttachment();
             if (connectHandlers != null) {
@@ -141,7 +138,7 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
     @SuppressWarnings({ "unchecked", "rawtypes" })
     @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
-        try (Closeable closeable = ProtocolMDCContext.from(protocol, ctx)) {
+        try (Closeable closeable = mdcContextFactory.from(protocol, ctx)) {
             ProtocolSession pSession = (ProtocolSession) ctx.getAttachment();
             LinkedList<LineHandler> lineHandlers = chain.getHandlers(LineHandler.class);
             LinkedList<ProtocolHandlerResultHandler> resultHandlers = chain.getHandlers(ProtocolHandlerResultHandler.class);
@@ -156,11 +153,6 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
                 long executionTime = System.currentTimeMillis() - start;
 
                 for (ProtocolHandlerResultHandler resultHandler : resultHandlers) {
-                    // Disable till PROTOCOLS-37 is implemented
-                    if (response instanceof FutureResponse) {
-                        LOGGER.debug("ProtocolHandlerResultHandler are not supported for FutureResponse yet");
-                        break;
-                    }
                     response = resultHandler.onResponse(pSession, response, executionTime, lHandler);
                 }
                 if (response != null) {
@@ -177,7 +169,7 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
 
     @Override
     public void channelClosed(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        try (Closeable closeable = ProtocolMDCContext.from(protocol, ctx)) {
+        try (Closeable closeable = mdcContextFactory.from(protocol, ctx)) {
             ProtocolSession session = (ProtocolSession) ctx.getAttachment();
             LOGGER.info("Connection closed for {}", session.getRemoteAddress().getAddress().getHostAddress());
             cleanup(ctx);
@@ -188,8 +180,6 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
 
     /**
      * Cleanup the channel
-     * 
-     * @param ctx
      */
     protected void cleanup(ChannelHandlerContext ctx) {
         ProtocolSession session = (ProtocolSession) ctx.getAttachment();
@@ -216,7 +206,7 @@ public class BasicChannelUpstreamHandler extends SimpleChannelUpstreamHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
-        try (Closeable closeable = ProtocolMDCContext.from(protocol, ctx)) {
+        try (Closeable closeable = mdcContextFactory.from(protocol, ctx)) {
             Channel channel = ctx.getChannel();
             ProtocolSession session = (ProtocolSession) ctx.getAttachment();
             if (e.getCause() instanceof TooLongFrameException && session != null) {

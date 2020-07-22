@@ -20,10 +20,12 @@
 
 package org.apache.james.webadmin.vault.routes;
 
+import java.time.Instant;
+
 import javax.mail.internet.AddressException;
 
 import org.apache.james.core.MailAddress;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.json.DTOModule;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTOModule;
@@ -34,31 +36,39 @@ public class DeletedMessagesVaultExportTaskAdditionalInformationDTO implements A
 
     private static DeletedMessagesVaultExportTaskAdditionalInformationDTO fromDomainObject(DeletedMessagesVaultExportTask.AdditionalInformation additionalInformation, String type) {
         return new DeletedMessagesVaultExportTaskAdditionalInformationDTO(
+            type,
             additionalInformation.getUserExportFrom(),
             additionalInformation.getExportTo(),
-            additionalInformation.getTotalExportedMessages()
+            additionalInformation.getTotalExportedMessages(),
+            additionalInformation.timestamp()
         );
     }
 
-    public static final AdditionalInformationDTOModule<DeletedMessagesVaultExportTask.AdditionalInformation, DeletedMessagesVaultExportTaskAdditionalInformationDTO> MODULE =
-        DTOModule
-            .forDomainObject(DeletedMessagesVaultExportTask.AdditionalInformation.class)
+    public static final AdditionalInformationDTOModule<DeletedMessagesVaultExportTask.AdditionalInformation, DeletedMessagesVaultExportTaskAdditionalInformationDTO> module() {
+        return DTOModule.forDomainObject(DeletedMessagesVaultExportTask.AdditionalInformation.class)
             .convertToDTO(DeletedMessagesVaultExportTaskAdditionalInformationDTO.class)
             .toDomainObjectConverter(DeletedMessagesVaultExportTaskAdditionalInformationDTO::toDomainObject)
             .toDTOConverter(DeletedMessagesVaultExportTaskAdditionalInformationDTO::fromDomainObject)
             .typeName(DeletedMessagesVaultExportTask.TYPE.asString())
             .withFactory(AdditionalInformationDTOModule::new);
+    }
 
+    private final String type;
     private final String userExportFrom;
     private final String exportTo;
     private final Long totalExportedMessages;
+    private final Instant timestamp;
 
-    public DeletedMessagesVaultExportTaskAdditionalInformationDTO(@JsonProperty("user") String userExportFrom,
+    public DeletedMessagesVaultExportTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                                  @JsonProperty("user") String userExportFrom,
                                                                   @JsonProperty("exportTo") String exportTo,
-                                                                  @JsonProperty("errorRestoreCount") Long totalExportedMessages) {
+                                                                  @JsonProperty("errorRestoreCount") Long totalExportedMessages,
+                                                                  @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.userExportFrom = userExportFrom;
         this.exportTo = exportTo;
         this.totalExportedMessages = totalExportedMessages;
+        this.timestamp = timestamp;
     }
 
     public String getUserExportFrom() {
@@ -76,12 +86,23 @@ public class DeletedMessagesVaultExportTaskAdditionalInformationDTO implements A
     DeletedMessagesVaultExportTask.AdditionalInformation toDomainObject() {
         try {
             return new DeletedMessagesVaultExportTask.AdditionalInformation(
-                User.fromUsername(userExportFrom),
+                Username.of(userExportFrom),
                 new MailAddress(exportTo),
-                totalExportedMessages
+                totalExportedMessages,
+                timestamp
             );
         } catch (AddressException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public String getType() {
+        return type;
+    }
+
+    @Override
+    public Instant getTimestamp() {
+        return timestamp;
     }
 }

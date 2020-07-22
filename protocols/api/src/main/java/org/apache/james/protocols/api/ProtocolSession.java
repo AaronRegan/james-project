@@ -22,13 +22,18 @@ package org.apache.james.protocols.api;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
+import org.apache.james.core.Username;
 import org.apache.james.protocols.api.handler.LineHandler;
+
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 
 /**
  * Session for a protocol. Every new connection generates a new session
- * 
- *
  */
 public interface ProtocolSession {
    
@@ -37,16 +42,75 @@ public interface ProtocolSession {
         Transaction
     }
 
+    class AttachmentKey<T> {
+        public static <U> AttachmentKey<U> of(String value, Class<U> type) {
+            Preconditions.checkArgument(!Strings.isNullOrEmpty(value), "An attachment key should not be empty or null");
+
+            return new AttachmentKey<>(value, type);
+        }
+
+        private final String value;
+        private final Class<T> type;
+
+        private AttachmentKey(String value, Class<T> type) {
+            this.value = value;
+            this.type = type;
+        }
+
+        public String asString() {
+            return value;
+        }
+
+        public Optional<T> convert(Object object) {
+            return Optional.ofNullable(object)
+                .filter(type::isInstance)
+                .map(type::cast);
+        }
+
+        @Override
+        public final boolean equals(Object o) {
+            if (o instanceof AttachmentKey) {
+                AttachmentKey<?> that = (AttachmentKey<?>) o;
+
+                return Objects.equals(this.value, that.value)
+                    && Objects.equals(this.type, that.type);
+            }
+            return false;
+        }
+
+        @Override
+        public final int hashCode() {
+            return Objects.hash(value, type);
+        }
+
+        @Override
+        public String toString() {
+            return MoreObjects.toStringHelper(this)
+                .add("value", value)
+                .add("type", type.getName())
+                .toString();
+        }
+    }
+
     /**
-     * Store the given value with the given key in the specified {@link State}. If you want to remove a value you need to use <code>null</code> as value
+     * Store the given value with the given key in the specified {@link State}.
      * 
      * @param key the key under which the value should get stored
-     * @param value the value which will get stored under the given key or <code>null</code> if you want to remove any value which is stored under the key
+     * @param value the value which will get stored under the given key
      * @param state the {@link State} to which the mapping belongs
      * @return oldValue the value which was stored before for this key or <code>null</code> if non was stored before.
      */
-    Object setAttachment(String key, Object value, State state);
-    
+    <T> Optional<T> setAttachment(AttachmentKey<T> key, T value, State state);
+
+    /**
+     * Remove a value stored for the given key in the specified {@link State}.
+     *
+     * @param key the key under which the value should get stored
+     * @param state the {@link State} to which the mapping belongs
+     * @return oldValue the value which was stored before for this key or <code>null</code> if non was stored before.
+     */
+    <T> Optional<T> removeAttachment(AttachmentKey<T> key,State state);
+
     /**
      * Return the value which is stored for the given key in the specified {@link State} or <code>null</code> if non was stored before.
      * 
@@ -54,27 +118,27 @@ public interface ProtocolSession {
      * @param state the {@link State} in which the value was stored for the key
      * @return value the stored value for the key
      */
-    Object getAttachment(String key, State state);
+    <T> Optional<T> getAttachment(AttachmentKey<T> key, State state);
     
     
     /**
      * Return Map which can be used to store objects within a session
      * 
      * @return state
-     * @deprecated use {@link #setAttachment(String, Object, State)}
+     * @deprecated use {@link #setAttachment(AttachmentKey, Object, State)}
      */
     @Deprecated
-    Map<String, Object> getState();
+    Map<AttachmentKey<?>, Object> getState();
     
     
     /**
      * Returns Map that consists of the state of the {@link ProtocolSession} per connection
      *
      * @return map of the current {@link ProtocolSession} state per connection
-     * @deprecated use {@link #getAttachment(String, State)}
+     * @deprecated use {@link #getAttachment(AttachmentKey, State)}
      */
     @Deprecated
-    Map<String,Object> getConnectionState();
+    Map<AttachmentKey<?>, Object> getConnectionState();
 
     
     /**
@@ -85,22 +149,16 @@ public interface ProtocolSession {
     
     /**
      * Return the {@link InetSocketAddress} of the remote peer
-     * 
-     * @return address
      */
     InetSocketAddress getRemoteAddress();
 
     /**
      * Return the {@link InetSocketAddress} of the local bound address
-     * 
-     * @return local
      */
     InetSocketAddress getLocalAddress();
     
     /**
      * Return the ID for the session
-     * 
-     * @return id
      */
     String getSessionID();
 
@@ -124,14 +182,14 @@ public interface ProtocolSession {
      *
      * @return the user name
      */
-    String getUser();
+    Username getUsername();
 
     /**
      * Sets the user name associated with this interaction.
      *
-     * @param user the user name
+     * @param username the user name
      */
-    void setUser(String user);
+    void setUsername(Username username);
 
     /**
      * Return true if StartTLS is supported by the configuration
@@ -142,22 +200,16 @@ public interface ProtocolSession {
     
     /**
      * Return true if the starttls was started
-     * 
-     * @return true
      */
     boolean isTLSStarted();
     
     /**
-     * Return the {@link ProtocolConfiguration} 
-     * 
-     * @return config
+     * Return the {@link ProtocolConfiguration}
      */
     ProtocolConfiguration getConfiguration();
     
     /**
      * Return the {@link Charset} which is used by the {@link ProtocolSession}
-     * 
-     * @return charset
      */
     Charset getCharset();
     
@@ -170,7 +222,6 @@ public interface ProtocolSession {
     
     /**
      * Put a new line handler in the chain
-     * @param overrideCommandHandler
      */
     <T extends ProtocolSession> void pushLineHandler(LineHandler<T> overrideCommandHandler);
     

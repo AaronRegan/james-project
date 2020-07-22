@@ -26,6 +26,8 @@ import java.util.LinkedList;
 import java.util.Optional;
 
 import org.apache.james.mailbox.extractor.TextExtractor;
+import org.apache.james.mailbox.model.ContentType.MediaType;
+import org.apache.james.mailbox.model.ContentType.SubType;
 import org.apache.james.mailbox.store.mail.model.Message;
 import org.apache.james.mime4j.MimeException;
 import org.apache.james.mime4j.message.DefaultBodyDescriptorBuilder;
@@ -33,10 +35,13 @@ import org.apache.james.mime4j.message.MaximalBodyDescriptor;
 import org.apache.james.mime4j.stream.EntityState;
 import org.apache.james.mime4j.stream.MimeConfig;
 import org.apache.james.mime4j.stream.MimeTokenStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
 
 public class MimePartParser {
+    private static final Logger LOGGER = LoggerFactory.getLogger(MimePartParser.class);
 
     private final Message message;
     private final TextExtractor textExtractor;
@@ -116,14 +121,24 @@ public class MimePartParser {
     private void extractMimePartBodyDescription(MimeTokenStream stream) {
         MaximalBodyDescriptor descriptor = (MaximalBodyDescriptor) stream.getBodyDescriptor();
 
-        currentlyBuildMimePart.addMediaType(descriptor.getMediaType())
-            .addSubType(descriptor.getSubType())
-            .addContentDisposition(descriptor.getContentDispositionType())
+        Optional.ofNullable(descriptor.getMediaType())
+            .map(MediaType::of)
+            .ifPresent(currentlyBuildMimePart::addMediaType);
+        Optional.ofNullable(descriptor.getSubType())
+            .map(SubType::of)
+            .ifPresent(currentlyBuildMimePart::addSubType);
+        currentlyBuildMimePart.addContentDisposition(descriptor.getContentDispositionType())
             .addFileName(descriptor.getContentDispositionFilename());
-
-        Optional.ofNullable(descriptor.getCharset())
-            .map(Charset::forName)
-            .ifPresent(currentlyBuildMimePart::charset);
+        extractCharset(descriptor);
     }
 
+    private void extractCharset(MaximalBodyDescriptor descriptor) {
+        try {
+            Optional.ofNullable(descriptor.getCharset())
+                .map(Charset::forName)
+                .ifPresent(currentlyBuildMimePart::charset);
+        } catch (Exception e) {
+            LOGGER.info("Failed parsing charset", e);
+        }
+    }
 }

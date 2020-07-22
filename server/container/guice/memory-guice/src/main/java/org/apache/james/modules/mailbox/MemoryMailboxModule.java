@@ -23,14 +23,18 @@ import static org.apache.james.modules.Names.MAILBOXMANAGER_NAME;
 
 import javax.inject.Singleton;
 
-import org.apache.james.adapter.mailbox.store.UserRepositoryAuthenticator;
-import org.apache.james.adapter.mailbox.store.UserRepositoryAuthorizator;
+import org.apache.james.adapter.mailbox.UserRepositoryAuthenticator;
+import org.apache.james.adapter.mailbox.UserRepositoryAuthorizator;
+import org.apache.james.mailbox.AttachmentContentLoader;
 import org.apache.james.mailbox.AttachmentManager;
+import org.apache.james.mailbox.Authenticator;
+import org.apache.james.mailbox.Authorizator;
 import org.apache.james.mailbox.BlobManager;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxPathLocker;
 import org.apache.james.mailbox.MessageIdManager;
 import org.apache.james.mailbox.RightManager;
+import org.apache.james.mailbox.SessionProvider;
 import org.apache.james.mailbox.SubscriptionManager;
 import org.apache.james.mailbox.events.MailboxListener;
 import org.apache.james.mailbox.extractor.TextExtractor;
@@ -38,16 +42,14 @@ import org.apache.james.mailbox.inmemory.InMemoryId;
 import org.apache.james.mailbox.inmemory.InMemoryMailboxManager;
 import org.apache.james.mailbox.inmemory.InMemoryMailboxSessionMapperFactory;
 import org.apache.james.mailbox.inmemory.InMemoryMessageId;
-import org.apache.james.mailbox.inmemory.JsoupTextExtractor;
 import org.apache.james.mailbox.inmemory.mail.InMemoryModSeqProvider;
 import org.apache.james.mailbox.inmemory.mail.InMemoryUidProvider;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
-import org.apache.james.mailbox.store.Authenticator;
-import org.apache.james.mailbox.store.Authorizator;
 import org.apache.james.mailbox.store.JVMMailboxPathLocker;
 import org.apache.james.mailbox.store.MailboxManagerConfiguration;
 import org.apache.james.mailbox.store.MailboxSessionMapperFactory;
+import org.apache.james.mailbox.store.SessionProviderImpl;
 import org.apache.james.mailbox.store.StoreAttachmentManager;
 import org.apache.james.mailbox.store.StoreBlobManager;
 import org.apache.james.mailbox.store.StoreMailboxManager;
@@ -55,6 +57,7 @@ import org.apache.james.mailbox.store.StoreMessageIdManager;
 import org.apache.james.mailbox.store.StoreRightManager;
 import org.apache.james.mailbox.store.StoreSubscriptionManager;
 import org.apache.james.mailbox.store.event.MailboxAnnotationListener;
+import org.apache.james.mailbox.store.extractor.JsoupTextExtractor;
 import org.apache.james.mailbox.store.mail.AttachmentMapperFactory;
 import org.apache.james.mailbox.store.mail.MailboxMapperFactory;
 import org.apache.james.mailbox.store.mail.MessageMapperFactory;
@@ -78,6 +81,7 @@ public class MemoryMailboxModule extends AbstractModule {
     @Override
     protected void configure() {
         install(new DefaultEventModule());
+        install(new MemoryDeadLetterModule());
         install(new MemoryQuotaModule());
         install(new MemoryQuotaSearchModule());
 
@@ -101,10 +105,12 @@ public class MemoryMailboxModule extends AbstractModule {
         bind(StoreMailboxManager.class).to(InMemoryMailboxManager.class);
         bind(MessageIdManager.class).to(StoreMessageIdManager.class);
         bind(AttachmentManager.class).to(StoreAttachmentManager.class);
+        bind(SessionProvider.class).to(SessionProviderImpl.class);
 
         bind(MessageSearchIndex.class).to(SimpleMessageSearchIndex.class);
         bind(TextExtractor.class).to(JsoupTextExtractor.class);
         bind(RightManager.class).to(StoreRightManager.class);
+        bind(AttachmentContentLoader.class).to(AttachmentManager.class);
 
         bind(DeletedMessageMetadataVault.class).to(MemoryDeletedMessageMetadataVault.class);
 
@@ -122,6 +128,7 @@ public class MemoryMailboxModule extends AbstractModule {
         bind(StoreAttachmentManager.class).in(Scopes.SINGLETON);
         bind(StoreRightManager.class).in(Scopes.SINGLETON);
         bind(MemoryDeletedMessageMetadataVault.class).in(Scopes.SINGLETON);
+        bind(SessionProviderImpl.class).in(Scopes.SINGLETON);
 
         Multibinder.newSetBinder(binder(), MailboxManagerDefinition.class)
             .addBinding()

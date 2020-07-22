@@ -23,28 +23,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 
-import org.junit.Test;
+import org.apache.james.mailbox.model.ContentType.MediaType;
+import org.apache.james.mailbox.model.ContentType.SubType;
+import org.junit.jupiter.api.Test;
 
-public class MimePartTest {
+class MimePartTest {
 
     @Test
-    public void buildShouldWorkWhenTextualContentFromParserIsEmpty() {
+    void buildShouldWorkWhenTextualContentFromParserIsEmpty() {
         MimePart.builder()
             .addBodyContent(new ByteArrayInputStream(new byte[] {}))
-            .addMediaType("text")
-            .addSubType("plain")
+            .addMediaType(MediaType.of("text"))
+            .addSubType(SubType.of("plain"))
             .build();
     }
 
     @Test
-    public void buildShouldWorkWhenTextualContentFromParserIsNonEmpty() {
+    void buildShouldWorkWhenTextualContentFromParserIsNonEmpty() {
         String body = "text";
         MimePart mimePart = MimePart.builder()
             .addBodyContent(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)))
-            .addMediaType("text")
-            .addSubType("plain")
+            .addMediaType(MediaType.of("text"))
+            .addSubType(SubType.of("plain"))
             .build();
-        
+
         assertThat(mimePart.getTextualBody()).contains(body);
     }
 }

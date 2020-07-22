@@ -30,14 +30,16 @@ import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.backends.cassandra.utils.CassandraUtils;
 import org.apache.james.core.Domain;
+import org.apache.james.json.DTOConverter;
 import org.apache.james.rrt.cassandra.CassandraMappingsSourcesDAO;
 import org.apache.james.rrt.cassandra.CassandraRRTModule;
 import org.apache.james.rrt.cassandra.CassandraRecipientRewriteTableDAO;
 import org.apache.james.rrt.cassandra.migration.MappingsSourcesMigration;
+import org.apache.james.rrt.cassandra.migration.MappingsSourcesMigrationTaskAdditionalInformationDTO;
 import org.apache.james.rrt.lib.Mapping;
 import org.apache.james.rrt.lib.MappingSource;
+import org.apache.james.task.Hostname;
 import org.apache.james.task.MemoryTaskManager;
-import org.apache.james.task.eventsourcing.Hostname;
 import org.apache.james.webadmin.WebAdminServer;
 import org.apache.james.webadmin.WebAdminUtils;
 import org.apache.james.webadmin.service.CassandraMappingsService;
@@ -80,7 +82,8 @@ class CassandraMappingsRoutesTest {
         taskManager = new MemoryTaskManager(new Hostname("foo"));
         webAdminServer = WebAdminUtils.createWebAdminServer(
                 new CassandraMappingsRoutes(cassandraMappingsService, taskManager, jsonTransformer),
-                new TasksRoutes(taskManager, jsonTransformer))
+                new TasksRoutes(taskManager, jsonTransformer,
+                    DTOConverter.of(MappingsSourcesMigrationTaskAdditionalInformationDTO.module(CassandraMappingsSolveInconsistenciesTask.TYPE))))
             .start();
 
         RestAssured.requestSpecification = WebAdminUtils.buildRequestSpecification(webAdminServer)
@@ -140,7 +143,7 @@ class CassandraMappingsRoutesTest {
             .body("statusCode", is(400))
             .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
             .body("message", is("Invalid arguments supplied in the user request"))
-            .body("details", is("'invalid-action' is not a valid action query parameter"));
+            .body("details", is("Invalid value supplied for query parameter 'action': invalid-action. Supported values are [SolveInconsistencies]"));
     }
 
     @Test
@@ -152,7 +155,7 @@ class CassandraMappingsRoutesTest {
             .body("statusCode", is(400))
             .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
             .body("message", is("Invalid arguments supplied in the user request"))
-            .body("details", is("'action' url parameter is mandatory"));
+            .body("details", is("'action' query parameter is compulsory. Supported values are [SolveInconsistencies]"));
     }
 
     @Test

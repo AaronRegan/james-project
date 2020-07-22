@@ -24,39 +24,45 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.model.Mailbox;
+import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
-import org.junit.Before;
-import org.junit.Test;
+import org.apache.james.mailbox.model.TestId;
+import org.apache.james.mailbox.model.UidValidity;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableList;
 
-public class ListMailboxAssertTest {
-    private static final String OTHER_NAMESPACE = "other_namespace";
-    private static final String NAME = "name";
-    private static final String USER = "user";
-    private static final String NAMESPACE = "namespace";
-    private static final long UID_VALIDITY = 42;
-    private static final Mailbox mailbox1 = new Mailbox(new MailboxPath(NAMESPACE, USER, NAME), UID_VALIDITY);
-    private static final Mailbox mailbox2 = new Mailbox(new MailboxPath(OTHER_NAMESPACE, USER, NAME), UID_VALIDITY);
+class ListMailboxAssertTest {
+    static final String OTHER_NAMESPACE = "other_namespace";
+    static final String NAME = "name";
+    static final Username USER = Username.of("user");
+    static final String NAMESPACE = "namespace";
+    static final UidValidity UID_VALIDITY = UidValidity.of(42);
+    static final MailboxId MAILBOX_ID_1 = TestId.of(1);
+    static final MailboxId MAILBOX_ID_2 = TestId.of(2);
+    static final Mailbox MAILBOX_1 = new Mailbox(new MailboxPath(NAMESPACE, USER, NAME), UID_VALIDITY, MAILBOX_ID_1);
+    static final Mailbox MAILBOX_2 = new Mailbox(new MailboxPath(OTHER_NAMESPACE, USER, NAME), UID_VALIDITY, MAILBOX_ID_2);
 
-    private ListMailboxAssert listMaiboxAssert;
-    private List<Mailbox> actualMailbox;
+    ListMailboxAssert listMaiboxAssert;
+    List<Mailbox> actualMailboxes;
 
-    @Before
-    public void setUp() {
-        actualMailbox = ImmutableList.of(mailbox1, mailbox2);
-        listMaiboxAssert = ListMailboxAssert.assertMailboxes(actualMailbox);
+    @BeforeEach
+    void setUp() {
+        actualMailboxes = ImmutableList.of(MAILBOX_1, MAILBOX_2);
+        listMaiboxAssert = ListMailboxAssert.assertMailboxes(actualMailboxes);
     }
 
     @Test
-    public void initListMailboxAssertShouldWork() {
+    void initListMailboxAssertShouldWork() {
         assertThat(listMaiboxAssert).isNotNull();
     }
 
     @Test
-    public void assertListMailboxShouldWork() {
-        assertMailboxes(actualMailbox).containOnly(new Mailbox(new MailboxPath(NAMESPACE, USER, NAME), UID_VALIDITY),
-            new Mailbox(new MailboxPath(OTHER_NAMESPACE, USER, NAME), UID_VALIDITY));
+    void assertListMailboxShouldWork() {
+        assertMailboxes(actualMailboxes).containOnly(new Mailbox(new MailboxPath(NAMESPACE, USER, NAME), UID_VALIDITY, MAILBOX_ID_1),
+            new Mailbox(new MailboxPath(OTHER_NAMESPACE, USER, NAME), UID_VALIDITY, MAILBOX_ID_2));
     }
 }

@@ -36,18 +36,21 @@ import org.apache.james.core.MaybeSender;
 import org.apache.james.jmap.draft.model.EnvelopeUtils;
 import org.apache.james.jmap.draft.model.Keyword;
 import org.apache.james.jmap.draft.model.Keywords;
-import org.apache.james.jmap.draft.model.Message;
-import org.apache.james.jmap.draft.model.MessageFactory;
-import org.apache.james.jmap.draft.model.MessagePreviewGenerator;
-import org.apache.james.jmap.draft.utils.HtmlTextExtractor;
+import org.apache.james.jmap.draft.model.message.view.MessageFullView;
+import org.apache.james.jmap.draft.model.message.view.MessageFullViewFactory;
+import org.apache.james.jmap.draft.model.message.view.MessageFullViewFactory.MetaDataWithContent;
+import org.apache.james.jmap.draft.utils.JsoupHtmlTextExtractor;
+import org.apache.james.jmap.memory.projections.MemoryMessageFastViewProjection;
 import org.apache.james.mailbox.BlobManager;
+import org.apache.james.mailbox.MessageIdManager;
 import org.apache.james.mailbox.MessageUid;
-import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.inmemory.InMemoryId;
 import org.apache.james.mailbox.model.BlobId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.TestMessageId;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.server.core.Envelope;
+import org.apache.james.util.html.HtmlTextExtractor;
 import org.apache.james.util.mime.MessageContentExtractor;
 import org.apache.mailet.Mail;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,11 +62,11 @@ import com.google.common.collect.ImmutableSet;
 class MessageSenderTest {
 
     private Envelope envelope;
-    private MessageFactory.MetaDataWithContent message;
-    private Message jmapMessage;
+    private MetaDataWithContent message;
+    private MessageFullView jmapMessage;
 
     @BeforeEach
-    void setup() throws MailboxException {
+    void setup() throws Exception {
         String headers = "From: me@example.com\n"
             + "To: 1@example.com\n"
             + "Cc: 2@example.com, 3@example.com\n"
@@ -72,7 +75,7 @@ class MessageSenderTest {
         String content = headers
             + "Hello! How are you?";
 
-        message = MessageFactory.MetaDataWithContent.builder()
+        message = MetaDataWithContent.builder()
             .uid(MessageUid.of(2))
             .keywords(Keywords.strictFactory().from(Keyword.SEEN))
             .size(content.length())
@@ -83,21 +86,21 @@ class MessageSenderTest {
             .messageId(TestMessageId.of(2))
             .build();
 
-        MessagePreviewGenerator messagePreview = mock(MessagePreviewGenerator.class);
-        HtmlTextExtractor htmlTextExtractor = mock(HtmlTextExtractor.class);
-        when(messagePreview.compute(any())).thenReturn("text preview");
-
         MessageContentExtractor messageContentExtractor = new MessageContentExtractor();
+        HtmlTextExtractor htmlTextExtractor = new JsoupHtmlTextExtractor();
+
         BlobManager blobManager = mock(BlobManager.class);
         when(blobManager.toBlobId(any(MessageId.class))).thenReturn(BlobId.fromString("fake"));
-        MessageFactory messageFactory = new MessageFactory(blobManager, messagePreview, messageContentExtractor, htmlTextExtractor);
-        jmapMessage = messageFactory.fromMetaDataWithContent(message);
+        MessageIdManager messageIdManager = mock(MessageIdManager.class);
+        MessageFullViewFactory messageFullViewFactory = new MessageFullViewFactory(blobManager, messageContentExtractor, htmlTextExtractor, messageIdManager,
+            new MemoryMessageFastViewProjection(new RecordingMetricFactory()));
+        jmapMessage = messageFullViewFactory.fromMetaDataWithContent(message).block();
         envelope = EnvelopeUtils.fromMessage(jmapMessage);
     }
 
     @Test
     void buildMailShouldThrowWhenNullMailboxMessage() throws Exception {
-        MessageFactory.MetaDataWithContent message = null;
+        MetaDataWithContent message = null;
         assertThatThrownBy(() -> MessageSender.buildMail(message, envelope)).isInstanceOf(NullPointerException.class);
     }
 

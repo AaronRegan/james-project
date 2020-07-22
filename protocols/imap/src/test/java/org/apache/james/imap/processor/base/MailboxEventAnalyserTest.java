@@ -30,17 +30,19 @@ import java.util.stream.Stream;
 import javax.mail.Flags;
 
 import org.apache.commons.lang3.NotImplementedException;
-import org.apache.james.imap.api.ImapSessionState;
-import org.apache.james.imap.api.ImapSessionUtils;
-import org.apache.james.imap.api.process.ImapSession;
+import org.apache.james.core.Username;
+import org.apache.james.imap.encode.FakeImapSession;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MailboxSessionUtil;
 import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.events.Event;
+import org.apache.james.mailbox.events.EventBusTestFixture;
 import org.apache.james.mailbox.events.InVMEventBus;
 import org.apache.james.mailbox.events.MailboxListener;
+import org.apache.james.mailbox.events.MemoryEventDeadLetters;
 import org.apache.james.mailbox.events.delivery.InVmEventDelivery;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.Mailbox;
@@ -50,10 +52,11 @@ import org.apache.james.mailbox.model.MessageMetaData;
 import org.apache.james.mailbox.model.MessageResult;
 import org.apache.james.mailbox.model.MessageResultIterator;
 import org.apache.james.mailbox.model.TestId;
+import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.mailbox.model.UpdatedFlags;
 import org.apache.james.mailbox.store.event.EventFactory;
 import org.apache.james.mailbox.store.mail.model.DefaultMessageId;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -61,19 +64,19 @@ public class MailboxEventAnalyserTest {
     private static final MessageUid UID = MessageUid.of(900);
     private static final UpdatedFlags ADD_RECENT_UPDATED_FLAGS = UpdatedFlags.builder()
         .uid(UID)
-        .modSeq(-1)
+        .modSeq(ModSeq.first())
         .oldFlags(new Flags())
         .newFlags(new Flags(Flags.Flag.RECENT))
         .build();
     private static final UpdatedFlags ADD_ANSWERED_UPDATED_FLAGS = UpdatedFlags.builder()
         .uid(UID)
-        .modSeq(-1)
+        .modSeq(ModSeq.first())
         .oldFlags(new Flags())
         .newFlags(new Flags(Flags.Flag.ANSWERED))
         .build();
     private static final UpdatedFlags NOOP_UPDATED_FLAGS = UpdatedFlags.builder()
         .uid(UID)
-        .modSeq(-1)
+        .modSeq(ModSeq.first())
         .oldFlags(new Flags())
         .newFlags(new Flags())
         .build();
@@ -110,29 +113,29 @@ public class MailboxEventAnalyserTest {
     }
 
     private static final MessageUid MESSAGE_UID = MessageUid.of(1);
-    private static final MailboxSession MAILBOX_SESSION = MailboxSessionUtil.create("user");
-    private static final MailboxSession OTHER_MAILBOX_SESSION = MailboxSessionUtil.create("user");
+    private static final Username USER = Username.of("user");
+    private static final MailboxSession MAILBOX_SESSION = MailboxSessionUtil.create(USER);
+    private static final MailboxSession OTHER_MAILBOX_SESSION = MailboxSessionUtil.create(USER);
     private static final char PATH_DELIMITER = '.';
-    private static final MailboxPath MAILBOX_PATH = new MailboxPath("namespace", "user", "name");
+    private static final MailboxPath MAILBOX_PATH = new MailboxPath("namespace", USER, "name");
     private static final TestId MAILBOX_ID = TestId.of(36);
-    private static final int UID_VALIDITY = 1024;
+    private static final UidValidity UID_VALIDITY = UidValidity.of(1024);
     private static final Mailbox DEFAULT_MAILBOX = new Mailbox(MAILBOX_PATH, UID_VALIDITY, MAILBOX_ID);
     private static final MailboxListener.Added ADDED = EventFactory.added()
         .randomEventId()
         .mailboxSession(MAILBOX_SESSION)
         .mailbox(DEFAULT_MAILBOX)
-        .addMetaData(new MessageMetaData(MessageUid.of(11), 0, new Flags(), 45, new Date(), new DefaultMessageId()))
+        .addMetaData(new MessageMetaData(MessageUid.of(11), ModSeq.first(), new Flags(), 45, new Date(), new DefaultMessageId()))
         .build();
 
     private SelectedMailboxImpl testee;
 
     @Before
     public void setUp() throws MailboxException {
-        ImapSession imapSession = mock(ImapSession.class);
-        InVMEventBus eventBus = new InVMEventBus(new InVmEventDelivery(new NoopMetricFactory()));
-        when(imapSession.getAttribute(ImapSessionUtils.MAILBOX_SESSION_ATTRIBUTE_SESSION_KEY))
-            .thenReturn(MAILBOX_SESSION);
-        when(imapSession.getState()).thenReturn(ImapSessionState.AUTHENTICATED);
+        FakeImapSession imapSession = new FakeImapSession();
+        InVMEventBus eventBus = new InVMEventBus(new InVmEventDelivery(new RecordingMetricFactory()), EventBusTestFixture.RETRY_BACKOFF_CONFIGURATION, new MemoryEventDeadLetters());
+        imapSession.setMailboxSession(MAILBOX_SESSION);
+        imapSession.authenticated();
 
         MailboxManager mailboxManager = mock(MailboxManager.class);
         MessageManager messageManager = mock(MessageManager.class);
@@ -155,7 +158,7 @@ public class MailboxEventAnalyserTest {
         when(messageManager.getMessages(any(), any(), any()))
             .thenReturn(new SingleMessageResultIterator(messageResult));
 
-        testee = new SelectedMailboxImpl(mailboxManager, eventBus, imapSession, MAILBOX_PATH);
+        testee = new SelectedMailboxImpl(mailboxManager, eventBus, imapSession, messageManager);
     }
 
     @Test

@@ -33,15 +33,14 @@ import javax.inject.Inject;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.james.mailbox.extractor.ParsedContent;
 import org.apache.james.mailbox.extractor.TextExtractor;
+import org.apache.james.mailbox.model.ContentType;
+import org.apache.james.mailbox.store.extractor.JsoupTextExtractor;
 import org.apache.james.metrics.api.MetricFactory;
 
-import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.TreeNode;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
@@ -55,16 +54,19 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
 public class TikaTextExtractor implements TextExtractor {
+    private static final ContentType.MediaType TEXT = ContentType.MediaType.of("text");
 
     private final MetricFactory metricFactory;
     private final TikaHttpClient tikaHttpClient;
     private final ObjectMapper objectMapper;
+    private final JsoupTextExtractor jsoupTextExtractor;
 
     @Inject
     public TikaTextExtractor(MetricFactory metricFactory, TikaHttpClient tikaHttpClient) {
         this.metricFactory = metricFactory;
         this.tikaHttpClient = tikaHttpClient;
         this.objectMapper = initializeObjectMapper();
+        this.jsoupTextExtractor = new JsoupTextExtractor();
     }
 
     private ObjectMapper initializeObjectMapper() {
@@ -76,18 +78,21 @@ public class TikaTextExtractor implements TextExtractor {
     }
 
     @Override
-    public ParsedContent extractContent(InputStream inputStream, String contentType) throws Exception {
-        return metricFactory.runPublishingTimerMetric("tikaTextExtraction", Throwing.supplier(
+    public ParsedContent extractContent(InputStream inputStream, ContentType contentType) throws Exception {
+        if (contentType.mediaType().equals(TEXT)) {
+            return jsoupTextExtractor.extractContent(inputStream, contentType);
+        }
+        return metricFactory.decorateSupplierWithTimerMetric("tikaTextExtraction", Throwing.supplier(
             () -> performContentExtraction(inputStream, contentType))
             .sneakyThrow());
     }
 
-    public ParsedContent performContentExtraction(InputStream inputStream, String contentType) throws IOException {
+    public ParsedContent performContentExtraction(InputStream inputStream, ContentType contentType) throws IOException {
         ContentAndMetadata contentAndMetadata = convert(tikaHttpClient.recursiveMetaDataAsJson(inputStream, contentType));
         return new ParsedContent(contentAndMetadata.getContent(), contentAndMetadata.getMetadata());
     }
 
-    private ContentAndMetadata convert(Optional<InputStream> maybeInputStream) throws IOException, JsonParseException, JsonMappingException {
+    private ContentAndMetadata convert(Optional<InputStream> maybeInputStream) throws IOException {
         return maybeInputStream
                 .map(Throwing.function(inputStream -> objectMapper.readValue(inputStream, ContentAndMetadata.class)))
                 .orElse(ContentAndMetadata.empty());
@@ -97,7 +102,7 @@ public class TikaTextExtractor implements TextExtractor {
     static class ContentAndMetadataDeserializer extends JsonDeserializer<ContentAndMetadata> {
 
         @Override
-        public ContentAndMetadata deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+        public ContentAndMetadata deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException {
             TreeNode treeNode = jsonParser.getCodec().readTree(jsonParser);
             Preconditions.checkState(treeNode.isArray() && treeNode.size() >= 1, "The response should be an array with at least one element");
             Preconditions.checkState(treeNode.get(0).isObject(), "The element should be a Json object");

@@ -35,6 +35,7 @@ import javax.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
 import org.apache.james.backends.cassandra.utils.CassandraUtils;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.acl.ACLDiff;
 import org.apache.james.mailbox.acl.PositiveUserACLDiff;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
@@ -47,6 +48,7 @@ import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.github.fge.lambdas.Throwing;
+
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -99,44 +101,42 @@ public class CassandraUserMailboxRightsDAO {
     public Mono<Void> update(CassandraId cassandraId, ACLDiff aclDiff) {
         PositiveUserACLDiff userACLDiff = new PositiveUserACLDiff(aclDiff);
         return Flux.merge(
-            addAll(cassandraId, userACLDiff.addedEntries()),
-            removeAll(cassandraId, userACLDiff.removedEntries()),
-            addAll(cassandraId, userACLDiff.changedEntries()))
+                addAll(cassandraId, userACLDiff.addedEntries()),
+                removeAll(cassandraId, userACLDiff.removedEntries()),
+                addAll(cassandraId, userACLDiff.changedEntries()))
             .then();
     }
 
-    private Mono<Void> removeAll(CassandraId cassandraId, Stream<MailboxACL.Entry> removedEntries) {
+    private Flux<Void> removeAll(CassandraId cassandraId, Stream<MailboxACL.Entry> removedEntries) {
         return Flux.fromStream(removedEntries)
             .flatMap(entry -> cassandraAsyncExecutor.executeVoid(
                 delete.bind()
                     .setString(USER_NAME, entry.getKey().getName())
-                    .setUUID(MAILBOX_ID, cassandraId.asUuid())))
-            .then();
+                    .setUUID(MAILBOX_ID, cassandraId.asUuid())));
     }
 
-    private Mono<Void> addAll(CassandraId cassandraId, Stream<MailboxACL.Entry> addedEntries) {
+    private Flux<Void> addAll(CassandraId cassandraId, Stream<MailboxACL.Entry> addedEntries) {
         return Flux.fromStream(addedEntries)
             .flatMap(entry -> cassandraAsyncExecutor.executeVoid(
                 insert.bind()
                     .setString(USER_NAME, entry.getKey().getName())
                     .setUUID(MAILBOX_ID, cassandraId.asUuid())
-                    .setString(RIGHTS, entry.getValue().serialize())))
-            .then();
+                    .setString(RIGHTS, entry.getValue().serialize())));
     }
 
-    public Mono<Optional<Rfc4314Rights>> retrieve(String userName, CassandraId mailboxId) {
+    public Mono<Optional<Rfc4314Rights>> retrieve(Username userName, CassandraId mailboxId) {
         return cassandraAsyncExecutor.executeSingleRowOptional(
             select.bind()
-                .setString(USER_NAME, userName)
+                .setString(USER_NAME, userName.asString())
                 .setUUID(MAILBOX_ID, mailboxId.asUuid()))
             .map(rowOptional ->
                 rowOptional.map(Throwing.function(row -> Rfc4314Rights.fromSerializedRfc4314Rights(row.getString(RIGHTS)))));
     }
 
-    public Flux<Pair<CassandraId, Rfc4314Rights>> listRightsForUser(String userName) {
+    public Flux<Pair<CassandraId, Rfc4314Rights>> listRightsForUser(Username userName) {
         return cassandraAsyncExecutor.execute(
             selectUser.bind()
-                .setString(USER_NAME, userName))
+                .setString(USER_NAME, userName.asString()))
             .flatMapMany(cassandraUtils::convertToFlux)
             .map(Throwing.function(this::toPair));
     }

@@ -22,6 +22,7 @@ import static org.apache.james.spamassassin.SpamAssassinResult.STATUS_MAIL;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.HashMap;
+import java.util.Optional;
 
 import javax.mail.MessagingException;
 import javax.mail.internet.AddressException;
@@ -30,7 +31,7 @@ import javax.mail.internet.MimeMessage;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.MaybeSender;
 import org.apache.james.core.builder.MimeMessageBuilder;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.protocols.smtp.SMTPSession;
 import org.apache.james.protocols.smtp.hook.HookResult;
 import org.apache.james.protocols.smtp.hook.HookReturnCode;
@@ -46,6 +47,8 @@ import org.apache.mailet.base.test.FakeMail;
 import org.junit.Rule;
 import org.junit.Test;
 
+import com.google.common.base.Preconditions;
+
 public class SpamAssassinHandlerTest {
 
     private static final String SPAMD_HOST = "localhost";
@@ -59,36 +62,44 @@ public class SpamAssassinHandlerTest {
 
         return new BaseFakeSMTPSession() {
 
-            private final HashMap<String, Object> sstate = new HashMap<>();
-            private final HashMap<String, Object> connectionState = new HashMap<>();
+            private final HashMap<AttachmentKey<?>, Object> sessionState = new HashMap<>();
+            private final HashMap<AttachmentKey<?>, Object> connectionState = new HashMap<>();
             private boolean relayingAllowed;
 
             @Override
-            public Object setAttachment(String key, Object value, State state) {
+            public <T> Optional<T> setAttachment(AttachmentKey<T> key, T value, State state) {
+                Preconditions.checkNotNull(key, "key cannot be null");
+                Preconditions.checkNotNull(value, "value cannot be null");
+
                 if (state == State.Connection) {
-                    if (value == null) {
-                        return connectionState.remove(key);
-                    }
-                    return connectionState.put(key, value);
+                    return key.convert(connectionState.put(key, value));
                 } else {
-                    if (value == null) {
-                        return sstate.remove(key);
-                    }
-                    return sstate.put(key, value);
+                    return key.convert(sessionState.put(key, value));
                 }
             }
 
             @Override
-            public Object getAttachment(String key, State state) {
+            public <T> Optional<T> removeAttachment(AttachmentKey<T> key, State state) {
+                Preconditions.checkNotNull(key, "key cannot be null");
+
+                if (state == State.Connection) {
+                    return key.convert(connectionState.remove(key));
+                } else {
+                    return key.convert(sessionState.remove(key));
+                }
+            }
+
+            @Override
+            public <T> Optional<T> getAttachment(AttachmentKey<T> key, State state) {
                 try {
-                    sstate.put(SMTPSession.SENDER, MaybeSender.of(new MailAddress("sender@james.apache.org")));
+                    sessionState.put(SMTPSession.SENDER, MaybeSender.of(new MailAddress("sender@james.apache.org")));
                 } catch (AddressException e) {
                     throw new RuntimeException(e);
                 }
                 if (state == State.Connection) {
-                    return connectionState.get(key);
+                    return key.convert(connectionState.get(key));
                 } else {
-                    return sstate.get(key);
+                    return key.convert(sessionState.get(key));
                 }
             }
 
@@ -125,7 +136,7 @@ public class SpamAssassinHandlerTest {
     public void testNonSpam() throws Exception {
         SMTPSession session = setupMockedSMTPSession(setupMockedMail(setupMockedMimeMessage("test")));
 
-        SpamAssassinHandler handler = new SpamAssassinHandler(new NoopMetricFactory());
+        SpamAssassinHandler handler = new SpamAssassinHandler(new RecordingMetricFactory());
 
         handler.setSpamdHost(SPAMD_HOST);
         handler.setSpamdPort(spamd.getPort());
@@ -142,7 +153,7 @@ public class SpamAssassinHandlerTest {
     public void testSpam() throws Exception {
         SMTPSession session = setupMockedSMTPSession(setupMockedMail(setupMockedMimeMessage(MockSpamd.GTUBE)));
 
-        SpamAssassinHandler handler = new SpamAssassinHandler(new NoopMetricFactory());
+        SpamAssassinHandler handler = new SpamAssassinHandler(new RecordingMetricFactory());
 
         handler.setSpamdHost(SPAMD_HOST);
         handler.setSpamdPort(spamd.getPort());
@@ -158,7 +169,7 @@ public class SpamAssassinHandlerTest {
     public void testSpamReject() throws Exception {
         SMTPSession session = setupMockedSMTPSession(setupMockedMail(setupMockedMimeMessage(MockSpamd.GTUBE)));
 
-        SpamAssassinHandler handler = new SpamAssassinHandler(new NoopMetricFactory());
+        SpamAssassinHandler handler = new SpamAssassinHandler(new RecordingMetricFactory());
 
         handler.setSpamdHost(SPAMD_HOST);
         handler.setSpamdPort(spamd.getPort());

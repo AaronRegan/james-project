@@ -18,68 +18,71 @@
  ****************************************************************/
 package org.apache.james.imap.decode.parser;
 
+import java.io.InputStream;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Date;
 
 import javax.mail.Flags;
 
-import org.apache.james.imap.api.ImapCommand;
 import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.api.ImapMessage;
+import org.apache.james.imap.api.Tag;
+import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapSession;
+import org.apache.james.imap.decode.DecodingException;
 import org.apache.james.imap.decode.ImapRequestLineReader;
 import org.apache.james.imap.decode.base.AbstractImapCommandParser;
 import org.apache.james.imap.message.request.AppendRequest;
-import org.apache.james.protocols.imap.DecodingException;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Parses APPEND command
  */
 public class AppendCommandParser extends AbstractImapCommandParser {
+    private final Clock clock;
 
-    public AppendCommandParser() {
-        super(ImapCommand.authenticatedStateCommand(ImapConstants.APPEND_COMMAND_NAME));
+    public AppendCommandParser(StatusResponseFactory statusResponseFactory, Clock clock) {
+        super(ImapConstants.APPEND_COMMAND, statusResponseFactory);
+            this.clock = clock;
     }
 
     /**
      * If the next character in the request is a '(', tries to read a
-     * "flag_list" argument from the request. If not, returns a MessageFlags
+     * "flag_list" argument from the request. If not, returns a Flags
      * with no flags set.
      */
-    public Flags optionalAppendFlags(ImapRequestLineReader request) throws DecodingException {
+    private Flags parseFlags(ImapRequestLineReader request) throws DecodingException {
         char next = request.nextWordChar();
         if (next == '(') {
             return request.flagList();
-        } else {
-            return null;
         }
+        return new Flags();
     }
 
     /**
      * If the next character in the request is a '"', tries to read a DateTime
-     * argument. If not, returns null.
+     * argument. If not, returns now.
      */
-    public Date optionalDateTime(ImapRequestLineReader request) throws DecodingException {
+    @VisibleForTesting
+    LocalDateTime parseDateTime(ImapRequestLineReader request) throws DecodingException {
         char next = request.nextWordChar();
         if (next == '"') {
             return request.dateTime();
-        } else {
-            return null;
         }
+        return LocalDateTime.now(clock);
     }
 
     @Override
-    protected ImapMessage decode(ImapCommand command, ImapRequestLineReader request, String tag, ImapSession session) throws DecodingException {
+    protected ImapMessage decode(ImapRequestLineReader request, Tag tag, ImapSession session) throws DecodingException {
         String mailboxName = request.mailbox();
-        Flags flags = optionalAppendFlags(request);
-        if (flags == null) {
-            flags = new Flags();
-        }
-        Date datetime = optionalDateTime(request);
-        if (datetime == null) {
-            datetime = new Date();
-        }
+        Flags flags = parseFlags(request);
+        LocalDateTime datetime = parseDateTime(request);
         request.nextWordChar();
 
-        return new AppendRequest(command, mailboxName, flags, datetime, request.consumeLiteral(true), tag);
+        InputStream literal = request.consumeLiteral(true).right;
+        return new AppendRequest(mailboxName, flags, Date.from(datetime.atZone(ZoneId.systemDefault()).toInstant()), literal, tag);
     }
 }

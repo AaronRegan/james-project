@@ -18,18 +18,18 @@
  ****************************************************************/
 package org.apache.james.imap.processor.fetch;
 
+import static java.nio.charset.StandardCharsets.US_ASCII;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.Charset;
 import java.util.List;
 
 import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.message.response.FetchResponse.BodyElement;
 import org.apache.james.mailbox.exception.MailboxException;
-import org.apache.james.mailbox.model.MessageResult;
-
+import org.apache.james.mailbox.model.Header;
 
 /**
  * {@link BodyElement} which represent a MIME element specified by for example (BODY[1.MIME])
@@ -37,19 +37,13 @@ import org.apache.james.mailbox.model.MessageResult;
  */
 public class MimeBodyElement implements BodyElement {
     private final String name;
-
-    protected final List<MessageResult.Header> headers;
-
+    protected final List<Header> headers;
     protected long size;
-    private static final Charset US_ASCII = Charset.forName("US-ASCII");
 
-
-    public MimeBodyElement(String name, List<MessageResult.Header> headers) throws MailboxException {
-        super();
+    public MimeBodyElement(String name, List<Header> headers) throws MailboxException {
         this.name = name;
         this.headers = headers;
         this.size = calculateSize(headers);
-        
     }
 
     @Override
@@ -58,13 +52,13 @@ public class MimeBodyElement implements BodyElement {
     }
     
 
-    protected long calculateSize(List<MessageResult.Header> headers) throws MailboxException {
+    protected long calculateSize(List<Header> headers) throws MailboxException {
         final int result;
         if (headers.isEmpty()) {
            result = 0;
         } else {
             int count = 0;
-            for (MessageResult.Header header : headers) {
+            for (Header header : headers) {
                 count += header.size() + ImapConstants.LINE_END.length();
             }
             result = count + ImapConstants.LINE_END.length();
@@ -82,7 +76,7 @@ public class MimeBodyElement implements BodyElement {
     public InputStream getInputStream() throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        for (MessageResult.Header header : headers) {
+        for (Header header : headers) {
             out.write((header.getName() + ": " + header.getValue() + ImapConstants.LINE_END).getBytes(US_ASCII));
         }
         // no empty line with CRLF for MIME headers. See IMAP-297

@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.5.0-SNAPSHOT</version>
+        <version>3.6.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -31,6 +31,9 @@
     <packaging>jar</packaging>
 
     <name>Apache James :: Server :: Mail Queue :: File</name>
+    <description>Provides a MailQueue implementation directly leveraging the file system.
+    Deprecated as many management features are missing, as this implementation is not thread safe.
+    Use embedded ActiveMQMailQueue instead.</description>
 
     <dependencies>
         <dependency>

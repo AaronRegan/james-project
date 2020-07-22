@@ -35,8 +35,7 @@ import javax.mail.MessagingException;
 import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
 
-import org.apache.james.core.MailAddress;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.jmap.draft.exceptions.DraftMessageMailboxUpdateException;
 import org.apache.james.jmap.draft.exceptions.InvalidOutboxMoveException;
 import org.apache.james.jmap.draft.model.Keyword;
@@ -56,7 +55,7 @@ import org.apache.james.mailbox.SystemMailboxesProvider;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxNotFoundException;
 import org.apache.james.mailbox.exception.OverQuotaException;
-import org.apache.james.mailbox.model.FetchGroupImpl;
+import org.apache.james.mailbox.model.FetchGroup;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxId.Factory;
 import org.apache.james.mailbox.model.MessageId;
@@ -64,8 +63,8 @@ import org.apache.james.mailbox.model.MessageMoves;
 import org.apache.james.mailbox.model.MessageResult;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.metrics.api.TimeMetric;
+import org.apache.james.rrt.api.CanSendFrom;
 import org.apache.james.server.core.MailImpl;
-import org.apache.james.util.OptionalUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,6 +73,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+
+import io.vavr.control.Try;
 
 public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
 
@@ -87,6 +88,7 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
     private final MessageSender messageSender;
 
     private final ReferenceUpdater referenceUpdater;
+    private final CanSendFrom canSendFrom;
 
     @Inject
     @VisibleForTesting SetMessagesUpdateProcessor(
@@ -96,7 +98,8 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
             Factory mailboxIdFactory,
             MessageSender messageSender,
             MetricFactory metricFactory,
-            ReferenceUpdater referenceUpdater) {
+            ReferenceUpdater referenceUpdater,
+            CanSendFrom canSendFrom) {
         this.updatePatchConverter = updatePatchConverter;
         this.messageIdManager = messageIdManager;
         this.systemMailboxesProvider = systemMailboxesProvider;
@@ -104,30 +107,48 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
         this.metricFactory = metricFactory;
         this.messageSender = messageSender;
         this.referenceUpdater = referenceUpdater;
+        this.canSendFrom = canSendFrom;
     }
 
     @Override
-    public SetMessagesResponse process(SetMessagesRequest request,  MailboxSession mailboxSession) {
+    public SetMessagesResponse process(SetMessagesRequest request, MailboxSession mailboxSession) {
         TimeMetric timeMetric = metricFactory.timer(JMAP_PREFIX + "SetMessagesUpdateProcessor");
-
         SetMessagesResponse.Builder responseBuilder = SetMessagesResponse.builder();
-        request.buildUpdatePatches(updatePatchConverter).forEach((id, patch) -> {
-                if (patch.isValid()) {
-                    update(id, patch, mailboxSession, responseBuilder);
-                } else {
-                    handleInvalidRequest(responseBuilder, id, patch.getValidationErrors(), patch);
-                }
-            }
-        );
+        Try.ofCallable(() -> listMailboxIdsForRole(mailboxSession, Role.OUTBOX))
+            .map(outboxes -> {
+                prepareResponse(request, mailboxSession, responseBuilder, outboxes);
+                return null;
+            })
+            .onFailure(e -> request.buildUpdatePatches(updatePatchConverter)
+                .forEach((id, patch) -> prepareResponseIfCantReadOutboxes(responseBuilder, e, id, patch)));
 
         timeMetric.stopAndPublish();
         return responseBuilder.build();
     }
 
-    private void update(MessageId messageId, UpdateMessagePatch updateMessagePatch, MailboxSession mailboxSession,
+    private void prepareResponseIfCantReadOutboxes(SetMessagesResponse.Builder responseBuilder, Throwable e, MessageId id, UpdateMessagePatch patch) {
+        if (patch.isValid()) {
+            handleMessageUpdateException(id, responseBuilder, e);
+        } else {
+            handleInvalidRequest(responseBuilder, id, patch.getValidationErrors(), patch);
+        }
+    }
+
+    private void prepareResponse(SetMessagesRequest request, MailboxSession mailboxSession, SetMessagesResponse.Builder responseBuilder, Set<MailboxId> outboxes) {
+        request.buildUpdatePatches(updatePatchConverter).forEach((id, patch) -> {
+                if (patch.isValid()) {
+                    update(outboxes, id, patch, mailboxSession, responseBuilder);
+                } else {
+                    handleInvalidRequest(responseBuilder, id, patch.getValidationErrors(), patch);
+                }
+            }
+        );
+    }
+
+    private void update(Set<MailboxId> outboxes, MessageId messageId, UpdateMessagePatch updateMessagePatch, MailboxSession mailboxSession,
                         SetMessagesResponse.Builder builder) {
         try {
-            List<MessageResult> messages = messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, mailboxSession);
+            List<MessageResult> messages = messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, mailboxSession);
             assertValidUpdate(messages, updateMessagePatch, mailboxSession);
 
             if (messages.isEmpty()) {
@@ -142,7 +163,7 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
                 } else {
                     builder.updated(ImmutableList.of(messageId));
                 }
-                sendMessageWhenOutboxInTargetMailboxIds(messageId, updateMessagePatch, mailboxSession, builder);
+                sendMessageWhenOutboxInTargetMailboxIds(outboxes, messageId, updateMessagePatch, mailboxSession, builder);
             }
         } catch (DraftMessageMailboxUpdateException e) {
             handleDraftMessageMailboxUpdateException(messageId, builder, e);
@@ -171,17 +192,19 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
         }
     }
 
-    private void sendMessageWhenOutboxInTargetMailboxIds(MessageId messageId, UpdateMessagePatch updateMessagePatch, MailboxSession mailboxSession, SetMessagesResponse.Builder builder) throws MailboxException, MessagingException, IOException {
-        if (isTargetingOutbox(mailboxSession, listTargetMailboxIds(updateMessagePatch))) {
+    private void sendMessageWhenOutboxInTargetMailboxIds(Set<MailboxId> outboxes, MessageId messageId, UpdateMessagePatch updateMessagePatch, MailboxSession mailboxSession, SetMessagesResponse.Builder builder) throws MailboxException, MessagingException, IOException {
+        if (isTargetingOutbox(outboxes, listTargetMailboxIds(updateMessagePatch))) {
             Optional<MessageResult> maybeMessageToSend =
-                messageIdManager.getMessages(
-                    ImmutableList.of(messageId), FetchGroupImpl.FULL_CONTENT, mailboxSession)
+                messageIdManager.getMessage(messageId, FetchGroup.FULL_CONTENT, mailboxSession)
                     .stream()
                     .findFirst();
             if (maybeMessageToSend.isPresent()) {
                 MessageResult messageToSend = maybeMessageToSend.get();
                 MailImpl mail = buildMailFromMessage(messageToSend);
-                assertUserIsSender(mailboxSession, mail.getMaybeSender().asOptional());
+                Optional<Username> fromUser = mail.getMaybeSender()
+                    .asOptional()
+                    .map(Username::fromMailAddress);
+                assertUserCanSendFrom(mailboxSession.getUser(), fromUser);
                 messageSender.sendMessage(messageId, mail, mailboxSession);
                 referenceUpdater.updateReferences(messageToSend.getHeaders(), mailboxSession);
             } else {
@@ -190,13 +213,13 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
         }
     }
 
-    private void assertUserIsSender(MailboxSession session, Optional<MailAddress> sender) throws MailboxSendingNotAllowedException {
-        boolean userIsSender = sender.map(address -> session.getUser().equals(User.fromMailAddress(address)))
-            .orElse(false);
-
-        if (!userIsSender) {
-            String allowedSender = session.getUser().asString();
-            throw new MailboxSendingNotAllowedException(allowedSender);
+    @VisibleForTesting
+    void assertUserCanSendFrom(Username connectedUser, Optional<Username> fromUser) throws MailboxSendingNotAllowedException {
+        if (!fromUser.filter(from -> canSendFrom.userCanSendFrom(connectedUser, from))
+            .isPresent()) {
+            throw new MailboxSendingNotAllowedException(connectedUser, fromUser);
+        } else {
+            LOGGER.debug("{} is allowed to send a mail using {} identity", connectedUser.asString(), fromUser);
         }
     }
 
@@ -259,14 +282,14 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
     }
 
     private Set<MailboxId> listTargetMailboxIds(UpdateMessagePatch updateMessagePatch) {
-        return OptionalUtils.toStream(updateMessagePatch.getMailboxIds())
+        return updateMessagePatch.getMailboxIds()
+            .stream()
             .flatMap(Collection::stream)
             .map(mailboxIdFactory::fromString)
             .collect(Guavate.toImmutableSet());
     }
 
-    private boolean isTargetingOutbox(MailboxSession mailboxSession, Set<MailboxId> targetMailboxIds) throws MailboxException {
-        Set<MailboxId> outboxes = listMailboxIdsForRole(mailboxSession, Role.OUTBOX);
+    private boolean isTargetingOutbox(Set<MailboxId> outboxes, Set<MailboxId> targetMailboxIds) throws MailboxException {
         if (outboxes.isEmpty()) {
             throw new MailboxNotFoundException("At least one outbox should be accessible");
         }
@@ -324,8 +347,8 @@ public class SetMessagesUpdateProcessor implements SetMessagesProcessor {
     }
 
     private SetMessagesResponse.Builder handleMessageUpdateException(MessageId messageId,
-                                              SetMessagesResponse.Builder builder,
-                                              Exception e) {
+                                                                     SetMessagesResponse.Builder builder,
+                                                                     Throwable e) {
         LOGGER.error("An error occurred when updating a message", e);
         return builder.notUpdated(ImmutableMap.of(messageId, SetError.builder()
                 .type(SetError.Type.ERROR)

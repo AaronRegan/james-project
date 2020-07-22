@@ -22,9 +22,12 @@ import java.util.List;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
+import org.apache.james.backends.cassandra.init.configuration.CassandraConsistenciesConfiguration;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MailboxSessionUtil;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.cassandra.CassandraMailboxSessionMapperFactory;
 import org.apache.james.mailbox.cassandra.TestCassandraMailboxSessionMapperFactory;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
@@ -33,7 +36,6 @@ import org.apache.james.mailbox.cassandra.ids.CassandraMessageId.Factory;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MessageId;
-import org.apache.james.mailbox.store.mail.AnnotationMapper;
 import org.apache.james.mailbox.store.mail.AttachmentMapper;
 import org.apache.james.mailbox.store.mail.MailboxMapper;
 import org.apache.james.mailbox.store.mail.MessageIdMapper;
@@ -50,13 +52,17 @@ public class CassandraMapperProvider implements MapperProvider {
     private final CassandraCluster cassandra;
     private final MessageUidProvider messageUidProvider;
     private final CassandraModSeqProvider cassandraModSeqProvider;
-    private final MailboxSession mailboxSession = MailboxSessionUtil.create("benwa");
+    private final MailboxSession mailboxSession = MailboxSessionUtil.create(Username.of("benwa"));
     private CassandraMailboxSessionMapperFactory mapperFactory;
 
-    public CassandraMapperProvider(CassandraCluster cassandra) {
+    public CassandraMapperProvider(CassandraCluster cassandra,
+                                   CassandraConsistenciesConfiguration cassandraConsistenciesConfiguration) {
         this.cassandra = cassandra;
         messageUidProvider = new MessageUidProvider();
-        cassandraModSeqProvider = new CassandraModSeqProvider(this.cassandra.getConf(), CassandraConfiguration.DEFAULT_CONFIGURATION);
+        cassandraModSeqProvider = new CassandraModSeqProvider(
+                this.cassandra.getConf(),
+                CassandraConfiguration.DEFAULT_CONFIGURATION,
+                cassandraConsistenciesConfiguration);
         mapperFactory = createMapperFactory();
     }
 
@@ -81,8 +87,7 @@ public class CassandraMapperProvider implements MapperProvider {
     }
 
     private CassandraMailboxSessionMapperFactory createMapperFactory() {
-        return TestCassandraMailboxSessionMapperFactory.forTests(cassandra.getConf(),
-            cassandra.getTypesProvider(),
+        return TestCassandraMailboxSessionMapperFactory.forTests(cassandra,
             new CassandraMessageId.Factory());
     }
 
@@ -102,11 +107,6 @@ public class CassandraMapperProvider implements MapperProvider {
     }
 
     @Override
-    public AnnotationMapper createAnnotationMapper() throws MailboxException {
-        return mapperFactory.getAnnotationMapper(mailboxSession);
-    }
-
-    @Override
     public List<Capabilities> getSupportedCapabilities() {
         return ImmutableList.copyOf(Capabilities.values());
     }
@@ -117,15 +117,13 @@ public class CassandraMapperProvider implements MapperProvider {
     }
 
     @Override
-    public long generateModSeq(Mailbox mailbox) throws MailboxException {
-        MailboxSession mailboxSession = null;
-        return cassandraModSeqProvider.nextModSeq(mailboxSession, mailbox);
+    public ModSeq generateModSeq(Mailbox mailbox) throws MailboxException {
+        return cassandraModSeqProvider.nextModSeq(mailbox);
     }
 
     @Override
-    public long highestModSeq(Mailbox mailbox) throws MailboxException {
-        MailboxSession mailboxSession = null;
-        return cassandraModSeqProvider.highestModSeq(mailboxSession, mailbox);
+    public ModSeq highestModSeq(Mailbox mailbox) throws MailboxException {
+        return cassandraModSeqProvider.highestModSeq(mailbox);
     }
 
 }

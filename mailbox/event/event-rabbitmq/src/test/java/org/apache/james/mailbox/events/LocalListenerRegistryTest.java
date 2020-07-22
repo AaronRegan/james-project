@@ -19,6 +19,7 @@
 
 package org.apache.james.mailbox.events;
 
+import static org.apache.james.mailbox.events.MailboxListener.wrapReactive;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
@@ -56,7 +57,7 @@ class LocalListenerRegistryTest {
         testee.addListener(KEY_1, listener);
 
         assertThat(testee.getLocalMailboxListeners(KEY_1).collectList().block())
-            .containsOnly(listener);
+            .containsOnly(wrapReactive(listener));
     }
 
     @Test
@@ -67,7 +68,7 @@ class LocalListenerRegistryTest {
         testee.addListener(KEY_1, listener2);
 
         assertThat(testee.getLocalMailboxListeners(KEY_1).collectList().block())
-            .containsOnly(listener1, listener2);
+            .containsOnly(wrapReactive(listener1), wrapReactive(listener2));
     }
 
     @Test
@@ -80,7 +81,7 @@ class LocalListenerRegistryTest {
         registration.unregister();
 
         assertThat(testee.getLocalMailboxListeners(KEY_1).collectList().block())
-            .containsOnly(listener1);
+            .containsOnly(wrapReactive(listener1));
     }
 
     @Test
@@ -123,7 +124,7 @@ class LocalListenerRegistryTest {
 
     @Nested
     class ConcurrentTest {
-        private final Duration ONE_SECOND = Duration.ofSeconds(1);
+        private final Duration oneSecond = Duration.ofSeconds(1);
 
         @Test
         void getLocalMailboxListenersShouldReturnPreviousAddedListener() throws Exception {
@@ -133,10 +134,10 @@ class LocalListenerRegistryTest {
                 .operation((threadNumber, operationNumber) -> testee.addListener(KEY_1, listener))
                 .threadCount(10)
                 .operationCount(10)
-                .runSuccessfullyWithin(ONE_SECOND);
+                .runSuccessfullyWithin(oneSecond);
 
             assertThat(testee.getLocalMailboxListeners(KEY_1).collectList().block())
-                .containsOnly(listener);
+                .containsOnly(wrapReactive(listener));
         }
 
         @Test
@@ -146,21 +147,16 @@ class LocalListenerRegistryTest {
             MailboxListener listener3 = event -> { };
 
             ConcurrentTestRunner.builder()
-                .operation((threadNumber, operationNumber) -> {
-                    if (threadNumber % 3 == 0) {
-                        testee.addListener(KEY_1, listener1);
-                    } else if (threadNumber % 3 == 1) {
-                        testee.addListener(KEY_1, listener2);
-                    } else if (threadNumber % 3 == 2) {
-                        testee.addListener(KEY_1, listener3);
-                    }
-                })
+                .randomlyDistributedOperations(
+                    (threadNumber, operationNumber) -> testee.addListener(KEY_1, listener1),
+                    (threadNumber, operationNumber) -> testee.addListener(KEY_1, listener2),
+                    (threadNumber, operationNumber) -> testee.addListener(KEY_1, listener3))
                 .threadCount(6)
                 .operationCount(10)
-                .runSuccessfullyWithin(ONE_SECOND);
+                .runSuccessfullyWithin(oneSecond);
 
             assertThat(testee.getLocalMailboxListeners(KEY_1).collectList().block())
-                .containsOnly(listener1, listener2, listener3);
+                .containsOnly(wrapReactive(listener1), wrapReactive(listener2), wrapReactive(listener3));
         }
 
         @Test
@@ -173,7 +169,7 @@ class LocalListenerRegistryTest {
                 .operation(((threadNumber, operationNumber) -> registration.unregister()))
                 .threadCount(10)
                 .operationCount(10)
-                .runSuccessfullyWithin(ONE_SECOND);
+                .runSuccessfullyWithin(oneSecond);
 
             assertThat(testee.getLocalMailboxListeners(KEY_1).collectList().block())
                 .isEmpty();
@@ -188,27 +184,27 @@ class LocalListenerRegistryTest {
             AtomicInteger firstListenerCount = new AtomicInteger(0);
 
             ConcurrentTestRunner.builder()
-                .operation((threadNumber, operationNumber) -> {
-                    if (threadNumber % 3 == 0) {
+                .randomlyDistributedOperations((threadNumber, operationNumber) -> {
                         LocalListenerRegistry.LocalRegistration registration = testee.addListener(KEY_1, listener1);
                         if (registration.isFirstListener()) {
                             firstListenerCount.incrementAndGet();
                         }
-                    } else if (threadNumber % 3 == 1) {
+                    },
+                    (threadNumber, operationNumber) -> {
                         LocalListenerRegistry.LocalRegistration registration = testee.addListener(KEY_1, listener2);
                         if (registration.isFirstListener()) {
                             firstListenerCount.incrementAndGet();
                         }
-                    } else if (threadNumber % 3 == 2) {
+                    },
+                    (threadNumber, operationNumber) -> {
                         LocalListenerRegistry.LocalRegistration registration = testee.addListener(KEY_1, listener3);
                         if (registration.isFirstListener()) {
                             firstListenerCount.incrementAndGet();
                         }
-                    }
-                })
+                    })
                 .threadCount(6)
                 .operationCount(10)
-                .runSuccessfullyWithin(ONE_SECOND);
+                .runSuccessfullyWithin(oneSecond);
 
             assertThat(firstListenerCount.get()).isEqualTo(1);
         }
@@ -227,7 +223,7 @@ class LocalListenerRegistryTest {
                 }))
                 .threadCount(10)
                 .operationCount(10)
-                .runSuccessfullyWithin(ONE_SECOND);
+                .runSuccessfullyWithin(oneSecond);
 
             assertThat(lastListenerRemoved.get()).isEqualTo(1);
         }
@@ -246,7 +242,7 @@ class LocalListenerRegistryTest {
             testee.addListener(KEY_1, listener4);
             LocalListenerRegistry.LocalRegistration registration5 = testee.addListener(KEY_1, listener5);
 
-            Mono<List<MailboxListener>> listeners = testee.getLocalMailboxListeners(KEY_1)
+            Mono<List<MailboxListener.ReactiveMailboxListener>> listeners = testee.getLocalMailboxListeners(KEY_1)
                 .publishOn(Schedulers.elastic())
                 .delayElements(Duration.ofMillis(100))
                 .collectList();

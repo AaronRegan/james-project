@@ -28,11 +28,7 @@ public class CassandraExtension implements GuiceModuleTestExtension {
     private final DockerCassandraRule cassandra;
 
     public CassandraExtension() {
-        this(new DockerCassandraRule());
-    }
-
-    public CassandraExtension(DockerCassandraRule cassandra) {
-        this.cassandra = cassandra;
+        this.cassandra = new DockerCassandraRule();
     }
 
     @Override
@@ -48,5 +44,17 @@ public class CassandraExtension implements GuiceModuleTestExtension {
     @Override
     public Module getModule() {
         return cassandra.getModule();
+    }
+
+    public DockerCassandraRule getCassandra() {
+        return cassandra;
+    }
+
+    public void pause() {
+        cassandra.pause();
+    }
+
+    public void unpause() {
+        cassandra.unpause();
     }
 }

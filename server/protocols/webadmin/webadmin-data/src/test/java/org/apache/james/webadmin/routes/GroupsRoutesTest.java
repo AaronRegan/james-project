@@ -36,7 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.james.core.Domain;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.domainlist.api.DomainList;
 import org.apache.james.domainlist.memory.MemoryDomainList;
@@ -65,6 +65,7 @@ import io.restassured.http.ContentType;
 class GroupsRoutesTest {
 
     private static final Domain DOMAIN = Domain.of("b.com");
+    private static final Domain DOMAIN_MAPPING = Domain.of("mapping");
     private static final Domain ALIAS_DOMAIN = Domain.of("alias");
     private static final String GROUP1 = "group1" + "@" + DOMAIN.name();
     private static final String GROUP2 = "group2" + "@" + DOMAIN.name();
@@ -106,9 +107,9 @@ class GroupsRoutesTest {
             domainList = new MemoryDomainList(dnsService);
             domainList.addDomain(DOMAIN);
             domainList.addDomain(ALIAS_DOMAIN);
+            domainList.addDomain(DOMAIN_MAPPING);
             memoryRecipientRewriteTable.setDomainList(domainList);
-            usersRepository = MemoryUsersRepository.withVirtualHosting();
-            usersRepository.setDomainList(domainList);
+            usersRepository = MemoryUsersRepository.withVirtualHosting(domainList);
             MappingSourceModule mappingSourceModule = new MappingSourceModule();
             createServer(new GroupsRoutes(memoryRecipientRewriteTable, usersRepository, new JsonTransformer(mappingSourceModule)));
         }
@@ -127,7 +128,7 @@ class GroupsRoutesTest {
         void getShouldNotResolveRecurseGroups() throws Exception {
             when().put(GROUP1 + SEPARATOR + USER_A);
 
-            memoryRecipientRewriteTable.addForwardMapping(MappingSource.fromUser(User.fromUsername(USER_A)),
+            memoryRecipientRewriteTable.addForwardMapping(MappingSource.fromUser(Username.of(USER_A)),
                 "b@" + DOMAIN.name());
 
             List<String> addresses =
@@ -355,7 +356,7 @@ class GroupsRoutesTest {
 
         @Test
         void putUserInGroupShouldNotAllowUserShadowing() throws UsersRepositoryException {
-            usersRepository.addUser(USER_A, "whatever");
+            usersRepository.addUser(Username.of(USER_A), "whatever");
 
             Map<String, Object> errors = when()
                 .put(USER_A + SEPARATOR + USER_B)
@@ -428,8 +429,8 @@ class GroupsRoutesTest {
             super.setUp();
             memoryRecipientRewriteTable.addErrorMapping(MappingSource.fromUser("error", DOMAIN), "disabled");
             memoryRecipientRewriteTable.addRegexMapping(MappingSource.fromUser("regex", DOMAIN), ".*@b\\.com");
-            memoryRecipientRewriteTable.addAliasDomainMapping(MappingSource.fromDomain(ALIAS_DOMAIN), DOMAIN);
-
+            memoryRecipientRewriteTable.addDomainMapping(MappingSource.fromDomain(DOMAIN_MAPPING), DOMAIN);
+            memoryRecipientRewriteTable.addDomainAliasMapping(MappingSource.fromDomain(ALIAS_DOMAIN), DOMAIN);
         }
 
     }
@@ -540,7 +541,7 @@ class GroupsRoutesTest {
             assertThat(errors)
                 .containsEntry("statusCode", HttpStatus.BAD_REQUEST_400)
                 .containsEntry("type", "InvalidArgument")
-                .containsEntry("message", "The group is not an email address")
+                .containsEntry("message", "The group member is not an email address")
                 .containsEntry("details", "Out of data at position 1 in 'not-an-address'");
         }
 
@@ -587,7 +588,7 @@ class GroupsRoutesTest {
             assertThat(errors)
                 .containsEntry("statusCode", HttpStatus.BAD_REQUEST_400)
                 .containsEntry("type", "InvalidArgument")
-                .containsEntry("message", "The group is not an email address")
+                .containsEntry("message", "The group member is not an email address")
                 .containsEntry("details", "Out of data at position 1 in 'not-an-address'");
         }
 

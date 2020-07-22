@@ -20,10 +20,10 @@
 package org.apache.james.mailbox.cassandra.mail;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.backends.cassandra.components.CassandraModule;
 import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
@@ -31,10 +31,8 @@ import org.apache.james.mailbox.cassandra.modules.CassandraAttachmentModule;
 import org.apache.james.mailbox.model.AttachmentId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-@ExtendWith(CassandraRestartExtension.class)
 class CassandraAttachmentMessageIdDAOTest {
 
     private static final CassandraModule MODULE = CassandraModule.aggregateModules(
@@ -65,5 +63,41 @@ class CassandraAttachmentMessageIdDAOTest {
         assertThat(testee.getOwnerMessageIds(attachmentId).collectList().block())
             .containsExactlyInAnyOrder(messageId1, messageId2)
             .hasSize(2);
+    }
+
+    @Test
+    void getOwnerMessageIdsShouldNotReturnDeletedValues() {
+        CassandraMessageId messageId1 = new CassandraMessageId.Factory().generate();
+        AttachmentId attachmentId = AttachmentId.random();
+
+        testee.storeAttachmentForMessageId(attachmentId, messageId1).block();
+
+        testee.delete(attachmentId, messageId1).block();
+        assertThat(testee.getOwnerMessageIds(attachmentId).collectList().block())
+            .isEmpty();
+    }
+
+    @Test
+    void deleteShouldOnlyDeleteSuppliedValues() {
+        CassandraMessageId messageId1 = new CassandraMessageId.Factory().generate();
+        CassandraMessageId messageId2 = new CassandraMessageId.Factory().generate();
+        AttachmentId attachmentId = AttachmentId.random();
+
+        testee.storeAttachmentForMessageId(attachmentId, messageId1).block();
+        testee.storeAttachmentForMessageId(attachmentId, messageId2).block();
+
+        testee.delete(attachmentId, messageId1).block();
+
+        assertThat(testee.getOwnerMessageIds(attachmentId).collectList().block())
+            .containsExactly(messageId2);
+    }
+
+    @Test
+    void deleteShouldNotThrowWhenNotExisting() {
+        CassandraMessageId messageId1 = new CassandraMessageId.Factory().generate();
+        AttachmentId attachmentId = AttachmentId.random();
+
+        assertThatCode(() -> testee.delete(attachmentId, messageId1).block())
+            .doesNotThrowAnyException();
     }
 }

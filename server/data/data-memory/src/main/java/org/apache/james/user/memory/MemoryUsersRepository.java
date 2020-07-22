@@ -19,102 +19,37 @@
 
 package org.apache.james.user.memory;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
-import org.apache.james.user.api.UsersRepositoryException;
-import org.apache.james.user.api.model.User;
-import org.apache.james.user.lib.AbstractUsersRepository;
-import org.apache.james.user.lib.model.DefaultUser;
+import org.apache.james.domainlist.api.DomainList;
+import org.apache.james.user.lib.UsersRepositoryImpl;
 
-public class MemoryUsersRepository extends AbstractUsersRepository {
+public class MemoryUsersRepository extends UsersRepositoryImpl<MemoryUsersDAO> {
 
-    public static MemoryUsersRepository withVirtualHosting() {
-        return new MemoryUsersRepository(true);
+    public static MemoryUsersRepository withVirtualHosting(DomainList domainList) {
+         MemoryUsersRepository userRepository = new MemoryUsersRepository(domainList);
+         userRepository.setEnableVirtualHosting(true);
+         return userRepository;
     }
 
-    public static MemoryUsersRepository withoutVirtualHosting() {
-        return new MemoryUsersRepository(false);
+    public static MemoryUsersRepository withoutVirtualHosting(DomainList domainList) {
+        MemoryUsersRepository userRepository = new MemoryUsersRepository(domainList);
+        userRepository.setEnableVirtualHosting(false);
+        return userRepository;
     }
-    
-    private final Map<String, User> userByName;
-    private final boolean supportVirtualHosting;
-    private String algo;
 
-    private MemoryUsersRepository(boolean supportVirtualHosting) {
-        this.userByName = new HashMap<>();
-        this.algo = "MD5";
-        this.supportVirtualHosting = supportVirtualHosting;
+    private MemoryUsersRepository(DomainList domainList) {
+        super(domainList, new MemoryUsersDAO());
     }
 
     public void clear() {
-        userByName.clear();
+        usersDAO.clear();
     }
 
     @Override
-    public boolean supportVirtualHosting() {
-        return supportVirtualHosting;
-    }
-
-    @Override
-    public void doConfigure(HierarchicalConfiguration<ImmutableNode> config) throws ConfigurationException {
-        algo = config.getString("algorithm", "MD5");
-        super.doConfigure(config);
-    }
-
-    @Override
-    protected void doAddUser(String username, String password) throws UsersRepositoryException {
-        DefaultUser user = new DefaultUser(username, algo);
-        user.setPassword(password);
-        userByName.put(username.toLowerCase(Locale.US), user);
-    }
-
-    @Override
-    public User getUserByName(String name) throws UsersRepositoryException {
-        return userByName.get(name);
-    }
-
-    @Override
-    public void updateUser(User user) throws UsersRepositoryException {
-        User existingUser = getUserByName(user.getUserName());
-        if (existingUser == null) {
-            throw new UsersRepositoryException("Please provide an existing user to update");
-        }
-        userByName.put(user.getUserName().toLowerCase(Locale.US), user);
-    }
-
-    @Override
-    public void removeUser(String name) throws UsersRepositoryException {
-        if (userByName.remove(name) == null) {
-            throw new UsersRepositoryException("unable to remove unknown user " + name);
-        }
-    }
-
-    @Override
-    public boolean contains(String name) throws UsersRepositoryException {
-        return userByName.containsKey(name.toLowerCase(Locale.US));
-    }
-
-    @Override
-    public boolean test(String name, final String password) throws UsersRepositoryException {
-        return Optional.ofNullable(userByName.get(org.apache.james.core.User.fromUsername(name).asString()))
-            .map(user -> user.verifyPassword(password))
-            .orElse(false);
-    }
-
-    @Override
-    public int countUsers() throws UsersRepositoryException {
-        return userByName.size();
-    }
-
-    @Override
-    public Iterator<String> list() throws UsersRepositoryException {
-        return userByName.keySet().iterator();
+    public void configure(HierarchicalConfiguration<ImmutableNode> config) throws ConfigurationException {
+        super.configure(config);
+        usersDAO.configure(config);
     }
 }

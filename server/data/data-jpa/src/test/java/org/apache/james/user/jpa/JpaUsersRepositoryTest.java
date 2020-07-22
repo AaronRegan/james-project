@@ -20,34 +20,66 @@ package org.apache.james.user.jpa;
 
 import org.apache.commons.configuration2.BaseHierarchicalConfiguration;
 import org.apache.james.backends.jpa.JpaTestCluster;
+import org.apache.james.domainlist.api.DomainList;
 import org.apache.james.user.jpa.model.JPAUser;
-import org.apache.james.user.lib.AbstractUsersRepository;
-import org.apache.james.user.lib.AbstractUsersRepositoryTest;
-import org.junit.After;
-import org.junit.Before;
+import org.apache.james.user.lib.UsersRepositoryContract;
+import org.apache.james.user.lib.UsersRepositoryImpl;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class JpaUsersRepositoryTest extends AbstractUsersRepositoryTest {
+class JpaUsersRepositoryTest {
 
     private static final JpaTestCluster JPA_TEST_CLUSTER = JpaTestCluster.create(JPAUser.class);
 
-    @Before
-    @Override
-    public void setUp() throws Exception {
-        super.setUp();
+    @Nested
+    class WhenEnableVirtualHosting implements UsersRepositoryContract.WithVirtualHostingContract {
+        @RegisterExtension
+        UserRepositoryExtension extension = UserRepositoryExtension.withVirtualHost();
+
+        private JPAUsersRepository usersRepository;
+
+        @BeforeEach
+        void setUp(TestSystem testSystem) throws Exception {
+            usersRepository = getUsersRepository(testSystem.getDomainList(), extension.isSupportVirtualHosting());
+        }
+
+        @Override
+        public UsersRepositoryImpl testee() {
+            return usersRepository;
+        }
     }
 
-    @Override
-    @After
-    public void tearDown() throws Exception {
-        super.tearDown();
+    @Nested
+    class WhenDisableVirtualHosting implements UsersRepositoryContract.WithOutVirtualHostingContract {
+        @RegisterExtension
+        UserRepositoryExtension extension = UserRepositoryExtension.withoutVirtualHosting();
+
+        private JPAUsersRepository usersRepository;
+
+        @BeforeEach
+        void setUp(TestSystem testSystem) throws Exception {
+            usersRepository = getUsersRepository(testSystem.getDomainList(), extension.isSupportVirtualHosting());
+        }
+
+        @Override
+        public UsersRepositoryImpl testee() {
+            return usersRepository;
+        }
+    }
+
+    @AfterEach
+    void tearDown() {
         JPA_TEST_CLUSTER.clear("JAMES_USER");
     }
 
-    @Override
-    protected AbstractUsersRepository getUsersRepository() throws Exception {
-        JPAUsersRepository repos = new JPAUsersRepository();
+    private static JPAUsersRepository getUsersRepository(DomainList domainList, boolean enableVirtualHosting) throws Exception {
+        JPAUsersRepository repos = new JPAUsersRepository(domainList);
         repos.setEntityManagerFactory(JPA_TEST_CLUSTER.getEntityManagerFactory());
-        repos.configure(new BaseHierarchicalConfiguration());
+        BaseHierarchicalConfiguration configuration = new BaseHierarchicalConfiguration();
+        configuration.addProperty("enableVirtualHosting", String.valueOf(enableVirtualHosting));
+        repos.configure(configuration);
         return repos;
     }
 }

@@ -18,9 +18,9 @@
  ****************************************************************/
 package org.apache.james.webadmin.vault.routes;
 
-import java.util.function.Function;
+import java.time.Instant;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
@@ -30,21 +30,28 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class DeletedMessagesVaultDeleteTaskAdditionalInformationDTO implements AdditionalInformationDTO {
 
-    static final Function<MessageId.Factory, AdditionalInformationDTOModule<DeletedMessagesVaultDeleteTask.AdditionalInformation, DeletedMessagesVaultDeleteTaskAdditionalInformationDTO>> SERIALIZATION_MODULE =
-        factory ->
-            DTOModule.forDomainObject(DeletedMessagesVaultDeleteTask.AdditionalInformation.class)
-                .convertToDTO(DeletedMessagesVaultDeleteTaskAdditionalInformationDTO.class)
-                .toDomainObjectConverter(dto -> new DeletedMessagesVaultDeleteTask.AdditionalInformation(User.fromUsername(dto.userName), factory.fromString(dto.getMessageId())))
-                .toDTOConverter((details, type) -> new DeletedMessagesVaultDeleteTaskAdditionalInformationDTO(details.getUser(), details.getDeleteMessageId()))
-                .typeName(DeletedMessagesVaultDeleteTask.TYPE.asString())
-                .withFactory(AdditionalInformationDTOModule::new);
+    public static AdditionalInformationDTOModule<DeletedMessagesVaultDeleteTask.AdditionalInformation, DeletedMessagesVaultDeleteTaskAdditionalInformationDTO> module(MessageId.Factory factory) {
+        return DTOModule.forDomainObject(DeletedMessagesVaultDeleteTask.AdditionalInformation.class)
+            .convertToDTO(DeletedMessagesVaultDeleteTaskAdditionalInformationDTO.class)
+            .toDomainObjectConverter(dto -> new DeletedMessagesVaultDeleteTask.AdditionalInformation(Username.of(dto.userName), factory.fromString(dto.getMessageId()), dto.getTimestamp()))
+            .toDTOConverter((details, type) -> new DeletedMessagesVaultDeleteTaskAdditionalInformationDTO(type, details.getUsername(), details.getDeleteMessageId(), details.timestamp()))
+            .typeName(DeletedMessagesVaultDeleteTask.TYPE.asString())
+            .withFactory(AdditionalInformationDTOModule::new);
+    }
 
+    private final String type;
     private final String userName;
     private final String messageId;
+    private final Instant timestamp;
 
-    public DeletedMessagesVaultDeleteTaskAdditionalInformationDTO(@JsonProperty("userName") String userName, @JsonProperty("messageId") String messageId) {
+    public DeletedMessagesVaultDeleteTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                                  @JsonProperty("userName") String userName,
+                                                                  @JsonProperty("messageId") String messageId,
+                                                                  @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.userName = userName;
         this.messageId = messageId;
+        this.timestamp = timestamp;
     }
 
     public String getMessageId() {
@@ -53,5 +60,15 @@ public class DeletedMessagesVaultDeleteTaskAdditionalInformationDTO implements A
 
     public String getUserName() {
         return userName;
+    }
+
+    @Override
+    public Instant getTimestamp() {
+        return timestamp;
+    }
+
+    @Override
+    public String getType() {
+        return type;
     }
 }

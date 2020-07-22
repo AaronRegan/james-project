@@ -19,6 +19,8 @@
 
 package org.apache.james.queue.rabbitmq;
 
+import static com.rabbitmq.client.MessageProperties.PERSISTENT_TEXT_PLAIN;
+import static org.apache.james.backends.rabbitmq.Constants.EMPTY_ROUTING_KEY;
 import static org.apache.james.queue.api.MailQueue.ENQUEUED_METRIC_NAME_PREFIX;
 
 import java.time.Clock;
@@ -32,27 +34,32 @@ import org.apache.james.metrics.api.Metric;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.queue.api.MailQueue;
 import org.apache.james.queue.rabbitmq.view.api.MailQueueView;
+import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueBrowser;
 import org.apache.mailet.Mail;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.github.fge.lambdas.Throwing;
+import com.google.common.collect.ImmutableMap;
+import com.rabbitmq.client.AMQP;
 
 import reactor.core.publisher.Mono;
+import reactor.rabbitmq.OutboundMessage;
+import reactor.rabbitmq.Sender;
 
 class Enqueuer {
     private final MailQueueName name;
-    private final RabbitClient rabbitClient;
+    private final Sender sender;
     private final Store<MimeMessage, MimeMessagePartsId> mimeMessageStore;
     private final MailReferenceSerializer mailReferenceSerializer;
     private final Metric enqueueMetric;
     private final MailQueueView mailQueueView;
     private final Clock clock;
 
-    Enqueuer(MailQueueName name, RabbitClient rabbitClient, Store<MimeMessage, MimeMessagePartsId> mimeMessageStore,
+    Enqueuer(MailQueueName name, Sender sender, Store<MimeMessage, MimeMessagePartsId> mimeMessageStore,
              MailReferenceSerializer serializer, MetricFactory metricFactory,
              MailQueueView mailQueueView, Clock clock) {
         this.name = name;
-        this.rabbitClient = rabbitClient;
+        this.sender = sender;
         this.mimeMessageStore = mimeMessageStore;
         this.mailReferenceSerializer = serializer;
         this.mailQueueView = mailQueueView;
@@ -64,10 +71,17 @@ class Enqueuer {
         EnqueueId enqueueId = EnqueueId.generate();
         saveMail(mail)
             .map(partIds -> new MailReference(enqueueId, mail, partIds))
-            .map(Throwing.function(this::publishReferenceToRabbit).sneakyThrow())
+            .flatMap(Throwing.function(this::publishReferenceToRabbit).sneakyThrow())
             .flatMap(mailQueueView::storeMail)
             .thenEmpty(Mono.fromRunnable(enqueueMetric::increment))
             .block();
+    }
+
+    Mono<Void> reQueue(CassandraMailQueueBrowser.CassandraMailQueueItemView item) {
+        Mail mail = item.getMail();
+        return Mono.fromCallable(() -> new MailReference(item.getEnqueuedId(), mail, item.getEnqueuedPartsId()))
+            .flatMap(Throwing.function(this::publishReferenceToRabbit).sneakyThrow())
+            .then();
     }
 
     private Mono<MimeMessagePartsId> saveMail(Mail mail) throws MailQueue.MailQueueException {
@@ -78,16 +92,28 @@ class Enqueuer {
         }
     }
 
-    private EnqueuedItem publishReferenceToRabbit(MailReference mailReference) throws MailQueue.MailQueueException {
-        rabbitClient.publish(name, getMailReferenceBytes(mailReference));
-
-        return EnqueuedItem.builder()
-            .enqueueId(mailReference.getEnqueueId())
-            .mailQueueName(name)
-            .mail(mailReference.getMail())
-            .enqueuedTime(clock.instant())
-            .mimeMessagePartsId(mailReference.getPartsId())
+    private Mono<EnqueuedItem> publishReferenceToRabbit(MailReference mailReference) throws MailQueue.MailQueueException {
+        AMQP.BasicProperties basicProperties = new AMQP.BasicProperties.Builder()
+            .deliveryMode(PERSISTENT_TEXT_PLAIN.getDeliveryMode())
+            .priority(PERSISTENT_TEXT_PLAIN.getPriority())
+            .contentType(PERSISTENT_TEXT_PLAIN.getContentType())
+            .headers(ImmutableMap.of("x-dead-letter-routing-key", EMPTY_ROUTING_KEY))
             .build();
+
+        OutboundMessage data = new OutboundMessage(
+            name.toRabbitExchangeName().asString(),
+            EMPTY_ROUTING_KEY,
+            basicProperties,
+            getMailReferenceBytes(mailReference));
+        return sender.send(Mono.just(data))
+            .then(Mono.just(
+                EnqueuedItem.builder()
+                    .enqueueId(mailReference.getEnqueueId())
+                    .mailQueueName(name)
+                    .mail(mailReference.getMail())
+                    .enqueuedTime(clock.instant())
+                    .mimeMessagePartsId(mailReference.getPartsId())
+                    .build()));
     }
 
     private byte[] getMailReferenceBytes(MailReference mailReference) throws MailQueue.MailQueueException {

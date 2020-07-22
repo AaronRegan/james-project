@@ -23,16 +23,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import java.util.HashMap;
+import java.util.Optional;
 
 import org.apache.james.core.Domain;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.MaybeSender;
+import org.apache.james.core.Username;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.domainlist.lib.DomainListConfiguration;
 import org.apache.james.domainlist.memory.MemoryDomainList;
 import org.apache.james.protocols.smtp.SMTPSession;
 import org.apache.james.protocols.smtp.hook.HookReturnCode;
 import org.apache.james.protocols.smtp.utils.BaseFakeSMTPSession;
+import org.apache.james.rrt.api.RecipientRewriteTableConfiguration;
 import org.apache.james.rrt.lib.MappingSource;
 import org.apache.james.rrt.memory.MemoryRecipientRewriteTable;
 import org.apache.james.smtpserver.fastfail.ValidRcptHandler;
@@ -41,8 +44,10 @@ import org.apache.james.user.memory.MemoryUsersRepository;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.google.common.base.Preconditions;
+
 public class ValidRcptHandlerTest {
-    private static final String VALID_USER = "postmaster";
+    private static final Username VALID_USER = Username.of("postmaster");
     private static final String INVALID_USER = "invalid";
     private static final String USER1 = "user1";
     private static final String USER2 = "user2";
@@ -58,20 +63,19 @@ public class ValidRcptHandlerTest {
 
     @Before
     public void setUp() throws Exception {
-        UsersRepository users = MemoryUsersRepository.withoutVirtualHosting();
-        users.addUser(VALID_USER, PASSWORD);
-
         MemoryDomainList memoryDomainList = new MemoryDomainList(mock(DNSService.class));
         memoryDomainList.configure(DomainListConfiguration.builder()
             .defaultDomain(Domain.LOCALHOST)
             .build());
+        UsersRepository users = MemoryUsersRepository.withoutVirtualHosting(memoryDomainList);
+        users.addUser(VALID_USER, PASSWORD);
 
         memoryRecipientRewriteTable = new MemoryRecipientRewriteTable();
         memoryRecipientRewriteTable.setDomainList(memoryDomainList);
-
+        memoryRecipientRewriteTable.setConfiguration(RecipientRewriteTableConfiguration.DEFAULT_ENABLED);
         handler = new ValidRcptHandler(users, memoryRecipientRewriteTable, memoryDomainList);
 
-        validUserEmail = new MailAddress(VALID_USER + "@localhost");
+        validUserEmail = new MailAddress(VALID_USER.asString() + "@localhost");
         user1mail = new MailAddress(USER1 + "@localhost");
         invalidUserEmail = new MailAddress(INVALID_USER + "@localhost");
     }
@@ -84,30 +88,38 @@ public class ValidRcptHandlerTest {
                 return relayingAllowed;
             }
             
-            private final HashMap<String, Object> sstate = new HashMap<>();
-            private final HashMap<String, Object> connectionState = new HashMap<>();
+            private final HashMap<AttachmentKey<?>, Object> sessionState = new HashMap<>();
+            private final HashMap<AttachmentKey<?>, Object> connectionState = new HashMap<>();
 
             @Override
-            public Object setAttachment(String key, Object value, State state) {
+            public <T> Optional<T> setAttachment(AttachmentKey<T> key, T value, State state) {
+                Preconditions.checkNotNull(key, "key cannot be null");
+                Preconditions.checkNotNull(value, "value cannot be null");
+
                 if (state == State.Connection) {
-                    if (value == null) {
-                        return connectionState.remove(key);
-                    }
-                    return connectionState.put(key, value);
+                    return key.convert(connectionState.put(key, value));
                 } else {
-                    if (value == null) {
-                        return sstate.remove(key);
-                    }
-                    return sstate.put(key, value);
+                    return key.convert(sessionState.put(key, value));
                 }
             }
 
             @Override
-            public Object getAttachment(String key, State state) {
+            public <T> Optional<T> removeAttachment(AttachmentKey<T> key, State state) {
+                Preconditions.checkNotNull(key, "key cannot be null");
+
                 if (state == State.Connection) {
-                    return connectionState.get(key);
+                    return key.convert(connectionState.remove(key));
                 } else {
-                    return sstate.get(key);
+                    return key.convert(sessionState.remove(key));
+                }
+            }
+
+            @Override
+            public <T> Optional<T> getAttachment(AttachmentKey<T> key, State state) {
+                if (state == State.Connection) {
+                    return key.convert(connectionState.get(key));
+                } else {
+                    return key.convert(sessionState.get(key));
                 }
             }
         };

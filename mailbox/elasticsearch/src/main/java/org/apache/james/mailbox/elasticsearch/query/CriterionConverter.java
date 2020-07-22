@@ -22,13 +22,13 @@ package org.apache.james.mailbox.elasticsearch.query;
 import static org.apache.james.backends.es.NodeMappingFactory.RAW;
 import static org.apache.james.backends.es.NodeMappingFactory.SPLIT_EMAIL;
 import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
-import static org.elasticsearch.index.query.QueryBuilders.existsQuery;
 import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
 import static org.elasticsearch.index.query.QueryBuilders.matchQuery;
 import static org.elasticsearch.index.query.QueryBuilders.nestedQuery;
 import static org.elasticsearch.index.query.QueryBuilders.rangeQuery;
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
@@ -97,7 +97,9 @@ public class CriterionConverter {
         registerHeaderOperatorConverter(
             SearchQuery.ExistsOperator.class,
             (headerName, operator) ->
-                existsQuery(JsonMessageConstants.HEADERS + "." + headerName));
+                nestedQuery(JsonMessageConstants.HEADERS,
+                    termQuery(JsonMessageConstants.HEADERS + "." + JsonMessageConstants.HEADER.NAME, headerName),
+                    ScoreMode.Avg));
         
         registerHeaderOperatorConverter(
             SearchQuery.AddressOperator.class,
@@ -109,8 +111,12 @@ public class CriterionConverter {
         
         registerHeaderOperatorConverter(
             SearchQuery.ContainsOperator.class,
-            (headerName, operator) -> matchQuery(JsonMessageConstants.HEADERS + "." + headerName,
-                    operator.getValue()));
+            (headerName, operator) ->
+                nestedQuery(JsonMessageConstants.HEADERS,
+                    boolQuery()
+                        .must(termQuery(JsonMessageConstants.HEADERS + "." + JsonMessageConstants.HEADER.NAME, headerName))
+                        .must(matchQuery(JsonMessageConstants.HEADERS + "." + JsonMessageConstants.HEADER.VALUE, operator.getValue())),
+                    ScoreMode.Avg));
     }
 
     @SuppressWarnings("unchecked")
@@ -181,13 +187,13 @@ public class CriterionConverter {
         return boolQuery().filter(
             convertDateOperator(field,
                 dateOperator.getType(),
-                DateResolutionFormater.DATE_TIME_FOMATTER.format(
-                    DateResolutionFormater.computeLowerDate(
-                        DateResolutionFormater.convertDateToZonedDateTime(dateOperator.getDate()),
+                DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
+                    DateResolutionFormatter.computeLowerDate(
+                        DateResolutionFormatter.convertDateToZonedDateTime(dateOperator.getDate()),
                         dateOperator.getDateResultion())),
-                DateResolutionFormater.DATE_TIME_FOMATTER.format(
-                    DateResolutionFormater.computeUpperDate(
-                        DateResolutionFormater.convertDateToZonedDateTime(dateOperator.getDate()),
+                DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
+                    DateResolutionFormatter.computeUpperDate(
+                        DateResolutionFormatter.convertDateToZonedDateTime(dateOperator.getDate()),
                         dateOperator.getDateResultion()))));
     }
 
@@ -209,6 +215,7 @@ public class CriterionConverter {
         }
     }
 
+    @SuppressWarnings("ReturnValueIgnored")
     private BoolQueryBuilder convertToBoolQuery(Stream<QueryBuilder> stream, BiFunction<BoolQueryBuilder, QueryBuilder, BoolQueryBuilder> addCriterionToBoolQuery) {
         return stream.collect(Collector.of(QueryBuilders::boolQuery,
                 addCriterionToBoolQuery::apply,

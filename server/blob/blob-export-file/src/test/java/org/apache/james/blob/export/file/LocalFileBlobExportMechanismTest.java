@@ -19,6 +19,7 @@
 
 package org.apache.james.blob.export.file;
 
+import static org.apache.james.blob.api.BlobStore.StoragePolicy.LOW_COST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -27,7 +28,6 @@ import static org.mockito.Mockito.when;
 import java.io.FileInputStream;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
 
 import javax.mail.Message;
 import javax.mail.internet.InternetAddress;
@@ -42,6 +42,7 @@ import org.apache.james.blob.api.ObjectStoreException;
 import org.apache.james.blob.export.api.FileExtension;
 import org.apache.james.blob.export.file.LocalFileBlobExportMechanism.Configuration;
 import org.apache.james.blob.memory.MemoryBlobStore;
+import org.apache.james.blob.memory.MemoryDumbBlobStore;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.util.MimeMessageUtil;
@@ -53,6 +54,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import nl.jqno.equalsverifier.EqualsVerifier;
+import reactor.core.publisher.Mono;
 
 @ExtendWith(FileSystemExtension.class)
 class LocalFileBlobExportMechanismTest {
@@ -66,7 +68,7 @@ class LocalFileBlobExportMechanismTest {
     @BeforeEach
     void setUp(FileSystem fileSystem) throws Exception {
         mailetContext = FakeMailContext.builder().postmaster(MailAddressFixture.POSTMASTER_AT_JAMES).build();
-        blobStore = new MemoryBlobStore(new HashBlobId.Factory());
+        blobStore = new MemoryBlobStore(new HashBlobId.Factory(), new MemoryDumbBlobStore());
 
         InetAddress localHost = mock(InetAddress.class);
         when(localHost.getHostName()).thenReturn(JAMES_HOST);
@@ -79,7 +81,7 @@ class LocalFileBlobExportMechanismTest {
 
     @Test
     void exportingBlobShouldSendAMail() {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT).block();
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT, LOW_COST)).block();
 
         String explanation = "The content of a deleted message vault had been shared with you.";
         testee.blobId(blobId)
@@ -112,7 +114,7 @@ class LocalFileBlobExportMechanismTest {
 
     @Test
     void exportingBlobShouldCreateAFileWithTheCorrespondingContent(FileSystem fileSystem) {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT).block();
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT, LOW_COST)).block();
 
         testee.blobId(blobId)
             .with(MailAddressFixture.RECIPIENT1)
@@ -150,7 +152,7 @@ class LocalFileBlobExportMechanismTest {
 
     @Test
     void exportingBlobShouldCreateAFileWithoutExtensionWhenNotDeclaringExtension() {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT).block();
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT, LOW_COST)).block();
 
         testee.blobId(blobId)
             .with(MailAddressFixture.RECIPIENT1)
@@ -174,7 +176,7 @@ class LocalFileBlobExportMechanismTest {
 
     @Test
     void exportingBlobShouldCreateAFileWithExtensionWhenDeclaringExtension() {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT).block();
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT, LOW_COST)).block();
 
         testee.blobId(blobId)
             .with(MailAddressFixture.RECIPIENT1)
@@ -199,13 +201,13 @@ class LocalFileBlobExportMechanismTest {
 
     @Test
     void exportingBlobShouldCreateAFileWithPrefixWhenDeclaringPrefix() {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT).block();
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), BLOB_CONTENT, LOW_COST)).block();
         String filePrefix = "deleted-message-of-bob@james.org";
 
         testee.blobId(blobId)
             .with(MailAddressFixture.RECIPIENT1)
             .explanation("The content of a deleted message vault had been shared with you.")
-            .filePrefix(Optional.of(filePrefix))
+            .filePrefix(filePrefix)
             .fileExtension(FileExtension.ZIP)
             .export();
 

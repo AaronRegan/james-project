@@ -19,6 +19,7 @@
 
 package org.apache.james.smtpserver;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -28,8 +29,6 @@ import java.util.List;
 
 import javax.mail.MessagingException;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.MaybeSender;
 import org.apache.james.lifecycle.api.LifecycleUtil;
@@ -44,6 +43,7 @@ import org.apache.james.protocols.smtp.SMTPRetCode;
 import org.apache.james.protocols.smtp.SMTPSession;
 import org.apache.james.protocols.smtp.core.AbstractHookableCmdHandler;
 import org.apache.james.protocols.smtp.core.DataLineFilter;
+import org.apache.james.protocols.smtp.core.SMTPMDCContextFactory;
 import org.apache.james.protocols.smtp.dsn.DSNStatus;
 import org.apache.james.protocols.smtp.hook.HookResult;
 import org.apache.james.protocols.smtp.hook.HookResultHook;
@@ -71,24 +71,15 @@ public class DataLineJamesMessageHookHandler implements DataLineFilter, Extensib
     private List<MessageHook> mHandlers;
 
     @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
-    }
-
-    @Override
     public Response onLine(SMTPSession session, ByteBuffer lineByteBuffer, LineHandler<SMTPSession> next) {
 
         byte[] line = new byte[lineByteBuffer.remaining()];
         lineByteBuffer.get(line, 0, line.length);
 
-        MimeMessageInputStreamSource mmiss = (MimeMessageInputStreamSource) session.getAttachment(SMTPConstants.DATA_MIMEMESSAGE_STREAMSOURCE, State.Transaction);
+        MimeMessageInputStreamSource mmiss = session.getAttachment(SMTPConstants.DATA_MIMEMESSAGE_STREAMSOURCE, State.Transaction)
+            .orElseThrow(() -> new RuntimeException("'" + SMTPConstants.DATA_MIMEMESSAGE_STREAMSOURCE.asString() + "' has not been filled."));
 
-        try {
+        try (Closeable closeable = SMTPMDCContextFactory.forSession(session).build()) {
             OutputStream out = mmiss.getWritableOutputStream();
 
             // 46 is "."
@@ -97,9 +88,8 @@ public class DataLineJamesMessageHookHandler implements DataLineFilter, Extensib
                 out.flush();
                 out.close();
 
-                @SuppressWarnings("unchecked")
-                List<MailAddress> recipientCollection = (List<MailAddress>) session.getAttachment(SMTPSession.RCPT_LIST, State.Transaction);
-                MaybeSender sender = (MaybeSender) session.getAttachment(SMTPSession.SENDER, State.Transaction);
+                List<MailAddress> recipientCollection = session.getAttachment(SMTPSession.RCPT_LIST, State.Transaction).orElse(ImmutableList.of());
+                MaybeSender sender = session.getAttachment(SMTPSession.SENDER, State.Transaction).orElse(MaybeSender.nullSender());
 
                 MailImpl mail = MailImpl.builder()
                     .name(MailImpl.getId())
@@ -152,7 +142,8 @@ public class DataLineJamesMessageHookHandler implements DataLineFilter, Extensib
     protected Response processExtensions(SMTPSession session, Mail mail) {
         if (mail != null && messageHandlers != null) {
             try {
-                MimeMessageInputStreamSource mmiss = (MimeMessageInputStreamSource) session.getAttachment(SMTPConstants.DATA_MIMEMESSAGE_STREAMSOURCE, State.Transaction);
+                MimeMessageInputStreamSource mmiss = session.getAttachment(SMTPConstants.DATA_MIMEMESSAGE_STREAMSOURCE, State.Transaction)
+                    .orElseThrow(() -> new RuntimeException("'" + SMTPConstants.DATA_MIMEMESSAGE_STREAMSOURCE.asString() + "' has not been filled."));
                 OutputStream out;
                 out = mmiss.getWritableOutputStream();
                 for (MessageHook rawHandler : mHandlers) {
@@ -236,7 +227,7 @@ public class DataLineJamesMessageHookHandler implements DataLineFilter, Extensib
         return classes;
     }
 
-    protected class MailToMailEnvelopeWrapper implements MailEnvelope {
+    protected static class MailToMailEnvelopeWrapper implements MailEnvelope {
         private final Mail mail;
         private final OutputStream out;
 

@@ -19,6 +19,7 @@
 
 package org.apache.james.mailbox.cassandra.mail;
 
+import static org.apache.james.backends.cassandra.Scenario.Builder.fail;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -27,10 +28,11 @@ import javax.mail.Flags;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.FlagsBuilder;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
 import org.apache.james.mailbox.cassandra.modules.CassandraApplicableFlagsModule;
@@ -43,21 +45,24 @@ import org.apache.james.mailbox.model.ComposedMessageIdWithMetaData;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageRange;
+import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.mailbox.model.UpdatedFlags;
+import org.apache.james.mailbox.store.MessageBuilder;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-@ExtendWith(CassandraRestartExtension.class)
+import reactor.core.publisher.Mono;
+
 class CassandraIndexTableHandlerTest {
 
     private static final CassandraId MAILBOX_ID = CassandraId.timeBased();
     private static final MessageUid MESSAGE_UID = MessageUid.of(18L);
     private static final CassandraMessageId CASSANDRA_MESSAGE_ID = new CassandraMessageId.Factory().generate();
-    private static final int UID_VALIDITY = 15;
-    private static final long MODSEQ = 17;
+    private static final UidValidity UID_VALIDITY = UidValidity.of(15);
+    private static final ModSeq MODSEQ = ModSeq.of(17);
 
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(
@@ -90,9 +95,33 @@ class CassandraIndexTableHandlerTest {
                                                 applicableFlagDAO,
                                                 deletedMessageDAO);
 
-        mailbox = new Mailbox(MailboxPath.forUser("user", "name"),
+        mailbox = new Mailbox(MailboxPath.forUser(Username.of("user"), "name"),
             UID_VALIDITY,
             MAILBOX_ID);
+    }
+
+    @Nested
+    class Failures {
+        @Test
+        void messageCountShouldBeUpdatedUponDeletedMessageFailure(CassandraCluster cassandra) throws Exception {
+            MailboxMessage message = new MessageBuilder()
+                .flags(FlagsBuilder.builder()
+                    .add(Flags.Flag.DELETED, Flags.Flag.RECENT)
+                    .add("customFlag")
+                    .build())
+                .build();
+
+            cassandra.getConf().registerScenario(fail()
+                .times(1)
+                .whenQueryStartsWith("INSERT INTO messageDeleted (mailboxId,uid) VALUES (:mailboxId,:uid);"));
+
+            testee.updateIndexOnAdd(message, MAILBOX_ID)
+                .onErrorResume(any -> Mono.empty())
+                .block();
+
+            Long actual = mailboxCounterDAO.countMessagesInMailbox(mailbox).block();
+            assertThat(actual).isEqualTo(1);
+        }
     }
 
     @Test
@@ -257,7 +286,7 @@ class CassandraIndexTableHandlerTest {
 
         testee.updateIndexOnDelete(new ComposedMessageIdWithMetaData(
                 new ComposedMessageId(MAILBOX_ID, CASSANDRA_MESSAGE_ID, MESSAGE_UID),
-                new Flags(),
+                new Flags(Flags.Flag.DELETED),
                 MODSEQ),
             MAILBOX_ID).block();
 

@@ -19,6 +19,8 @@
 
 package org.apache.james.webadmin.service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 
 import javax.mail.MessagingException;
@@ -26,25 +28,28 @@ import javax.mail.MessagingException;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
 import org.apache.james.mailrepository.api.MailRepositoryStore;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.task.TaskType;
 
 public class ReprocessingOneMailTask implements Task {
 
-    public static final TaskType TYPE = TaskType.of("reprocessingOneTask");
+    public static final TaskType TYPE = TaskType.of("reprocessing-one");
 
     public static class AdditionalInformation implements TaskExecutionDetails.AdditionalInformation {
         private final MailRepositoryPath repositoryPath;
         private final String targetQueue;
         private final MailKey mailKey;
         private final Optional<String> targetProcessor;
+        private final Instant timestamp;
 
-        public AdditionalInformation(MailRepositoryPath repositoryPath, String targetQueue, MailKey mailKey, Optional<String> targetProcessor) {
+        public AdditionalInformation(MailRepositoryPath repositoryPath, MailQueueName targetQueue, MailKey mailKey, Optional<String> targetProcessor, Instant timestamp) {
             this.repositoryPath = repositoryPath;
-            this.targetQueue = targetQueue;
+            this.targetQueue = targetQueue.asString();
             this.mailKey = mailKey;
             this.targetProcessor = targetProcessor;
+            this.timestamp = timestamp;
         }
 
         public String getMailKey() {
@@ -61,6 +66,11 @@ public class ReprocessingOneMailTask implements Task {
 
         public String getRepositoryPath() {
             return repositoryPath.asString();
+        }
+
+        @Override
+        public Instant timestamp() {
+            return timestamp;
         }
     }
 
@@ -80,19 +90,23 @@ public class ReprocessingOneMailTask implements Task {
 
     private final ReprocessingService reprocessingService;
     private final MailRepositoryPath repositoryPath;
-    private final String targetQueue;
+    private final MailQueueName targetQueue;
     private final MailKey mailKey;
     private final Optional<String> targetProcessor;
     private final AdditionalInformation additionalInformation;
 
     public ReprocessingOneMailTask(ReprocessingService reprocessingService,
-                                   MailRepositoryPath repositoryPath, String targetQueue, MailKey mailKey, Optional<String> targetProcessor) {
+                                   MailRepositoryPath repositoryPath,
+                                   MailQueueName targetQueue,
+                                   MailKey mailKey,
+                                   Optional<String> targetProcessor,
+                                   Clock clock) {
         this.reprocessingService = reprocessingService;
         this.repositoryPath = repositoryPath;
         this.targetQueue = targetQueue;
         this.mailKey = mailKey;
         this.targetProcessor = targetProcessor;
-        this.additionalInformation = new AdditionalInformation(repositoryPath, targetQueue, mailKey, targetProcessor);
+        this.additionalInformation = new AdditionalInformation(repositoryPath, targetQueue, mailKey, targetProcessor, clock.instant());
     }
 
     @Override
@@ -115,7 +129,7 @@ public class ReprocessingOneMailTask implements Task {
         return repositoryPath;
     }
 
-    String getTargetQueue() {
+    MailQueueName getTargetQueue() {
         return targetQueue;
     }
 

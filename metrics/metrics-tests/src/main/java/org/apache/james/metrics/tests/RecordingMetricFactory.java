@@ -19,27 +19,37 @@
 
 package org.apache.james.metrics.tests;
 
+import static org.apache.james.metrics.api.TimeMetric.ExecutionResult.DEFAULT_100_MS_THRESHOLD;
+
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.james.metrics.api.Metric;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.metrics.api.TimeMetric;
+import org.reactivestreams.Publisher;
 
 import com.github.steveash.guavate.Guavate;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 
+import reactor.core.publisher.Flux;
+
 public class RecordingMetricFactory implements MetricFactory {
     private final Multimap<String, Duration> executionTimes = Multimaps.synchronizedListMultimap(ArrayListMultimap.create());
-    private final ConcurrentHashMap<String, Integer> counters = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicInteger> counters = new ConcurrentHashMap<>();
 
     @Override
     public Metric generate(String name) {
-        return new RecordingMetric(executionValue -> counters.put(name, executionValue));
+        return new RecordingMetric(atomicCounterFor(name));
+    }
+
+    private AtomicInteger atomicCounterFor(String name) {
+        return counters.computeIfAbsent(name, currentName -> new AtomicInteger());
     }
 
     @Override
@@ -49,6 +59,20 @@ public class RecordingMetricFactory implements MetricFactory {
                 executionTimes.put(name, executionTime);
             }
         });
+    }
+
+    @Override
+    public <T> Publisher<T> decoratePublisherWithTimerMetric(String name, Publisher<T> publisher) {
+        return Flux.using(() -> timer(name),
+            any -> Flux.from(publisher),
+            TimeMetric::stopAndPublish);
+    }
+
+    @Override
+    public <T> Publisher<T> decoratePublisherWithTimerMetricLogP99(String name, Publisher<T> publisher) {
+        return Flux.using(() -> timer(name),
+            any -> Flux.from(publisher),
+            timer -> timer.stopAndPublish().logWhenExceedP99(DEFAULT_100_MS_THRESHOLD));
     }
 
     public Collection<Duration> executionTimesFor(String name) {
@@ -64,12 +88,12 @@ public class RecordingMetricFactory implements MetricFactory {
     }
 
     public int countFor(String name) {
-        return counters.getOrDefault(name, 0);
+        return atomicCounterFor(name).get();
     }
 
     public Map<String, Integer> countForPrefixName(String prefixName) {
         return counters.entrySet().stream()
             .filter(entry -> entry.getKey().startsWith(prefixName))
-            .collect(Guavate.toImmutableMap(Map.Entry::getKey, Map.Entry::getValue));
+            .collect(Guavate.toImmutableMap(Map.Entry::getKey, e -> e.getValue().get()));
     }
 }

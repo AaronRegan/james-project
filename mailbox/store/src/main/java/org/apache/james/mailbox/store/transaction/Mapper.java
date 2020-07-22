@@ -23,7 +23,6 @@ import org.apache.james.mailbox.exception.MailboxException;
 
 /**
  * Mapper which execute units of work in a {@link Transaction}
- *
  */
 public interface Mapper {
     
@@ -34,12 +33,9 @@ public interface Mapper {
     
     /**
      * Execute the given Transaction
-     * 
-     * @param transaction 
-     * @throws MailboxException
      */
     <T> T execute(Transaction<T> transaction) throws MailboxException;
-        
+
     /**
      * Unit of work executed in a Transaction
      *
@@ -48,8 +44,6 @@ public interface Mapper {
         
         /**
          * Run unit of work in a Transaction and return a value
-         * 
-         * @throws MailboxException
          */
         T run() throws MailboxException;
     }

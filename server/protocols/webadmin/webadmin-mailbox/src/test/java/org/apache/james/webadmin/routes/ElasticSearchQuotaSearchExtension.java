@@ -27,6 +27,7 @@ import org.apache.james.backends.es.DockerElasticSearch;
 import org.apache.james.backends.es.DockerElasticSearchSingleton;
 import org.apache.james.backends.es.ElasticSearchConfiguration;
 import org.apache.james.backends.es.ElasticSearchIndexer;
+import org.apache.james.backends.es.ReactorElasticSearchClient;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.domainlist.memory.MemoryDomainList;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
@@ -35,10 +36,10 @@ import org.apache.james.quota.search.QuotaSearchTestSystem;
 import org.apache.james.quota.search.elasticsearch.ElasticSearchQuotaSearcher;
 import org.apache.james.quota.search.elasticsearch.QuotaRatioElasticSearchConstants;
 import org.apache.james.quota.search.elasticsearch.QuotaSearchIndexCreationUtil;
+import org.apache.james.quota.search.elasticsearch.UserRoutingKeyFactory;
 import org.apache.james.quota.search.elasticsearch.events.ElasticSearchQuotaMailboxListener;
 import org.apache.james.quota.search.elasticsearch.json.QuotaRatioToElasticSearchJson;
 import org.apache.james.user.memory.MemoryUsersRepository;
-import org.elasticsearch.client.RestHighLevelClient;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -52,7 +53,7 @@ public class ElasticSearchQuotaSearchExtension implements ParameterResolver, Bef
     private final DockerElasticSearch elasticSearch = DockerElasticSearchSingleton.INSTANCE;
     private WebAdminQuotaSearchTestSystem restQuotaSearchTestSystem;
     private TemporaryFolder temporaryFolder = new TemporaryFolder();
-    private RestHighLevelClient client;
+    private ReactorElasticSearchClient client;
 
     @Override
     public void beforeEach(ExtensionContext context) {
@@ -68,15 +69,15 @@ public class ElasticSearchQuotaSearchExtension implements ParameterResolver, Bef
 
             InMemoryIntegrationResources resources = InMemoryIntegrationResources.defaultResources();
 
-            MemoryUsersRepository usersRepository = MemoryUsersRepository.withVirtualHosting();
 
             DNSService dnsService = mock(DNSService.class);
             MemoryDomainList domainList = new MemoryDomainList(dnsService);
-            usersRepository.setDomainList(domainList);
+            MemoryUsersRepository usersRepository = MemoryUsersRepository.withVirtualHosting(domainList);
 
             ElasticSearchQuotaMailboxListener listener = new ElasticSearchQuotaMailboxListener(
                 new ElasticSearchIndexer(client, QuotaRatioElasticSearchConstants.DEFAULT_QUOTA_RATIO_WRITE_ALIAS),
-                new QuotaRatioToElasticSearchJson());
+                new QuotaRatioToElasticSearchJson(),
+                new UserRoutingKeyFactory());
 
             resources.getMailboxManager().getEventBus().register(listener);
 

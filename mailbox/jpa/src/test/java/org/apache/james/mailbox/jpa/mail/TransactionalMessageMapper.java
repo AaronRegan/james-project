@@ -28,6 +28,7 @@ import javax.mail.Flags;
 
 import org.apache.commons.lang3.NotImplementedException;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxCounters;
@@ -38,6 +39,8 @@ import org.apache.james.mailbox.store.FlagsUpdateCalculator;
 import org.apache.james.mailbox.store.mail.MessageMapper;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.apache.james.mailbox.store.transaction.Mapper;
+
+import reactor.core.publisher.Flux;
 
 public class TransactionalMessageMapper implements MessageMapper {
     private final JPAMessageMapper messageMapper;
@@ -54,13 +57,14 @@ public class TransactionalMessageMapper implements MessageMapper {
     @Override
     public MailboxCounters getMailboxCounters(Mailbox mailbox) throws MailboxException {
         return MailboxCounters.builder()
+            .mailboxId(mailbox.getMailboxId())
             .count(countMessagesInMailbox(mailbox))
             .unseen(countUnseenMessagesInMailbox(mailbox))
             .build();
     }
 
     @Override
-    public Iterator<MessageUid> listAllMessageUids(Mailbox mailbox) throws MailboxException {
+    public Flux<MessageUid> listAllMessageUids(Mailbox mailbox) {
         return messageMapper.listAllMessageUids(mailbox);
     }
 
@@ -92,8 +96,7 @@ public class TransactionalMessageMapper implements MessageMapper {
         return messageMapper.countMessagesInMailbox(mailbox);
     }
 
-    @Override
-    public long countUnseenMessagesInMailbox(Mailbox mailbox) throws MailboxException {
+    private long countUnseenMessagesInMailbox(Mailbox mailbox) throws MailboxException {
         return messageMapper.countUnseenMessagesInMailbox(mailbox);
     }
 
@@ -143,7 +146,7 @@ public class TransactionalMessageMapper implements MessageMapper {
     }
 
     @Override
-    public long getHighestModSeq(Mailbox mailbox) throws MailboxException {
+    public ModSeq getHighestModSeq(Mailbox mailbox) throws MailboxException {
         return messageMapper.getHighestModSeq(mailbox);
     }
 

@@ -23,9 +23,9 @@ import java.io.InputStream;
 import java.io.SequenceInputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.mail.Flags;
 import javax.persistence.Basic;
@@ -43,15 +43,18 @@ import javax.persistence.OneToMany;
 import javax.persistence.OrderBy;
 
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.jpa.JPAId;
 import org.apache.james.mailbox.jpa.mail.model.JPAMailbox;
 import org.apache.james.mailbox.jpa.mail.model.JPAProperty;
 import org.apache.james.mailbox.jpa.mail.model.JPAUserFlag;
+import org.apache.james.mailbox.model.AttachmentId;
 import org.apache.james.mailbox.model.ComposedMessageId;
 import org.apache.james.mailbox.model.ComposedMessageIdWithMetaData;
-import org.apache.james.mailbox.model.MessageAttachment;
+import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mailbox.model.MessageId;
+import org.apache.james.mailbox.model.ParsedAttachment;
 import org.apache.james.mailbox.store.mail.model.DefaultMessageId;
 import org.apache.james.mailbox.store.mail.model.DelegatingMailboxMessage;
 import org.apache.james.mailbox.store.mail.model.FlagsFactory;
@@ -59,12 +62,12 @@ import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.apache.james.mailbox.store.mail.model.Property;
 import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
 import org.apache.james.mailbox.store.mail.model.impl.PropertyBuilder;
-import org.apache.james.mailbox.store.search.comparator.UidComparator;
-import org.apache.james.mime4j.MimeException;
 import org.apache.openjpa.persistence.jdbc.ElementJoinColumn;
 import org.apache.openjpa.persistence.jdbc.ElementJoinColumns;
 import org.apache.openjpa.persistence.jdbc.Index;
 
+import com.github.fge.lambdas.Throwing;
+import com.github.steveash.guavate.Guavate;
 import com.google.common.base.Objects;
 
 /**
@@ -84,21 +87,19 @@ import com.google.common.base.Objects;
         @NamedQuery(name = "findDeletedMessagesInMailboxWithUID", query = "SELECT message FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid=:uidParam AND message.deleted=TRUE ORDER BY message.uid ASC"),
         @NamedQuery(name = "findDeletedMessagesInMailboxAfterUID", query = "SELECT message FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid>=:uidParam AND message.deleted=TRUE ORDER BY message.uid ASC"),
 
-        @NamedQuery(name = "deleteDeletedMessagesInMailbox", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.deleted=TRUE"),
-        @NamedQuery(name = "deleteDeletedMessagesInMailboxBetweenUIDs", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid BETWEEN :fromParam AND :toParam AND message.deleted=TRUE"),
-        @NamedQuery(name = "deleteDeletedMessagesInMailboxWithUID", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid=:uidParam AND message.deleted=TRUE"),
-        @NamedQuery(name = "deleteDeletedMessagesInMailboxAfterUID", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid>=:uidParam AND message.deleted=TRUE"),
+        @NamedQuery(name = "deleteMessagesInMailbox", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam"),
+        @NamedQuery(name = "deleteMessagesInMailboxBetweenUIDs", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid BETWEEN :fromParam AND :toParam"),
+        @NamedQuery(name = "deleteMessagesInMailboxWithUID", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid=:uidParam"),
+        @NamedQuery(name = "deleteMessagesInMailboxAfterUID", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.uid>=:uidParam"),
 
         @NamedQuery(name = "countUnseenMessagesInMailbox", query = "SELECT COUNT(message) FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam AND message.seen=FALSE"),
         @NamedQuery(name = "countMessagesInMailbox", query = "SELECT COUNT(message) FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam"),
         @NamedQuery(name = "deleteMessages", query = "DELETE FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam"),
         @NamedQuery(name = "findLastUidInMailbox", query = "SELECT message.uid FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam ORDER BY message.uid DESC"),
-        @NamedQuery(name = "findHighestModSeqInMailbox", query = "SELECT message.modSeq FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam ORDER BY message.modSeq DESC"),
-        @NamedQuery(name = "deleteAllMemberships", query = "DELETE FROM MailboxMessage message") })
+        @NamedQuery(name = "findHighestModSeqInMailbox", query = "SELECT message.modSeq FROM MailboxMessage message WHERE message.mailbox.mailboxId = :idParam ORDER BY message.modSeq DESC")
+})
 @MappedSuperclass
 public abstract class AbstractJPAMailboxMessage implements MailboxMessage {
-
-    private static final Comparator<MailboxMessage> MESSAGE_UID_COMPARATOR = new UidComparator();
     private static final String TOSTRING_SEPARATOR = " ";
 
     /** Identifies composite key */
@@ -278,12 +279,12 @@ public abstract class AbstractJPAMailboxMessage implements MailboxMessage {
      * @param original
      *            message to be copied, not null
      */
-    public AbstractJPAMailboxMessage(JPAMailbox mailbox, MessageUid uid, long modSeq, MailboxMessage original)
+    public AbstractJPAMailboxMessage(JPAMailbox mailbox, MessageUid uid, ModSeq modSeq, MailboxMessage original)
             throws MailboxException {
         super();
         this.mailbox = mailbox;
         this.uid = uid.asLong();
-        this.modSeq = modSeq;
+        this.modSeq = modSeq.asLong();
         this.userFlags = new ArrayList<>();
         setFlags(original.createFlags());
 
@@ -325,20 +326,20 @@ public abstract class AbstractJPAMailboxMessage implements MailboxMessage {
     @Override
     public ComposedMessageIdWithMetaData getComposedMessageIdWithMetaData() {
         return ComposedMessageIdWithMetaData.builder()
-            .modSeq(modSeq)
+            .modSeq(getModSeq())
             .flags(createFlags())
             .composedMessageId(new ComposedMessageId(mailbox.getMailboxId(), getMessageId(), MessageUid.of(uid)))
             .build();
     }
 
     @Override
-    public long getModSeq() {
-        return modSeq;
+    public ModSeq getModSeq() {
+        return ModSeq.of(modSeq);
     }
 
     @Override
-    public void setModSeq(long modSeq) {
-        this.modSeq = modSeq;
+    public void setModSeq(ModSeq modSeq) {
+        this.modSeq = modSeq.asLong();
     }
 
     @Override
@@ -360,7 +361,9 @@ public abstract class AbstractJPAMailboxMessage implements MailboxMessage {
      */
     @Override
     public List<Property> getProperties() {
-        return new ArrayList<>(properties);
+        return properties.stream()
+            .map(JPAProperty::toProperty)
+            .collect(Guavate.toImmutableList());
     }
 
     @Override
@@ -488,11 +491,6 @@ public abstract class AbstractJPAMailboxMessage implements MailboxMessage {
         return new DefaultMessageId();
     }
 
-    @Override
-    public int compareTo(MailboxMessage other) {
-        return MESSAGE_UID_COMPARATOR.compare(this, other);
-    }
-
     public String toString() {
         return "message("
                 + "mailboxId = " + this.getMailboxId() + TOSTRING_SEPARATOR
@@ -508,12 +506,21 @@ public abstract class AbstractJPAMailboxMessage implements MailboxMessage {
     }
 
     @Override
-    public List<MessageAttachment> getAttachments() {
+    public List<MessageAttachmentMetadata> getAttachments() {
         try {
-            return new MessageParser().retrieveAttachments(getFullContent());
-        } catch (MimeException | IOException e) {
+            AtomicInteger counter = new AtomicInteger(0);
+            return new MessageParser().retrieveAttachments(getFullContent())
+                .stream()
+                .map(Throwing.<ParsedAttachment, MessageAttachmentMetadata>function(
+                    attachmentMetadata -> attachmentMetadata.asMessageAttachment(generateFixedAttachmentId(counter.incrementAndGet())))
+                    .sneakyThrow())
+                .collect(Guavate.toImmutableList());
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
+    private AttachmentId generateFixedAttachmentId(int position) {
+        return AttachmentId.from(getMailboxId().serialize() + "-" + getUid().asLong() + "-" + position);
+    }
 }

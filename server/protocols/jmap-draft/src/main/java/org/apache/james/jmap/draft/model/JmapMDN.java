@@ -25,7 +25,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.apache.james.core.Domain;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.jmap.draft.exceptions.InvalidOriginMessageForMDNException;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.model.MessageId;
@@ -142,7 +142,7 @@ public class JmapMDN {
 
     public Message generateMDNMessage(Message originalMessage, MailboxSession mailboxSession) throws ParseException, IOException, InvalidOriginMessageForMDNException {
 
-        User user = mailboxSession.getUser();
+        Username username = mailboxSession.getUser();
 
         return MDN.builder()
             .report(generateReport(originalMessage, mailboxSession))
@@ -150,9 +150,9 @@ public class JmapMDN {
             .build()
         .asMime4JMessageBuilder()
             .setTo(getSenderAddress(originalMessage))
-            .setFrom(user.asString())
+            .setFrom(username.asString())
             .setSubject(subject)
-            .setMessageId(MimeUtil.createUniqueMessageId(user.getDomainPart().map(Domain::name).orElse(null)))
+            .setMessageId(MimeUtil.createUniqueMessageId(username.getDomainPart().map(Domain::name).orElse(null)))
             .build();
     }
 
@@ -176,8 +176,7 @@ public class JmapMDN {
             .findFirst();
     }
 
-
-    public MDNReport generateReport(Message originalMessage, MailboxSession mailboxSession) throws InvalidOriginMessageForMDNException {
+    private MDNReport generateReport(Message originalMessage, MailboxSession mailboxSession) throws InvalidOriginMessageForMDNException {
         if (originalMessage.getMessageId() == null) {
             throw InvalidOriginMessageForMDNException.missingHeader("Message-ID");
         }

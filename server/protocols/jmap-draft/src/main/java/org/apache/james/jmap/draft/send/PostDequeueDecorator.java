@@ -24,6 +24,7 @@ import java.util.Optional;
 import javax.mail.Flags;
 import javax.mail.Flags.Flag;
 
+import org.apache.james.core.Username;
 import org.apache.james.jmap.draft.send.exception.MailShouldBeInOutboxException;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
@@ -33,7 +34,7 @@ import org.apache.james.mailbox.Role;
 import org.apache.james.mailbox.SystemMailboxesProvider;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxRoleNotFoundException;
-import org.apache.james.mailbox.model.FetchGroupImpl;
+import org.apache.james.mailbox.model.FetchGroup;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageId.Factory;
@@ -84,7 +85,7 @@ public class PostDequeueDecorator extends MailQueueItemDecorator {
             Optional<String> username = retrieveUsername();
             if (!getMail().getAttribute(IS_DELIVERED.getName()).isPresent()) {
                 try {
-                    MailboxSession mailboxSession = mailboxManager.createSystemSession(username.get());
+                    MailboxSession mailboxSession = mailboxManager.createSystemSession(Username.of(username.get()));
                     moveFromOutboxToSentWithSeenFlag(messageId, mailboxSession);
                     getMail().setAttribute(IS_DELIVERED);
                 } catch (MailShouldBeInOutboxException e) {
@@ -142,7 +143,7 @@ public class PostDequeueDecorator extends MailQueueItemDecorator {
 
     private void assertMessageBelongsToOutbox(MessageId messageId, MailboxSession mailboxSession) throws MailboxException, MailShouldBeInOutboxException {
         MailboxId outboxMailboxId = getOutboxMailboxId(mailboxSession);
-        List<MessageResult> messages = messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, mailboxSession);
+        List<MessageResult> messages = messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, mailboxSession);
         for (MessageResult message: messages) {
             if (message.getMailboxId().equals(outboxMailboxId)) {
                 return;

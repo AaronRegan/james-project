@@ -22,10 +22,9 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import javax.mail.Flags;
@@ -36,6 +35,8 @@ import org.apache.james.mailbox.MessageUid;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 
 /**
  * <p>
@@ -172,8 +173,6 @@ public class SearchQuery implements Serializable {
 
         /**
          * Create a new {@link Sort} which is NOT {@link #order}
-         * 
-         * @param sortClause
          */
         public Sort(SortClause sortClause) {
             this(sortClause, Order.NATURAL);
@@ -181,8 +180,6 @@ public class SearchQuery implements Serializable {
 
         /**
          * Return true if the sort should be in reverse order
-         * 
-         * @return reverse
          */
         public boolean isReverse() {
             return order == Order.REVERSE;
@@ -190,8 +187,6 @@ public class SearchQuery implements Serializable {
 
         /**
          * Return the {@link SortClause}
-         * 
-         * @return clause
          */
         public SortClause getSortClause() {
             return sortClause;
@@ -449,9 +444,7 @@ public class SearchQuery implements Serializable {
      * Creates a filter matching messages whose Address header contains the
      * given address. The address header of the message MUST get canonicalized
      * before try to match it.
-     * 
-     * @param type
-     * @param address
+     *
      * @return <code>Criterion</code>
      */
     public static Criterion address(AddressType type, String address) {
@@ -767,42 +760,78 @@ public class SearchQuery implements Serializable {
         return new MimeMessageIDCriterion(messageId);
     }
 
-    private final Set<MessageUid> recentMessageUids = new HashSet<>();
+    public static class Builder {
+        private final ImmutableList.Builder<Criterion> criterias;
+        private final ImmutableSet.Builder<MessageUid> recentMessageUids;
+        private Optional<ImmutableList<Sort>> sorts;
 
-    private final List<Criterion> criterias;
-
-    private List<Sort> sorts = Collections.singletonList(new Sort(Sort.SortClause.Uid, Sort.Order.NATURAL));
-
-    public SearchQuery(Criterion... criterias) {
-        this(new ArrayList<>(Arrays.asList(criterias)));
-    }
-
-    public SearchQuery() {
-        this(new ArrayList<>());
-    }
-
-    private SearchQuery(List<Criterion> criterias) {
-        this.criterias = criterias;
-    }
-
-    public void andCriteria(Criterion crit) {
-        criterias.add(crit);
-    }
-
-    public List<Criterion> getCriterias() {
-        return criterias;
-    }
-
-    /**
-     * Set the {@link Sort}'s to use
-     * 
-     * @param sorts
-     */
-    public void setSorts(List<Sort> sorts) {
-        if (sorts == null || sorts.isEmpty()) {
-            throw new IllegalArgumentException("There must be at least one Sort");
+        public Builder() {
+            criterias = ImmutableList.builder();
+            sorts = Optional.empty();
+            recentMessageUids = ImmutableSet.builder();
         }
+
+        public Builder andCriteria(Criterion... criteria) {
+            return andCriteria(Arrays.asList(criteria));
+        }
+
+        public Builder andCriteria(Collection<Criterion> criteria) {
+            this.criterias.addAll(criteria);
+            return this;
+        }
+
+        public Builder sorts(Sort... sorts) {
+            return this.sorts(Arrays.asList(sorts));
+        }
+
+        public Builder sorts(List<Sort> sorts) {
+            if (sorts == null || sorts.isEmpty()) {
+                throw new IllegalArgumentException("There must be at least one Sort");
+            }
+            this.sorts = Optional.of(ImmutableList.copyOf(sorts));
+            return this;
+        }
+
+        public Builder addRecentMessageUids(Collection<MessageUid> uids) {
+            recentMessageUids.addAll(uids);
+            return this;
+        }
+
+        public SearchQuery build() {
+            return new SearchQuery(criterias.build(),
+                sorts.orElse(ImmutableList.of(new Sort(Sort.SortClause.Uid, Sort.Order.NATURAL))),
+                recentMessageUids.build());
+        }
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static SearchQuery of(Criterion... criterias) {
+        return new Builder().andCriteria(criterias).build();
+    }
+
+    public static SearchQuery matchAll() {
+        return new Builder().build();
+    }
+
+    public static SearchQuery allSortedWith(Sort... sorts) {
+        return new Builder().sorts(sorts).build();
+    }
+
+    private final ImmutableList<Criterion> criteria;
+    private final ImmutableList<Sort> sorts;
+    private final ImmutableSet<MessageUid> recentMessageUids;
+
+    private SearchQuery(ImmutableList<Criterion> criteria, ImmutableList<Sort> sorts, ImmutableSet<MessageUid> recentMessageUids) {
+        this.criteria = criteria;
         this.sorts = sorts;
+        this.recentMessageUids = recentMessageUids;
+    }
+
+    public List<Criterion> getCriteria() {
+        return criteria;
     }
 
     /**
@@ -810,8 +839,7 @@ public class SearchQuery implements Serializable {
      * They get "executed" in a chain, if the first does not give an result the
      * second will get executed etc.
      * 
-     * If not set via {@link #setSorts(List)} it will sort via
-     * {@link Sort.SortClause#Uid}
+     * Default to sort via {@link Sort.SortClause#Uid}
      * 
      * @return sorts
      */
@@ -830,24 +858,14 @@ public class SearchQuery implements Serializable {
         return recentMessageUids;
     }
 
-    /**
-     * Adds all the uids to the collection of recents.
-     * 
-     * @param uids
-     *            not null
-     */
-    public void addRecentMessageUids(Collection<MessageUid> uids) {
-        recentMessageUids.addAll(uids);
-    }
-
     @Override
     public String toString() {
-        return "Search:" + criterias.toString();
+        return "Search:" + criteria.toString();
     }
 
     @Override
     public final int hashCode() {
-        return Objects.hashCode(criterias);
+        return Objects.hashCode(criteria, sorts, recentMessageUids);
     }
 
     @Override
@@ -855,80 +873,11 @@ public class SearchQuery implements Serializable {
         if (obj instanceof SearchQuery) {
             SearchQuery that = (SearchQuery) obj;
 
-            return Objects.equal(this.criterias, that.criterias);
+            return Objects.equal(this.criteria, that.criteria)
+                && Objects.equal(this.sorts, that.sorts)
+                && Objects.equal(this.recentMessageUids, that.recentMessageUids);
         }
         return false;
-    }
-
-    /**
-     * Numbers within a particular range. Range includes both high and low
-     * boundaries. May be a single value. {@link Long#MAX_VALUE} represents
-     * unlimited in either direction.
-     */
-    public static class NumericRange implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private final long lowValue;
-
-        private final long highValue;
-
-        public NumericRange(long value) {
-            super();
-            this.lowValue = value;
-            this.highValue = value;
-        }
-
-        public NumericRange(long lowValue, long highValue) {
-            super();
-            this.lowValue = lowValue;
-            this.highValue = highValue;
-        }
-
-        public long getHighValue() {
-            return highValue;
-        }
-
-        public long getLowValue() {
-            return lowValue;
-        }
-
-        /**
-         * Is the given value in this range?
-         * 
-         * @param value
-         *            value to be tested
-         * @return true if the value is in range, false otherwise
-         */
-        public boolean isIn(long value) {
-            if (lowValue == Long.MAX_VALUE) {
-                return highValue >= value;
-            }
-            return lowValue <= value && highValue >= value;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(lowValue, highValue);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (obj instanceof NumericRange) {
-                NumericRange that = (NumericRange) obj;
-                return Objects.equal(this.lowValue, that.lowValue)
-                    && Objects.equal(this.highValue, that.highValue);
-            }
-            return false;
-        }
-
-        @Override
-        public String toString() {
-            return MoreObjects.toStringHelper(this)
-                .add("lowValue", lowValue)
-                .add("highValue", highValue)
-                .toString();
-        }
-
     }
 
     /**
@@ -1909,9 +1858,9 @@ public class SearchQuery implements Serializable {
 
         /**
          * Gets the operator type.
-         * 
+         *
          * @return the type, either {@link DateComparator#BEFORE},
-         *         {@link DateComparator#AFTER} or {@link DateComparator#ON}
+         * {@link DateComparator#AFTER} or {@link DateComparator#ON}
          */
         public DateComparator getType() {
             return type;
@@ -1940,62 +1889,6 @@ public class SearchQuery implements Serializable {
                 .add("date", date)
                 .add("dateResolution", dateResolution)
                 .add("type", type)
-                .toString();
-        }
-
-    }
-
-    /**
-     * Search for numbers within set of ranges.
-     */
-    public static class InOperator implements Operator {
-        private static final long serialVersionUID = 1L;
-
-        private final NumericRange[] range;
-
-        public InOperator(NumericRange[] range) {
-            super();
-            this.range = range;
-        }
-
-        /**
-         * Gets the filtering ranges. Values falling within these ranges will be
-         * selected.
-         * 
-         * @return the <code>NumericRange</code>'s search on, not null
-         */
-        public NumericRange[] getRange() {
-            return range;
-        }
-
-        @Override
-        public int hashCode() {
-            return range.length;
-        }
-
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (obj == null) {
-                return false;
-            }
-            if (getClass() != obj.getClass()) {
-                return false;
-            }
-            final InOperator other = (InOperator) obj;
-            if (!Arrays.equals(range, other.range)) {
-                return false;
-            }
-            return true;
-        }
-
-        @Override
-        public String toString() {
-            return MoreObjects.toStringHelper(this)
-                .add("range", Arrays.toString(range))
                 .toString();
         }
 

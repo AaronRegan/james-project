@@ -20,34 +20,56 @@
 package org.apache.james.metrics.dropwizard;
 
 import org.apache.james.metrics.api.Metric;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.Counter;
+import com.codahale.metrics.Meter;
 
 public class DropWizardMetric implements Metric {
 
-    private final Counter counter;
+    private static final Logger LOGGER = LoggerFactory.getLogger(DropWizardMetric.class);
 
-    public DropWizardMetric(Counter counter) {
-        this.counter = counter;
+    private final Meter meter;
+    private final String metricName;
+
+    public DropWizardMetric(Meter meter, String metricName) {
+        this.meter = meter;
+        this.metricName = metricName;
     }
 
     @Override
     public void increment() {
-        counter.inc();
+        meter.mark();
     }
 
     @Override
     public void decrement() {
-        counter.dec();
+        meter.mark(-1);
     }
 
     @Override
     public void add(int value) {
-        counter.inc(value);
+        meter.mark(value);
     }
 
     @Override
     public void remove(int value) {
-        counter.dec(value);
+        meter.mark(-1 * value);
+    }
+
+    @Override
+    public long getCount() {
+        long value = meter.getCount();
+        if (value < 0) {
+            LOGGER.error("counter value({}) of the metric '{}' should not be a negative number", value, metricName);
+            return 0;
+        }
+
+        return value;
+    }
+
+    @Override
+    public double movingAverage() {
+        return meter.getFiveMinuteRate();
     }
 }

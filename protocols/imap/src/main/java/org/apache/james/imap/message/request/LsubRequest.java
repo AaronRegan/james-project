@@ -18,15 +18,18 @@
  ****************************************************************/
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
+
+import com.google.common.base.MoreObjects;
 
 public class LsubRequest extends AbstractImapRequest {
     private final String baseReferenceName;
 
     private final String mailboxPattern;
 
-    public LsubRequest(ImapCommand command, String referenceName, String mailboxPattern, String tag) {
-        super(tag, command);
+    public LsubRequest(String referenceName, String mailboxPattern, Tag tag) {
+        super(tag, ImapConstants.LSUB_COMMAND);
         this.baseReferenceName = referenceName;
         this.mailboxPattern = mailboxPattern;
     }
@@ -37,5 +40,13 @@ public class LsubRequest extends AbstractImapRequest {
 
     public final String getMailboxPattern() {
         return mailboxPattern;
+    }
+
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("baseReferenceName", baseReferenceName)
+            .add("mailboxPattern", mailboxPattern)
+            .toString();
     }
 }

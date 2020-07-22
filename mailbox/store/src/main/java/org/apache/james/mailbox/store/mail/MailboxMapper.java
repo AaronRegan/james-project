@@ -20,15 +20,19 @@ package org.apache.james.mailbox.store.mail;
 
 import java.util.List;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.acl.ACLDiff;
-import org.apache.james.mailbox.exception.MailboxException;
-import org.apache.james.mailbox.exception.MailboxNotFoundException;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxACL.Right;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.UidValidity;
+import org.apache.james.mailbox.model.search.MailboxQuery;
 import org.apache.james.mailbox.store.transaction.Mapper;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 /**
  * Mapper for {@link Mailbox} actions. A {@link MailboxMapper} has a lifecycle from the start of a request 
@@ -36,64 +40,46 @@ import org.apache.james.mailbox.store.transaction.Mapper;
  *
  */
 public interface MailboxMapper extends Mapper {
-    
+
     /**
-     * Save the give {@link Mailbox} to the underlying storage
-     * 
-     * @param mailbox
-     * @throws MailboxException
+     * Create a {@link Mailbox} with the given {@link MailboxPath} and uid to the underlying storage
      */
-    MailboxId save(Mailbox mailbox) throws MailboxException;
+    Mono<Mailbox> create(MailboxPath mailboxPath, UidValidity uidValidity);
+
+    /**
+     * Rename the given {@link Mailbox} to the underlying storage
+     */
+    Mono<MailboxId> rename(Mailbox mailbox);
     
     /**
      * Delete the given {@link Mailbox} from the underlying storage
-     * 
-     * @param mailbox
-     * @throws MailboxException
      */
-    void delete(Mailbox mailbox) throws MailboxException;
+    Mono<Void> delete(Mailbox mailbox);
 
   
     /**
      * Return the {@link Mailbox} for the given name
-     * 
-     * @param mailboxName 
-     * @return mailbox
-     * @throws MailboxException
-     * @throws MailboxNotFoundException
      */
-    Mailbox findMailboxByPath(MailboxPath mailboxName)
-            throws MailboxException, MailboxNotFoundException;
+    Mono<Mailbox> findMailboxByPath(MailboxPath mailboxName);
+
+    default Mono<Boolean> pathExists(MailboxPath mailboxName) {
+        return findMailboxByPath(mailboxName).hasElement();
+    }
 
     /**
      * Return the {@link Mailbox} for the given name
-     * 
-     * @param mailboxId
-     * @return mailbox
-     * @throws MailboxException
-     * @throws MailboxNotFoundException
      */
-    Mailbox findMailboxById(MailboxId mailboxId)
-            throws MailboxException, MailboxNotFoundException;
+    Mono<Mailbox> findMailboxById(MailboxId mailboxId);
 
     /**
      * Return a List of {@link Mailbox} for the given userName and matching the right
-     * 
-     * @param userName
-     * @return right
-     * @throws MailboxException
      */
-    List<Mailbox> findNonPersonalMailboxes(String userName, Right right) throws MailboxException;
+    Flux<Mailbox> findNonPersonalMailboxes(Username userName, Right right);
 
     /**
      * Return a List of {@link Mailbox} which name is like the given name
-     * 
-     * @param mailboxPath
-     * @return mailboxList
-     * @throws MailboxException
      */
-    List<Mailbox> findMailboxWithPathLike(MailboxPath mailboxPath)
-            throws MailboxException;
+    Flux<Mailbox> findMailboxWithPathLike(MailboxQuery.UserBound query);
 
     /**
      * Return if the given {@link Mailbox} has children
@@ -101,33 +87,26 @@ public interface MailboxMapper extends Mapper {
      * @param mailbox not null
      * @param delimiter path delimiter
      * @return true when the mailbox has children, false otherwise
-     * @throws MailboxException
-     * @throws MailboxNotFoundException
      */
-    boolean hasChildren(Mailbox mailbox, char delimiter)
-            throws MailboxException, MailboxNotFoundException;
+    Mono<Boolean> hasChildren(Mailbox mailbox, char delimiter);
 
     /**
      * Update the ACL of the stored mailbox.
-     *
      * @param mailbox Mailbox for whom we want to update ACL
      * @param mailboxACLCommand Update to perform
      */
-    ACLDiff updateACL(Mailbox mailbox, MailboxACL.ACLCommand mailboxACLCommand) throws MailboxException;
+    Mono<ACLDiff> updateACL(Mailbox mailbox, MailboxACL.ACLCommand mailboxACLCommand);
 
     /**
      * Reset the ACL of the stored mailbox.
-     *
-     * @param mailbox Mailbox for whom we want to update ACL
+     *  @param mailbox Mailbox for whom we want to update ACL
      * @param mailboxACL New value of the ACL for this mailbox
+     * @return
      */
-    ACLDiff setACL(Mailbox mailbox, MailboxACL mailboxACL) throws MailboxException;
+    Mono<ACLDiff> setACL(Mailbox mailbox, MailboxACL mailboxACL);
 
     /**
-     * Return a unmodifable {@link List} of all {@link Mailbox} 
-     * 
-     * @return mailboxList
-     * @throws MailboxException 
+     * Return a unmodifable {@link List} of all {@link Mailbox}
      */
-    List<Mailbox> list() throws MailboxException;
+    Flux<Mailbox> list();
 }

@@ -19,29 +19,25 @@
 
 package org.apache.james.queue.rabbitmq;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
-import java.time.Duration;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.james.backend.rabbitmq.RabbitMQExtension;
+import org.apache.james.backends.rabbitmq.RabbitMQExtension;
 import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.mail.MimeMessageStore;
 import org.apache.james.metrics.api.NoopGaugeRegistry;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.queue.api.MailQueueFactory;
 import org.apache.james.queue.api.MailQueueFactoryContract;
 import org.apache.james.queue.api.RawMailQueueItemDecoratorFactory;
+import org.apache.james.queue.rabbitmq.view.RabbitMQMailQueueConfiguration;
 import org.apache.james.queue.rabbitmq.view.api.MailQueueView;
-import org.apache.james.util.concurrency.ConcurrentTestRunner;
+import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueBrowser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 class RabbitMqMailQueueFactoryTest implements MailQueueFactoryContract<RabbitMQMailQueue> {
@@ -57,22 +53,27 @@ class RabbitMqMailQueueFactoryTest implements MailQueueFactoryContract<RabbitMQM
     void setup() throws Exception {
         MimeMessageStore.Factory mimeMessageStoreFactory = mock(MimeMessageStore.Factory.class);
         MailQueueView.Factory mailQueueViewFactory = mock(MailQueueView.Factory.class);
-        MailQueueView mailQueueView = mock(MailQueueView.class);
+        MailQueueView<CassandraMailQueueBrowser.CassandraMailQueueItemView> mailQueueView = mock(MailQueueView.class);
         when(mailQueueViewFactory.create(any()))
             .thenReturn(mailQueueView);
 
-        RabbitClient rabbitClient = new RabbitClient(rabbitMQExtension.getRabbitChannelPool());
-        RabbitMQMailQueueFactory.PrivateFactory factory = new RabbitMQMailQueueFactory.PrivateFactory(
-            new NoopMetricFactory(),
+        RabbitMQMailQueueConfiguration configuration = RabbitMQMailQueueConfiguration.builder()
+            .sizeMetricsEnabled(true)
+            .build();
+
+        RabbitMQMailQueueFactory.PrivateFactory privateFactory = new RabbitMQMailQueueFactory.PrivateFactory(
+            new RecordingMetricFactory(),
             new NoopGaugeRegistry(),
-            rabbitClient,
+            rabbitMQExtension.getSender(),
+            rabbitMQExtension.getReceiverProvider(),
             mimeMessageStoreFactory,
             BLOB_ID_FACTORY,
             mailQueueViewFactory,
             Clock.systemUTC(),
-            new RawMailQueueItemDecoratorFactory());
+            new RawMailQueueItemDecoratorFactory(),
+            configuration);
         mqManagementApi = new RabbitMQMailQueueManagement(rabbitMQExtension.managementAPI());
-        mailQueueFactory = new RabbitMQMailQueueFactory(rabbitClient, mqManagementApi, factory);
+        mailQueueFactory = new RabbitMQMailQueueFactory(rabbitMQExtension.getSender(), mqManagementApi, privateFactory);
     }
 
     @AfterEach
@@ -85,21 +86,4 @@ class RabbitMqMailQueueFactoryTest implements MailQueueFactoryContract<RabbitMQM
         return mailQueueFactory;
     }
 
-    @Test
-    void createQueueShouldReturnTheSameInstanceWhenParallelCreateSameQueueName() throws Exception {
-        Set<RabbitMQMailQueue> createdRabbitMQMailQueues =  ConcurrentHashMap.newKeySet();
-
-        ConcurrentTestRunner.builder()
-            .operation((threadNumber, operationNumber) ->
-                createdRabbitMQMailQueues.add(mailQueueFactory.createQueue("spool")))
-            .threadCount(100)
-            .operationCount(10)
-            .runSuccessfullyWithin(Duration.ofMinutes(10));
-
-        assertThat(mailQueueFactory.listCreatedMailQueues())
-            .hasSize(1)
-            .isEqualTo(createdRabbitMQMailQueues)
-            .extracting(RabbitMQMailQueue::getName)
-            .hasOnlyOneElementSatisfying(queueName -> assertThat(queueName).isEqualTo("spool"));
-    }
 }

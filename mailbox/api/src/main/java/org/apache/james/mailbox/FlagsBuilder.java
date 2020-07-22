@@ -21,6 +21,7 @@ package org.apache.james.mailbox;
 
 import java.util.Arrays;
 import java.util.List;
+
 import javax.mail.Flags;
 
 public class FlagsBuilder {
@@ -58,6 +59,48 @@ public class FlagsBuilder {
 
     public FlagsBuilder add(Flags... flagsArray) {
         add(Arrays.asList(flagsArray));
+        return this;
+    }
+
+    public FlagsBuilder isAnswered(boolean isAnswered) {
+        if (isAnswered) {
+            internalFlags.add(Flags.Flag.ANSWERED);
+        }
+        return this;
+    }
+
+    public FlagsBuilder isDraft(boolean isDraft) {
+        if (isDraft) {
+            internalFlags.add(Flags.Flag.DRAFT);
+        }
+        return this;
+    }
+
+    public FlagsBuilder isDeleted(boolean isDeleted) {
+        if (isDeleted) {
+            internalFlags.add(Flags.Flag.DELETED);
+        }
+        return this;
+    }
+
+    public FlagsBuilder isFlagged(boolean isFlagged) {
+        if (isFlagged) {
+            internalFlags.add(Flags.Flag.FLAGGED);
+        }
+        return this;
+    }
+
+    public FlagsBuilder isRecent(boolean isRecent) {
+        if (isRecent) {
+            internalFlags.add(Flags.Flag.RECENT);
+        }
+        return this;
+    }
+
+    public FlagsBuilder isSeen(boolean isSeen) {
+        if (isSeen) {
+            internalFlags.add(Flags.Flag.SEEN);
+        }
         return this;
     }
 

@@ -20,19 +20,17 @@
 package org.apache.james.mailbox.cassandra.mail;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.modules.CassandraFirstUnseenModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-@ExtendWith(CassandraRestartExtension.class)
 class CassandraFirstUnseenDAOTest {
     private static final CassandraId MAILBOX_ID = CassandraId.timeBased();
     private static final MessageUid UID_1 = MessageUid.of(1);
@@ -60,6 +58,32 @@ class CassandraFirstUnseenDAOTest {
 
         assertThat(testee.retrieveFirstUnread(MAILBOX_ID).block())
             .isEqualByComparingTo(UID_1);
+    }
+
+    @Test
+    void addUnreadShouldNotReturnRemovedEntries() {
+        testee.addUnread(MAILBOX_ID, UID_1).block();
+
+        testee.removeAll(MAILBOX_ID).block();
+
+        assertThat(testee.retrieveFirstUnread(MAILBOX_ID).blockOptional())
+            .isEmpty();
+    }
+
+    @Test
+    void removeAllShouldDeleteAllUidEntries() {
+        testee.addUnread(MAILBOX_ID, UID_1).block();
+        testee.addUnread(MAILBOX_ID, UID_2).block();
+
+        testee.removeAll(MAILBOX_ID).block();
+
+        assertThat(testee.retrieveFirstUnread(MAILBOX_ID).blockOptional())
+            .isEmpty();
+    }
+
+    @Test
+    void removeAllShouldNotThrowWhenAbsent() {
+        assertThatCode(() -> testee.removeAll(MAILBOX_ID).block()).doesNotThrowAnyException();
     }
 
     @Test

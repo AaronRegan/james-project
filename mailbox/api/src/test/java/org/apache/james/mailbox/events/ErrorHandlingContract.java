@@ -19,13 +19,14 @@
 
 package org.apache.james.mailbox.events;
 
+import static org.apache.james.mailbox.events.EventBusTestFixture.DEFAULT_FIRST_BACKOFF;
 import static org.apache.james.mailbox.events.EventBusTestFixture.EVENT;
 import static org.apache.james.mailbox.events.EventBusTestFixture.EVENT_2;
 import static org.apache.james.mailbox.events.EventBusTestFixture.EVENT_ID;
 import static org.apache.james.mailbox.events.EventBusTestFixture.GROUP_A;
 import static org.apache.james.mailbox.events.EventBusTestFixture.KEY_1;
 import static org.apache.james.mailbox.events.EventBusTestFixture.NO_KEYS;
-import static org.apache.james.mailbox.events.EventBusTestFixture.WAIT_CONDITION;
+import static org.apache.james.mailbox.events.EventBusTestFixture.RETRY_BACKOFF_CONFIGURATION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.spy;
@@ -38,9 +39,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.james.mailbox.util.EventCollector;
 import org.assertj.core.api.SoftAssertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableSet;
+
+import reactor.core.publisher.Mono;
 
 interface ErrorHandlingContract extends EventBusContract {
 
@@ -80,7 +84,7 @@ interface ErrorHandlingContract extends EventBusContract {
         doThrow(new RuntimeException())
             .when(eventCollector).event(EVENT);
 
-        eventBus().register(eventCollector, KEY_1);
+        Mono.from(eventBus().register(eventCollector, KEY_1)).block();
         eventBus().dispatch(EVENT, ImmutableSet.of(KEY_1)).block();
 
         assertThat(eventCollector.getEvents())
@@ -99,15 +103,20 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(eventCollector, GROUP_A);
         eventBus().dispatch(EVENT, NO_KEYS).block();
 
-        WAIT_CONDITION
-            .until(() -> eventCollector.getEvents().size() == 1);
+        getSpeedProfile().shortWaitCondition()
+            .untilAsserted(() -> assertThat(eventCollector.getEvents()).hasSize(1));
     }
 
     @Test
     default void listenerShouldReceiveWhenFailsEqualsMaxRetries() {
         EventCollector eventCollector = eventCollector();
-
+        //do throw  RetryBackoffConfiguration.DEFAULT.DEFAULT_MAX_RETRIES
         doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doCallRealMethod()
@@ -116,15 +125,21 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(eventCollector, GROUP_A);
         eventBus().dispatch(EVENT, NO_KEYS).block();
 
-        WAIT_CONDITION
-            .until(() -> eventCollector.getEvents().size() == 1);
+        getSpeedProfile().longWaitCondition()
+            .untilAsserted(() -> assertThat(eventCollector.getEvents()).hasSize(1));
     }
 
     @Test
     default void listenerShouldNotReceiveWhenFailsGreaterThanMaxRetries() throws Exception {
         EventCollector eventCollector = eventCollector();
 
+        //do throw  RetryBackoffConfiguration.DEFAULT.DEFAULT_MAX_RETRIES + 1 times
         doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
@@ -146,9 +161,9 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(throwingListener, GROUP_A);
         eventBus().dispatch(EVENT, NO_KEYS).block();
 
-        TimeUnit.SECONDS.sleep(5);
+        Thread.sleep(getSpeedProfile().getLongWaitTime().toMillis());
         int numberOfCallsAfterExceedMaxRetries = throwingListener.timeElapsed.size();
-        TimeUnit.SECONDS.sleep(5);
+        Thread.sleep(getSpeedProfile().getLongWaitTime().toMillis());
 
         assertThat(throwingListener.timeElapsed.size())
             .isEqualTo(numberOfCallsAfterExceedMaxRetries);
@@ -161,14 +176,14 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(throwingListener, GROUP_A);
         eventBus().dispatch(EVENT, NO_KEYS).block();
 
-        TimeUnit.SECONDS.sleep(5);
+        Thread.sleep(getSpeedProfile().getLongWaitTime().toMillis());
         SoftAssertions.assertSoftly(softly -> {
             List<Instant> timeElapsed = throwingListener.timeElapsed;
-            softly.assertThat(timeElapsed).hasSize(4);
+            softly.assertThat(timeElapsed).hasSize(RETRY_BACKOFF_CONFIGURATION.getMaxRetries() + 1);
 
-            long minFirstDelayAfter = 100; // first backOff
-            long minSecondDelayAfter = 50; // 50 * jitter factor (50 * 0.5)
-            long minThirdDelayAfter = 100; // 100 * jitter factor (100 * 0.5)
+            long minFirstDelayAfter = DEFAULT_FIRST_BACKOFF.toMillis(); // first backOff
+            long minSecondDelayAfter = DEFAULT_FIRST_BACKOFF.toMillis() / 2; // first_backOff * jitter factor (first_backOff * 0.5)
+            long minThirdDelayAfter = DEFAULT_FIRST_BACKOFF.toMillis(); // first_backOff * jitter factor (first_backOff * 1)
 
             softly.assertThat(timeElapsed.get(1))
                 .isAfterOrEqualTo(timeElapsed.get(0).plusMillis(minFirstDelayAfter));
@@ -199,21 +214,27 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(listener, GROUP_A);
         eventBus().dispatch(EVENT, NO_KEYS).block();
 
-        WAIT_CONDITION.until(successfulRetry::get);
+        getSpeedProfile().shortWaitCondition().until(successfulRetry::get);
     }
 
     @Test
     default void deadLettersIsNotAppliedForKeyRegistrations() throws Exception {
         EventCollector eventCollector = eventCollector();
 
+        //do throw  RetryBackoffConfiguration.DEFAULT.DEFAULT_MAX_RETRIES + 1 times
         doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doCallRealMethod()
             .when(eventCollector).event(EVENT);
 
-        eventBus().register(eventCollector, KEY_1);
+        Mono.from(eventBus().register(eventCollector, KEY_1)).block();
         eventBus().dispatch(EVENT, ImmutableSet.of(KEY_1)).block();
 
         TimeUnit.SECONDS.sleep(1);
@@ -236,8 +257,8 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(eventCollector, new EventBusTestFixture.GroupA());
         eventBus().dispatch(EVENT, NO_KEYS).block();
 
-        WAIT_CONDITION
-            .until(() -> eventCollector.getEvents().size() == 1);
+        getSpeedProfile().shortWaitCondition()
+            .untilAsserted(() -> assertThat(eventCollector.getEvents()).hasSize(1));
 
         assertThat(deadLetter().groupsWithFailedEvents().toIterable())
             .isEmpty();
@@ -246,8 +267,13 @@ interface ErrorHandlingContract extends EventBusContract {
     @Test
     default void deadLetterShouldStoreWhenDispatchFailsGreaterThanMaxRetries() {
         EventCollector eventCollector = eventCollector();
-
+        //do throw  RetryBackoffConfiguration.DEFAULT.DEFAULT_MAX_RETRIES + 1 times
         doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
@@ -257,7 +283,8 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(eventCollector, GROUP_A);
         eventBus().dispatch(EVENT, NO_KEYS).block();
 
-        WAIT_CONDITION.untilAsserted(() -> assertThat(deadLetter().failedIds(GROUP_A)
+        getSpeedProfile().longWaitCondition()
+            .untilAsserted(() -> assertThat(deadLetter().failedIds(GROUP_A)
                 .flatMap(insertionId -> deadLetter().failedEvent(GROUP_A, insertionId))
                 .toIterable())
             .containsOnly(EVENT));
@@ -269,7 +296,13 @@ interface ErrorHandlingContract extends EventBusContract {
     default void deadLetterShouldStoreWhenRedeliverFailsGreaterThanMaxRetries() {
         EventCollector eventCollector = eventCollector();
 
+        //do throw  RetryBackoffConfiguration.DEFAULT.DEFAULT_MAX_RETRIES + 1 times
         doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
             .doThrow(new RuntimeException())
@@ -279,12 +312,40 @@ interface ErrorHandlingContract extends EventBusContract {
         eventBus().register(eventCollector, GROUP_A);
         eventBus().reDeliver(GROUP_A, EVENT).block();
 
-        WAIT_CONDITION.untilAsserted(() -> assertThat(deadLetter().failedIds(GROUP_A)
-                .flatMap(insertionId -> deadLetter().failedEvent(GROUP_A, insertionId))
-                .toIterable())
-            .containsOnly(EVENT));
-        assertThat(eventCollector.getEvents())
-            .isEmpty();
+        getSpeedProfile().longWaitCondition()
+            .untilAsserted(() ->
+                assertThat(
+                        deadLetter()
+                            .failedIds(GROUP_A)
+                            .flatMap(insertionId -> deadLetter().failedEvent(GROUP_A, insertionId))
+                            .toIterable())
+                .containsOnly(EVENT));
+        assertThat(eventCollector.getEvents()).isEmpty();
+    }
+
+    @Disabled("JAMES-2907 redeliver should work as initial dispatch")
+    @Test
+    default void retryShouldDeliverAsManyTimesAsInitialDeliveryAttempt() {
+        EventCollector eventCollector = eventCollector();
+
+        //do throw  RetryBackoffConfiguration.DEFAULT.DEFAULT_MAX_RETRIES + 1 times
+        doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doThrow(new RuntimeException())
+            .doCallRealMethod()
+            .when(eventCollector).event(EVENT);
+
+        eventBus().register(eventCollector, GROUP_A);
+        eventBus().reDeliver(GROUP_A, EVENT).block();
+
+        getSpeedProfile().longWaitCondition()
+            .untilAsserted(() -> assertThat(eventCollector.getEvents()).isNotEmpty());
     }
 
     @Test
@@ -293,11 +354,11 @@ interface ErrorHandlingContract extends EventBusContract {
         EventCollector eventCollector2 = eventCollector();
 
         eventBus().register(eventCollector, GROUP_A);
-        eventBus().register(eventCollector2, KEY_1);
+        Mono.from(eventBus().register(eventCollector2, KEY_1)).block();
         eventBus().reDeliver(GROUP_A, EVENT).block();
 
-        WAIT_CONDITION
-            .until(() -> eventCollector.getEvents().size() == 1);
+        getSpeedProfile().longWaitCondition()
+            .untilAsserted(() -> assertThat(eventCollector.getEvents()).hasSize(1));
         assertThat(eventCollector2.getEvents()).isEmpty();
     }
 }

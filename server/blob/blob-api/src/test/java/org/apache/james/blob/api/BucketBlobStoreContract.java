@@ -19,6 +19,7 @@
 
 package org.apache.james.blob.api;
 
+import static org.apache.james.blob.api.BlobStore.StoragePolicy.LOW_COST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -29,6 +30,8 @@ import java.time.Duration;
 
 import org.apache.james.util.concurrency.ConcurrentTestRunner;
 import org.junit.jupiter.api.Test;
+
+import reactor.core.publisher.Mono;
 
 public interface BucketBlobStoreContract {
     String SHORT_STRING = "toto";
@@ -43,7 +46,7 @@ public interface BucketBlobStoreContract {
     default void deleteBucketShouldThrowWhenNullBucketName() {
         BlobStore store = testee();
 
-        assertThatThrownBy(() -> store.deleteBucket(null).block())
+        assertThatThrownBy(() -> Mono.from(store.deleteBucket(null)).block())
             .isInstanceOf(NullPointerException.class);
     }
 
@@ -51,10 +54,10 @@ public interface BucketBlobStoreContract {
     default void deleteBucketShouldDeleteExistingBucketWithItsData() {
         BlobStore store = testee();
 
-        BlobId blobId = store.save(CUSTOM, SHORT_BYTEARRAY).block();
-        store.deleteBucket(CUSTOM).block();
+        BlobId blobId = Mono.from(store.save(CUSTOM, SHORT_BYTEARRAY, LOW_COST)).block();
+        Mono.from(store.deleteBucket(CUSTOM)).block();
 
-        assertThatThrownBy(() -> store.read(CUSTOM, blobId))
+        assertThatThrownBy(() -> store.read(CUSTOM, blobId).read())
             .isInstanceOf(ObjectStoreException.class);
     }
 
@@ -62,10 +65,10 @@ public interface BucketBlobStoreContract {
     default void deleteBucketShouldBeIdempotent() {
         BlobStore store = testee();
 
-        store.save(CUSTOM, SHORT_BYTEARRAY).block();
-        store.deleteBucket(CUSTOM).block();
+        Mono.from(store.save(CUSTOM, SHORT_BYTEARRAY, LOW_COST)).block();
+        Mono.from(store.deleteBucket(CUSTOM)).block();
 
-        assertThatCode(() -> store.deleteBucket(CUSTOM).block())
+        assertThatCode(() -> Mono.from(store.deleteBucket(CUSTOM)).block())
             .doesNotThrowAnyException();
     }
 
@@ -73,7 +76,7 @@ public interface BucketBlobStoreContract {
     default void saveBytesShouldThrowWhenNullBucketName() {
         BlobStore store = testee();
 
-        assertThatThrownBy(() -> store.save(null, SHORT_BYTEARRAY).block())
+        assertThatThrownBy(() -> Mono.from(store.save(null, SHORT_BYTEARRAY, LOW_COST)).block())
             .isInstanceOf(NullPointerException.class);
     }
 
@@ -81,7 +84,7 @@ public interface BucketBlobStoreContract {
     default void saveStringShouldThrowWhenNullBucketName() {
         BlobStore store = testee();
 
-        assertThatThrownBy(() -> store.save(null, SHORT_STRING).block())
+        assertThatThrownBy(() -> Mono.from(store.save(null, SHORT_STRING, LOW_COST)).block())
             .isInstanceOf(NullPointerException.class);
     }
 
@@ -89,7 +92,7 @@ public interface BucketBlobStoreContract {
     default void saveInputStreamShouldThrowWhenNullBucketName() {
         BlobStore store = testee();
 
-        assertThatThrownBy(() -> store.save(null, new ByteArrayInputStream(SHORT_BYTEARRAY)).block())
+        assertThatThrownBy(() -> Mono.from(store.save(null, new ByteArrayInputStream(SHORT_BYTEARRAY), LOW_COST)).block())
             .isInstanceOf(NullPointerException.class);
     }
 
@@ -97,7 +100,7 @@ public interface BucketBlobStoreContract {
     default void readShouldThrowWhenNullBucketName() {
         BlobStore store = testee();
 
-        BlobId blobId = store.save(BucketName.DEFAULT, SHORT_BYTEARRAY).block();
+        BlobId blobId = Mono.from(store.save(BucketName.DEFAULT, SHORT_BYTEARRAY, LOW_COST)).block();
         assertThatThrownBy(() -> store.read(null, blobId))
             .isInstanceOf(NullPointerException.class);
     }
@@ -106,8 +109,8 @@ public interface BucketBlobStoreContract {
     default void readBytesStreamShouldThrowWhenNullBucketName() {
         BlobStore store = testee();
 
-        BlobId blobId = store.save(BucketName.DEFAULT, SHORT_BYTEARRAY).block();
-        assertThatThrownBy(() -> store.readBytes(null, blobId).block())
+        BlobId blobId = Mono.from(store.save(BucketName.DEFAULT, SHORT_BYTEARRAY, LOW_COST)).block();
+        assertThatThrownBy(() -> Mono.from(store.readBytes(null, blobId)).block())
             .isInstanceOf(NullPointerException.class);
     }
 
@@ -115,8 +118,8 @@ public interface BucketBlobStoreContract {
     default void readStringShouldThrowWhenBucketDoesNotExist() {
         BlobStore store = testee();
 
-        BlobId blobId = store.save(BucketName.DEFAULT, SHORT_BYTEARRAY).block();
-        assertThatThrownBy(() -> store.read(CUSTOM, blobId))
+        BlobId blobId = Mono.from(store.save(BucketName.DEFAULT, SHORT_BYTEARRAY, LOW_COST)).block();
+        assertThatThrownBy(() -> store.read(CUSTOM, blobId).read())
             .isInstanceOf(ObjectStoreException.class);
     }
 
@@ -124,8 +127,8 @@ public interface BucketBlobStoreContract {
     default void readBytesStreamShouldThrowWhenBucketDoesNotExist() {
         BlobStore store = testee();
 
-        BlobId blobId = store.save(BucketName.DEFAULT, SHORT_BYTEARRAY).block();
-        assertThatThrownBy(() -> store.readBytes(CUSTOM, blobId).block())
+        BlobId blobId = Mono.from(store.save(BucketName.DEFAULT, SHORT_BYTEARRAY, LOW_COST)).block();
+        assertThatThrownBy(() -> Mono.from(store.readBytes(CUSTOM, blobId)).block())
             .isInstanceOf(ObjectStoreException.class);
     }
 
@@ -133,11 +136,11 @@ public interface BucketBlobStoreContract {
     default void shouldBeAbleToSaveDataInMultipleBuckets() {
         BlobStore store = testee();
 
-        BlobId blobIdDefault = store.save(BucketName.DEFAULT, SHORT_BYTEARRAY).block();
-        BlobId blobIdCustom = store.save(CUSTOM, SHORT_BYTEARRAY).block();
+        BlobId blobIdDefault = Mono.from(store.save(BucketName.DEFAULT, SHORT_BYTEARRAY, LOW_COST)).block();
+        BlobId blobIdCustom = Mono.from(store.save(CUSTOM, SHORT_BYTEARRAY, LOW_COST)).block();
 
-        byte[] bytesDefault = store.readBytes(BucketName.DEFAULT, blobIdDefault).block();
-        byte[] bytesCustom = store.readBytes(CUSTOM, blobIdCustom).block();
+        byte[] bytesDefault = Mono.from(store.readBytes(BucketName.DEFAULT, blobIdDefault)).block();
+        byte[] bytesCustom = Mono.from(store.readBytes(CUSTOM, blobIdCustom)).block();
 
         assertThat(bytesDefault).isEqualTo(bytesCustom);
     }
@@ -147,7 +150,7 @@ public interface BucketBlobStoreContract {
         BlobStore store = testee();
 
         ConcurrentTestRunner.builder()
-            .operation(((threadNumber, step) -> store.save(CUSTOM, SHORT_STRING + threadNumber + step).block()))
+            .operation(((threadNumber, step) -> Mono.from(store.save(CUSTOM, SHORT_STRING + threadNumber + step, LOW_COST)).block()))
             .threadCount(10)
             .operationCount(10)
             .runSuccessfullyWithin(Duration.ofMinutes(1));
@@ -157,10 +160,10 @@ public interface BucketBlobStoreContract {
     default void deleteBucketConcurrentlyShouldNotFail() throws Exception {
         BlobStore store = testee();
 
-        store.save(CUSTOM, SHORT_BYTEARRAY).block();
+        Mono.from(store.save(CUSTOM, SHORT_BYTEARRAY, LOW_COST)).block();
 
         ConcurrentTestRunner.builder()
-            .operation(((threadNumber, step) -> store.deleteBucket(CUSTOM).block()))
+            .operation(((threadNumber, step) -> Mono.from(store.deleteBucket(CUSTOM)).block()))
             .threadCount(10)
             .operationCount(10)
             .runSuccessfullyWithin(Duration.ofMinutes(1));

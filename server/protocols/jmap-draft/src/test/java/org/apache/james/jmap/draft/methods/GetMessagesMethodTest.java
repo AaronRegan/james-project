@@ -21,7 +21,9 @@ package org.apache.james.jmap.draft.methods;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
@@ -35,16 +37,21 @@ import javax.mail.Flags;
 import javax.mail.Flags.Flag;
 
 import org.apache.commons.lang3.NotImplementedException;
-import org.apache.james.core.User;
-import org.apache.james.jmap.draft.model.MethodCallId;
+import org.apache.james.core.Username;
 import org.apache.james.jmap.draft.model.GetMessagesRequest;
 import org.apache.james.jmap.draft.model.GetMessagesResponse;
-import org.apache.james.jmap.draft.model.Message;
-import org.apache.james.jmap.draft.model.MessageFactory;
-import org.apache.james.jmap.draft.model.MessagePreviewGenerator;
 import org.apache.james.jmap.draft.model.MessageProperties.MessageProperty;
-import org.apache.james.jmap.draft.utils.HtmlTextExtractor;
+import org.apache.james.jmap.draft.model.MethodCallId;
+import org.apache.james.jmap.draft.model.message.view.MessageFastViewFactory;
+import org.apache.james.jmap.draft.model.message.view.MessageFullView;
+import org.apache.james.jmap.draft.model.message.view.MessageFullViewFactory;
+import org.apache.james.jmap.draft.model.message.view.MessageHeaderView;
+import org.apache.james.jmap.draft.model.message.view.MessageHeaderViewFactory;
+import org.apache.james.jmap.draft.model.message.view.MessageMetadataView;
+import org.apache.james.jmap.draft.model.message.view.MessageMetadataViewFactory;
+import org.apache.james.jmap.draft.model.message.view.MetaMessageViewFactory;
 import org.apache.james.jmap.draft.utils.JsoupHtmlTextExtractor;
+import org.apache.james.jmap.memory.projections.MemoryMessageFastViewProjection;
 import org.apache.james.mailbox.BlobManager;
 import org.apache.james.mailbox.FlagsBuilder;
 import org.apache.james.mailbox.MailboxSession;
@@ -60,9 +67,11 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.store.StoreMailboxManager;
 import org.apache.james.metrics.logger.DefaultMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.mime4j.message.BodyPartBuilder;
 import org.apache.james.mime4j.message.MultipartBuilder;
 import org.apache.james.mime4j.stream.RawField;
+import org.apache.james.util.html.HtmlTextExtractor;
 import org.apache.james.util.mime.MessageContentExtractor;
 import org.assertj.core.api.Condition;
 import org.assertj.core.data.MapEntry;
@@ -80,9 +89,11 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.jayway.jsonpath.JsonPath;
 
+import reactor.core.publisher.Mono;
+
 public class GetMessagesMethodTest {
     private static final String FORWARDED = "forwarded";
-    private static final User ROBERT = User.fromUsername("robert");
+    private static final Username ROBERT = Username.of("robert");
 
     private MessageIdManager messageIdManager;
     private org.apache.james.mime4j.dom.Message messageContent1;
@@ -94,26 +105,38 @@ public class GetMessagesMethodTest {
     private MailboxPath inboxPath;
     private MailboxPath customMailboxPath;
     private MethodCallId methodCallId;
-    
+    private MessageMetadataViewFactory messageMetadataViewFactory;
+
     @Before
     public void setup() throws Exception {
         methodCallId = MethodCallId.of("#0");
-        HtmlTextExtractor htmlTextExtractor = new JsoupHtmlTextExtractor();
-        MessagePreviewGenerator messagePreview = new MessagePreviewGenerator();
         MessageContentExtractor messageContentExtractor = new MessageContentExtractor();
+        HtmlTextExtractor htmlTextExtractor = new JsoupHtmlTextExtractor();
         BlobManager blobManager = mock(BlobManager.class);
         when(blobManager.toBlobId(any(MessageId.class))).thenReturn(BlobId.fromString("fake"));
-        MessageFactory messageFactory = new MessageFactory(blobManager, messagePreview, messageContentExtractor, htmlTextExtractor);
         InMemoryIntegrationResources resources = InMemoryIntegrationResources.defaultResources();
         mailboxManager = resources.getMailboxManager();
 
-        session = MailboxSessionUtil.create(ROBERT.asString());
+        session = MailboxSessionUtil.create(ROBERT);
         inboxPath = MailboxPath.inbox(session);
         customMailboxPath = new MailboxPath(inboxPath, "custom");
         mailboxManager.createMailbox(inboxPath, session);
         mailboxManager.createMailbox(customMailboxPath, session);
         messageIdManager = resources.getMessageIdManager();
-        testee = new GetMessagesMethod(messageFactory, messageIdManager, new DefaultMetricFactory());
+
+        messageMetadataViewFactory = spy(new MessageMetadataViewFactory(blobManager, messageIdManager));
+        MessageFullViewFactory messageFullViewFactory = new MessageFullViewFactory(blobManager, messageContentExtractor,
+            htmlTextExtractor, messageIdManager,
+            new MemoryMessageFastViewProjection(new RecordingMetricFactory()));
+        MessageFastViewFactory messageFastViewFactory = new MessageFastViewFactory(blobManager, messageIdManager,
+            new MemoryMessageFastViewProjection(new RecordingMetricFactory()), messageFullViewFactory);
+
+        MetaMessageViewFactory metaMessageViewFactory = new MetaMessageViewFactory(
+            messageFullViewFactory,
+            new MessageHeaderViewFactory(blobManager, messageIdManager),
+            messageMetadataViewFactory,
+            messageFastViewFactory);
+        testee = new GetMessagesMethod(metaMessageViewFactory, new DefaultMetricFactory());
 
         messageContent1 = org.apache.james.mime4j.dom.Message.Builder.of()
             .setSubject("message 1 subject")
@@ -130,96 +153,100 @@ public class GetMessagesMethodTest {
             .setBody("my message", StandardCharsets.UTF_8)
             .build();
     }
-    
+
     @Test
     public void processShouldThrowWhenNullRequest() {
         GetMessagesRequest request = null;
-        assertThatThrownBy(() -> testee.process(request, mock(MethodCallId.class), mock(MailboxSession.class))).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> testee.processToStream(request, mock(MethodCallId.class), mock(MailboxSession.class))).isInstanceOf(NullPointerException.class);
     }
 
     @Test
     public void processShouldThrowWhenNullSession() {
         MailboxSession mailboxSession = null;
-        assertThatThrownBy(() -> testee.process(mock(GetMessagesRequest.class), mock(MethodCallId.class), mailboxSession)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> testee.processToStream(mock(GetMessagesRequest.class), mock(MethodCallId.class), mailboxSession)).isInstanceOf(NullPointerException.class);
     }
 
     @Test
     public void processShouldThrowWhenNullMethodCallId() {
         MethodCallId methodCallId = null;
-        assertThatThrownBy(() -> testee.process(mock(GetMessagesRequest.class), methodCallId, mock(MailboxSession.class))).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> testee.processToStream(mock(GetMessagesRequest.class), methodCallId, mock(MailboxSession.class))).isInstanceOf(NullPointerException.class);
     }
 
     @Test
     public void processShouldThrowWhenRequestHasAccountId() {
-        assertThatThrownBy(() -> testee.process(
-                GetMessagesRequest.builder().accountId("abc").build(), mock(MethodCallId.class), mock(MailboxSession.class))).isInstanceOf(NotImplementedException.class);
+        assertThatThrownBy(() -> testee.processToStream(
+            GetMessagesRequest.builder().accountId("abc").build(), mock(MethodCallId.class), mock(MailboxSession.class))).isInstanceOf(NotImplementedException.class);
     }
-    
+
     @Test
     @SuppressWarnings("unchecked")
     public void processShouldFetchMessages() throws Exception {
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
-        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session);
-        ComposedMessageId message2 = inbox.appendMessage(AppendCommand.from(messageContent2), session);
-        ComposedMessageId message3 = inbox.appendMessage(AppendCommand.from(messageContent3), session);
-        
-        GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message1.getMessageId(),
-                        message2.getMessageId(),
-                        message3.getMessageId()))
-                .build();
+        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session).getId();
+        ComposedMessageId message2 = inbox.appendMessage(AppendCommand.from(messageContent2), session).getId();
+        ComposedMessageId message3 = inbox.appendMessage(AppendCommand.from(messageContent3), session).getId();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
-        
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message1.getMessageId(),
+                message2.getMessageId(),
+                message3.getMessageId()))
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
+
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getId, Message::getSubject, Message::getTextBody)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getId, MessageFullView::getSubject, MessageFullView::getTextBody)
             .containsOnly(
                 Tuple.tuple(message1.getMessageId(), "message 1 subject", Optional.of("my message")),
                 Tuple.tuple(message2.getMessageId(), "message 2 subject", Optional.of("my message")),
                 Tuple.tuple(message3.getMessageId(), "", Optional.of("my message")));
     }
-    
+
     @Test
     @SuppressWarnings("unchecked")
     public void processShouldFetchHtmlMessage() throws Exception {
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
         ComposedMessageId message = inbox.appendMessage(
             AppendCommand.from(
-                    org.apache.james.mime4j.dom.Message.Builder.of()
-                        .setSubject("message 1 subject")
-                        .setBody("my <b>HTML</b> message", "html", StandardCharsets.UTF_8)),
-            session);
-        
-        GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message.getMessageId()))
-                .build();
+                org.apache.james.mime4j.dom.Message.Builder.of()
+                    .setSubject("message 1 subject")
+                    .setBody("my <b>HTML</b> message", "html", StandardCharsets.UTF_8)),
+            session).getId();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
-        
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message.getMessageId()))
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
+
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getId, Message::getHtmlBody)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getId, MessageFullView::getHtmlBody)
             .containsOnly(Tuple.tuple(message.getMessageId(), Optional.of("my <b>HTML</b> message")));
     }
 
     @Test
     public void processShouldReturnOnlyMandatoryPropertiesOnEmptyPropertyList() throws Exception {
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
-        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(this.messageContent1), session);
-        
-        GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message1.getMessageId()))
-                .properties(ImmutableList.of())
-                .build();
+        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(this.messageContent1), session).getId();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of())
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getProperties())
@@ -230,13 +257,13 @@ public class GetMessagesMethodTest {
     public void processShouldReturnAllPropertiesWhenNoPropertyGiven() throws Exception {
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
 
-        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session);
-        
-        GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message1.getMessageId()))
-                .build();
+        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session).getId();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getProperties())
             .isEqualTo(Optional.of(MessageProperty.allOutputProperties()));
@@ -246,35 +273,35 @@ public class GetMessagesMethodTest {
     public void processShouldAddMandatoryPropertiesWhenNotInPropertyList() throws Exception {
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
 
-        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session);
-        
+        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session).getId();
+
         GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message1.getMessageId()))
-                .properties(ImmutableList.of(MessageProperty.subject.asFieldName()))
-                .build();
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of(MessageProperty.subject.asFieldName()))
+            .build();
 
         Set<MessageProperty> expected = Sets.newHashSet(MessageProperty.id, MessageProperty.subject);
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getProperties())
             .isEqualTo(Optional.of(expected));
     }
-    
+
     @Test
     public void processShouldReturnTextBodyWhenBodyInPropertyListAndEmptyHtmlBody() throws Exception {
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
 
-        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session);
-        
+        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent1), session).getId();
+
         GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message1.getMessageId()))
-                .properties(ImmutableList.of(MessageProperty.body.asFieldName()))
-                .build();
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of(MessageProperty.body.asFieldName()))
+            .build();
 
         Set<MessageProperty> expected = Sets.newHashSet(MessageProperty.id, MessageProperty.textBody);
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getProperties())
@@ -291,20 +318,22 @@ public class GetMessagesMethodTest {
                 org.apache.james.mime4j.dom.Message.Builder.of()
                     .setSubject("message 1 subject")
                     .setBody("my <b>HTML</b> message", "html", StandardCharsets.UTF_8)),
-            session);
+            session).getId();
 
         GetMessagesRequest request = GetMessagesRequest.builder()
             .ids(ImmutableList.of(message.getMessageId()))
             .build();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getId, Message::getTextBody, Message::getHtmlBody)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getId, MessageFullView::getTextBody, MessageFullView::getHtmlBody)
             .containsOnly(Tuple.tuple(message.getMessageId(), Optional.of("my HTML message"), Optional.of("my <b>HTML</b> message")));
     }
 
@@ -315,22 +344,24 @@ public class GetMessagesMethodTest {
 
         ComposedMessageId message = inbox.appendMessage(
             AppendCommand.from(org.apache.james.mime4j.dom.Message.Builder.of()
-                    .setSubject("message 1 subject")
-                    .setBody("", "html", StandardCharsets.UTF_8)),
-            session);
+                .setSubject("message 1 subject")
+                .setBody("", "html", StandardCharsets.UTF_8)),
+            session).getId();
 
         GetMessagesRequest request = GetMessagesRequest.builder()
             .ids(ImmutableList.of(message.getMessageId()))
             .build();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getId, Message::getTextBody, Message::getHtmlBody)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getId, MessageFullView::getTextBody, MessageFullView::getHtmlBody)
             .containsOnly(Tuple.tuple(message.getMessageId(), Optional.empty(), Optional.of("")));
     }
 
@@ -341,28 +372,30 @@ public class GetMessagesMethodTest {
 
         ComposedMessageId message = inbox.appendMessage(
             AppendCommand.from(org.apache.james.mime4j.dom.Message.Builder.of()
-                    .setSubject("message subject")
-                    .setBody(MultipartBuilder.create()
-                        .setSubType("alternative")
-                        .addBodyPart(BodyPartBuilder.create()
-                            .setBody("My plain message", "plain", StandardCharsets.UTF_8))
-                        .addBodyPart(BodyPartBuilder.create()
-                            .setBody("<a>The </a> <strong>HTML</strong> message", "html", StandardCharsets.UTF_8))
-                        .build())),
-            session);
+                .setSubject("message subject")
+                .setBody(MultipartBuilder.create()
+                    .setSubType("alternative")
+                    .addBodyPart(BodyPartBuilder.create()
+                        .setBody("My plain message", "plain", StandardCharsets.UTF_8))
+                    .addBodyPart(BodyPartBuilder.create()
+                        .setBody("<a>The </a> <strong>HTML</strong> message", "html", StandardCharsets.UTF_8))
+                    .build())),
+            session).getId();
 
         GetMessagesRequest request = GetMessagesRequest.builder()
             .ids(ImmutableList.of(message.getMessageId()))
             .build();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getId, Message::getTextBody, Message::getHtmlBody)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getId, MessageFullView::getTextBody, MessageFullView::getHtmlBody)
             .containsOnly(Tuple.tuple(message.getMessageId(), Optional.of("My plain message"), Optional.of("<a>The </a> <strong>HTML</strong> message")));
     }
 
@@ -378,22 +411,22 @@ public class GetMessagesMethodTest {
                     .setField(new RawField("HEADer2", "Header2Content"))
                     .setSubject("message 1 subject")
                     .setBody("my message", StandardCharsets.UTF_8)),
-            session);
-        
+            session).getId();
+
         GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message1.getMessageId()))
-                .properties(ImmutableList.of("headers.from", "headers.heADER2"))
-                .build();
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of("headers.from", "headers.heADER2"))
+            .build();
 
         Set<MessageProperty> expected = Sets.newHashSet(MessageProperty.id, MessageProperty.headers);
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getProperties())
             .isEqualTo(Optional.of(expected));
     }
-    
+
     @Test
     public void processShouldReturnPropertyFilterWhenFilteringHeadersRequested() throws Exception {
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
@@ -406,14 +439,14 @@ public class GetMessagesMethodTest {
                     .setField(new RawField("HEADer2", "Header2Content"))
                     .setSubject("message 1 subject")
                     .setBody("my message", StandardCharsets.UTF_8)),
-            session);
-        
-        GetMessagesRequest request = GetMessagesRequest.builder()
-                .ids(ImmutableList.of(message1.getMessageId()))
-                .properties(ImmutableList.of("headers.from", "headers.heADER2"))
-                .build();
+            session).getId();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of("headers.from", "headers.heADER2"))
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result)
             .hasSize(1)
@@ -438,7 +471,7 @@ public class GetMessagesMethodTest {
                     .setField(new RawField("HEADer2", "Header2Content"))
                     .setSubject("message 1 subject")
                     .setBody("my message", StandardCharsets.UTF_8)),
-            session);
+            session).getId();
 
         MailboxId customMailboxId = mailboxManager.getMailbox(customMailboxPath, session).getId();
         messageIdManager.setInMailboxes(message1.getMessageId(),
@@ -450,20 +483,126 @@ public class GetMessagesMethodTest {
             .properties(ImmutableList.of("mailboxIds"))
             .build();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1);
         Method.Response response = result.get(0).getResponse();
         assertThat(response).isInstanceOf(GetMessagesResponse.class);
         GetMessagesResponse getMessagesResponse = (GetMessagesResponse) response;
-        assertThat(getMessagesResponse.list()).hasSize(1);
-        assertThat(getMessagesResponse.list().get(0).getMailboxIds()).containsOnly(customMailboxId, message1.getMailboxId());
+        assertThat(getMessagesResponse.list()).hasSize(1)
+            .hasOnlyElementsOfType(MessageMetadataView.class)
+            .extracting(MessageMetadataView.class::cast)
+            .flatExtracting(MessageMetadataView::getMailboxIds)
+            .containsOnly(customMailboxId, message1.getMailboxId());
+    }
+
+    @Test
+    public void processShouldReturnMetadataWhenOnlyMailboxIds() throws Exception {
+        MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
+
+        ComposedMessageId message1 = inbox.appendMessage(
+            AppendCommand.from(
+                org.apache.james.mime4j.dom.Message.Builder.of()
+                    .setFrom("user@domain.tld")
+                    .setField(new RawField("header1", "Header1Content"))
+                    .setField(new RawField("HEADer2", "Header2Content"))
+                    .setSubject("message 1 subject")
+                    .setBody("my message", StandardCharsets.UTF_8)),
+            session).getId();
+
+        MailboxId customMailboxId = mailboxManager.getMailbox(customMailboxPath, session).getId();
+        messageIdManager.setInMailboxes(message1.getMessageId(),
+            ImmutableList.of(message1.getMailboxId(), customMailboxId),
+            session);
+
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of("mailboxIds"))
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
+
+        assertThat(result).hasSize(1);
+        Method.Response response = result.get(0).getResponse();
+        assertThat(response).isInstanceOf(GetMessagesResponse.class);
+        GetMessagesResponse getMessagesResponse = (GetMessagesResponse) response;
+        assertThat(getMessagesResponse.list())
+            .hasSize(1)
+            .hasOnlyElementsOfType(MessageMetadataView.class);
+    }
+
+    @Test
+    public void processShouldReturnFullViewWhenRequestedTextBody() throws Exception {
+        MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
+
+        ComposedMessageId message1 = inbox.appendMessage(
+            AppendCommand.from(
+                org.apache.james.mime4j.dom.Message.Builder.of()
+                    .setFrom("user@domain.tld")
+                    .setField(new RawField("header1", "Header1Content"))
+                    .setField(new RawField("HEADer2", "Header2Content"))
+                    .setSubject("message 1 subject")
+                    .setBody("my message", StandardCharsets.UTF_8)),
+            session).getId();
+
+        MailboxId customMailboxId = mailboxManager.getMailbox(customMailboxPath, session).getId();
+        messageIdManager.setInMailboxes(message1.getMessageId(),
+            ImmutableList.of(message1.getMailboxId(), customMailboxId),
+            session);
+
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of("mailboxIds", "textBody"))
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
+
+        assertThat(result).hasSize(1);
+        Method.Response response = result.get(0).getResponse();
+        assertThat(response).isInstanceOf(GetMessagesResponse.class);
+        GetMessagesResponse getMessagesResponse = (GetMessagesResponse) response;
+        assertThat(getMessagesResponse.list())
+            .hasSize(1)
+            .hasOnlyElementsOfType(MessageFullView.class);
+    }
+
+    @Test
+    public void processShouldReturnHeaderViewWhenRequestedTo() throws Exception {
+        MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
+
+        ComposedMessageId message1 = inbox.appendMessage(
+            AppendCommand.from(
+                org.apache.james.mime4j.dom.Message.Builder.of()
+                    .setFrom("user@domain.tld")
+                    .setField(new RawField("header1", "Header1Content"))
+                    .setField(new RawField("HEADer2", "Header2Content"))
+                    .setSubject("message 1 subject")
+                    .setBody("my message", StandardCharsets.UTF_8)),
+            session).getId();
+
+        MailboxId customMailboxId = mailboxManager.getMailbox(customMailboxPath, session).getId();
+        messageIdManager.setInMailboxes(message1.getMessageId(),
+            ImmutableList.of(message1.getMailboxId(), customMailboxId),
+            session);
+
+        GetMessagesRequest request = GetMessagesRequest.builder()
+            .ids(ImmutableList.of(message1.getMessageId()))
+            .properties(ImmutableList.of("mailboxIds", "to"))
+            .build();
+
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
+
+        assertThat(result).hasSize(1);
+        Method.Response response = result.get(0).getResponse();
+        assertThat(response).isInstanceOf(GetMessagesResponse.class);
+        GetMessagesResponse getMessagesResponse = (GetMessagesResponse) response;
+        assertThat(getMessagesResponse.list())
+            .hasSize(1)
+            .hasOnlyElementsOfType(MessageHeaderView.class);
     }
 
     @Test
     public void processShouldNotFailOnSingleMessageFailure() throws Exception {
-        MessageFactory messageFactory = mock(MessageFactory.class);
-        testee = new GetMessagesMethod(messageFactory, messageIdManager, new DefaultMetricFactory());
         MessageManager inbox = mailboxManager.getMailbox(inboxPath, session);
 
         org.apache.james.mime4j.dom.Message messageContent = org.apache.james.mime4j.dom.Message.Builder.of()
@@ -474,18 +613,20 @@ public class GetMessagesMethodTest {
             .setBody("my message", StandardCharsets.UTF_8)
             .build();
 
-        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent), session);
-        ComposedMessageId message2 = inbox.appendMessage(AppendCommand.from(messageContent), session);
-        when(messageFactory.fromMetaDataWithContent(any()))
-            .thenReturn(mock(Message.class))
-            .thenThrow(new RuntimeException());
+        ComposedMessageId message1 = inbox.appendMessage(AppendCommand.from(messageContent), session).getId();
+        ComposedMessageId message2 = inbox.appendMessage(AppendCommand.from(messageContent), session).getId();
+
+        doCallRealMethod()
+            .doReturn(Mono.error(new RuntimeException()))
+            .when(messageMetadataViewFactory)
+            .fromMessageResults(any());
 
         GetMessagesRequest request = GetMessagesRequest.builder()
             .ids(ImmutableList.of(message1.getMessageId(), message2.getMessageId()))
             .properties(ImmutableList.of("mailboxIds"))
             .build();
 
-        List<JmapResponse> responses = testee.process(request, methodCallId, session).collect(Guavate.toImmutableList());
+        List<JmapResponse> responses = testee.processToStream(request, methodCallId, session).collect(Guavate.toImmutableList());
 
         assertThat(responses).hasSize(1);
         Method.Response response = responses.get(0).getResponse();
@@ -504,17 +645,17 @@ public class GetMessagesMethodTest {
             AppendCommand.builder()
                 .withFlags(flags)
                 .build(messageContent1),
-            session);
+            session).getId();
         ComposedMessageId message2 = inbox.appendMessage(
             AppendCommand.builder()
                 .withFlags(flags)
                 .build(messageContent2),
-            session);
+            session).getId();
         ComposedMessageId message3 = inbox.appendMessage(
             AppendCommand.builder()
                 .withFlags(flags)
                 .build(messageContent3),
-            session);
+            session).getId();
 
         GetMessagesRequest request = GetMessagesRequest.builder()
             .ids(ImmutableList.of(message1.getMessageId(),
@@ -522,25 +663,27 @@ public class GetMessagesMethodTest {
                 message3.getMessageId()))
             .build();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getKeywords)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getKeywords)
             .containsOnlyElementsOf(
-                    ImmutableList.of(
-                        ImmutableMap.of(
-                            "$Answered", true,
-                            "$Draft", true),
-                        ImmutableMap.of(
-                            "$Answered", true,
-                            "$Draft", true),
-                        ImmutableMap.of(
-                            "$Answered", true,
-                            "$Draft", true)));
+                ImmutableList.of(
+                    ImmutableMap.of(
+                        "$Answered", true,
+                        "$Draft", true),
+                    ImmutableMap.of(
+                        "$Answered", true,
+                        "$Draft", true),
+                    ImmutableMap.of(
+                        "$Answered", true,
+                        "$Draft", true)));
 
     }
 
@@ -561,17 +704,17 @@ public class GetMessagesMethodTest {
             AppendCommand.builder()
                 .withFlags(flags1)
                 .build(messageContent1),
-            session);
+            session).getId();
         ComposedMessageId message2 = inbox.appendMessage(
             AppendCommand.builder()
                 .withFlags(flags2)
                 .build(messageContent2),
-            session);
+            session).getId();
         ComposedMessageId message3 = inbox.appendMessage(
             AppendCommand.builder()
                 .withFlags(flags3)
                 .build(messageContent3),
-            session);
+            session).getId();
 
         GetMessagesRequest request = GetMessagesRequest.builder()
             .ids(ImmutableList.of(message1.getMessageId(),
@@ -579,25 +722,27 @@ public class GetMessagesMethodTest {
                 message3.getMessageId()))
             .build();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getKeywords)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getKeywords)
             .containsOnlyElementsOf(
-                    ImmutableList.of(
-                        ImmutableMap.of(
-                            "$Answered", true,
-                            "$Draft", true),
-                        ImmutableMap.of(
-                            "$Answered", true,
-                            "$Draft", true),
-                        ImmutableMap.of(
-                            "$Answered", true,
-                            "$Draft", true)));
+                ImmutableList.of(
+                    ImmutableMap.of(
+                        "$Answered", true,
+                        "$Draft", true),
+                    ImmutableMap.of(
+                        "$Answered", true,
+                        "$Draft", true),
+                    ImmutableMap.of(
+                        "$Answered", true,
+                        "$Draft", true)));
 
     }
 
@@ -613,25 +758,27 @@ public class GetMessagesMethodTest {
             AppendCommand.builder()
                 .withFlags(flags)
                 .build(messageContent1),
-            session);
+            session).getId();
 
         GetMessagesRequest request = GetMessagesRequest.builder()
             .ids(ImmutableList.of(message1.getMessageId()))
             .build();
 
-        List<JmapResponse> result = testee.process(request, methodCallId, session).collect(Collectors.toList());
+        List<JmapResponse> result = testee.processToStream(request, methodCallId, session).collect(Collectors.toList());
 
         assertThat(result).hasSize(1)
             .extracting(JmapResponse::getResponse)
             .hasOnlyElementsOfType(GetMessagesResponse.class)
             .extracting(GetMessagesResponse.class::cast)
             .flatExtracting(GetMessagesResponse::list)
-            .extracting(Message::getKeywords)
+            .hasOnlyElementsOfType(MessageFullView.class)
+            .extracting(MessageFullView.class::cast)
+            .extracting(MessageFullView::getKeywords)
             .containsOnlyElementsOf(
-                    ImmutableList.of(
-                        ImmutableMap.of(
-                            "$Answered", true,
-                            FORWARDED, true)));
+                ImmutableList.of(
+                    ImmutableMap.of(
+                        "$Answered", true,
+                        FORWARDED, true)));
     }
 
 }

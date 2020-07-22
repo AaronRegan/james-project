@@ -20,7 +20,6 @@
 package org.apache.james.webadmin.service;
 
 import java.util.Optional;
-import java.util.function.BiFunction;
 
 import javax.inject.Inject;
 
@@ -34,10 +33,11 @@ import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.task.TaskType;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import reactor.core.publisher.Mono;
 
 public class CassandraMappingsSolveInconsistenciesTask implements Task {
-    public static final TaskType TYPE = TaskType.of("cassandraMappingsSolveInconsistencies");
+    public static final TaskType TYPE = TaskType.of("cassandra-mappings-solve-inconsistencies");
 
     private static class CassandraMappingsSolveInconsistenciesTaskDTO implements TaskDTO {
 
@@ -53,14 +53,16 @@ public class CassandraMappingsSolveInconsistenciesTask implements Task {
         }
     }
 
-    public static final BiFunction<MappingsSourcesMigration, CassandraMappingsSourcesDAO, TaskDTOModule<CassandraMappingsSolveInconsistenciesTask, CassandraMappingsSolveInconsistenciesTaskDTO>> MODULE = (mappingsSourcesMigration, cassandraMappingsSourcesDAO) ->
-        DTOModule
+    public static TaskDTOModule<CassandraMappingsSolveInconsistenciesTask, CassandraMappingsSolveInconsistenciesTaskDTO>
+        module(MappingsSourcesMigration mappingsSourcesMigration, CassandraMappingsSourcesDAO cassandraMappingsSourcesDAO) {
+        return DTOModule
             .forDomainObject(CassandraMappingsSolveInconsistenciesTask.class)
             .convertToDTO(CassandraMappingsSolveInconsistenciesTaskDTO.class)
             .toDomainObjectConverter(dto -> new CassandraMappingsSolveInconsistenciesTask(mappingsSourcesMigration, cassandraMappingsSourcesDAO))
             .toDTOConverter((domainObject, typeName) -> new CassandraMappingsSolveInconsistenciesTaskDTO(typeName))
             .typeName(TYPE.asString())
             .withFactory(TaskDTOModule::new);
+    }
 
     private final Task mappingsSourcesMigration;
     private final CassandraMappingsSourcesDAO cassandraMappingsSourcesDAO;

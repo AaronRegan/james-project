@@ -19,33 +19,28 @@
 
 package org.apache.james.linshare;
 
-import static io.restassured.RestAssured.given;
-import static org.apache.james.linshare.LinshareFixture.USER_1;
+import static org.apache.james.blob.api.BlobStore.StoragePolicy.LOW_COST;
+import static org.apache.james.linshare.LinshareExtension.LinshareAPIForTechnicalAccountTesting;
+import static org.apache.james.linshare.LinshareExtension.LinshareAPIForUserTesting;
 import static org.apache.james.linshare.LinshareFixture.USER_2;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.hasSize;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
 
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.export.api.BlobExportMechanism;
 import org.apache.james.blob.export.api.FileExtension;
 import org.apache.james.blob.memory.MemoryBlobStore;
+import org.apache.james.blob.memory.MemoryDumbBlobStore;
 import org.apache.james.core.MailAddress;
 import org.apache.james.linshare.client.Document;
-import org.apache.james.linshare.client.LinshareAPI;
-import org.awaitility.Awaitility;
-import org.awaitility.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-import io.restassured.specification.RequestSpecification;
+import reactor.core.publisher.Mono;
 
 class LinshareBlobExportMechanismTest {
     private static final String FILE_CONTENT = "content";
@@ -58,42 +53,41 @@ class LinshareBlobExportMechanismTest {
     private MemoryBlobStore blobStore;
     private LinshareBlobExportMechanism testee;
     private HashBlobId.Factory blobIdFactory;
-    private LinshareAPI user2API;
+    private LinshareAPIForUserTesting user2API;
 
     @BeforeEach
     void setUp() throws Exception {
         blobIdFactory = new HashBlobId.Factory();
-        blobStore = new MemoryBlobStore(blobIdFactory);
+        blobStore = new MemoryBlobStore(blobIdFactory, new MemoryDumbBlobStore());
 
         testee = new LinshareBlobExportMechanism(
-            linshareExtension.getAPIFor(USER_1),
+            linshareExtension.getDelegationAccountAPI(),
             blobStore);
 
-        user2API = linshareExtension.getAPIFor(USER_2);
+        user2API = LinshareAPIForUserTesting.from(USER_2);
     }
 
     @Test
-    void exportShouldShareTheDocumentViaLinshare() throws Exception {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), FILE_CONTENT).block();
+    void exportShouldUploadTheDocumentToTargetUserViaLinshare() throws Exception {
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), FILE_CONTENT, LOW_COST)).block();
         String filePrefix = "deleted-message-of-bob@james.org-";
 
         testee.blobId(blobId)
             .with(new MailAddress(USER_2.getUsername()))
             .explanation(EXPLANATION)
-            .filePrefix(Optional.of(filePrefix))
+            .filePrefix(filePrefix)
             .fileExtension(FILE_TEXT_EXTENSION)
             .export();
 
-        assertThat(user2API.receivedShares())
+        assertThat(user2API.listAllDocuments())
             .hasSize(1)
-            .allSatisfy(receivedShare -> assertThat(receivedShare.getDocument().getName()).endsWith(".txt"))
-            .allSatisfy(receivedShare -> assertThat(receivedShare.getDocument().getName()).startsWith(filePrefix))
-            .allSatisfy(receivedShare -> assertThat(receivedShare.getSender().getMail()).isEqualTo(USER_1.getUsername()));
+            .allSatisfy(receivedShare -> assertThat(receivedShare.getName()).endsWith(".txt"))
+            .allSatisfy(receivedShare -> assertThat(receivedShare.getName()).startsWith(filePrefix));
     }
 
     @Test
-    void exportShouldSendAnEmailToSharee() throws Exception {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), FILE_CONTENT).block();
+    void exportShouldUploadTheDocumentAndAllowDownloadViaLinshare(LinshareAPIForTechnicalAccountTesting delegationAPIForTesting) throws Exception {
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), FILE_CONTENT, LOW_COST)).block();
 
         testee.blobId(blobId)
             .with(new MailAddress(USER_2.getUsername()))
@@ -102,37 +96,8 @@ class LinshareBlobExportMechanismTest {
             .fileExtension(FILE_TEXT_EXTENSION)
             .export();
 
-        RequestSpecification request = given(linshareExtension.getLinshare().fakeSmtpRequestSpecification());
-
-        Awaitility.waitAtMost(Duration.TEN_SECONDS)
-            .pollInterval(Duration.ONE_SECOND)
-            .untilAsserted(
-                () -> request
-                    .get("/api/email")
-                .then()
-                    .body("", hasSize(2)));
-
-        request
-            .get("/api/email")
-        .then()
-            .body("[1].subject", containsString("John Doe has shared a file with you"))
-            .body("[1].to", hasItem(USER_2.getUsername()))
-            .body("[1].html", containsString(EXPLANATION));
-    }
-
-    @Test
-    void exportShouldShareTheDocumentAndAllowDownloadViaLinshare() throws Exception {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), FILE_CONTENT).block();
-
-        testee.blobId(blobId)
-            .with(new MailAddress(USER_2.getUsername()))
-            .explanation(EXPLANATION)
-            .noFileCustomPrefix()
-            .fileExtension(FILE_TEXT_EXTENSION)
-            .export();
-
-        Document sharedDoc = user2API.receivedShares().get(0).getDocument();
-        byte[] sharedFile =  linshareExtension.downloadSharedFile(USER_2, sharedDoc.getId(), sharedDoc.getName());
+        Document sharedDoc = user2API.listAllDocuments().get(0);
+        byte[] sharedFile = delegationAPIForTesting.downloadFileFrom(USER_2, sharedDoc.getId());
         assertThat(sharedFile).isEqualTo(FILE_CONTENT.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -152,17 +117,17 @@ class LinshareBlobExportMechanismTest {
 
     @Test
     void exportWithFilePrefixShouldCreateFileWithCustomPrefix() throws Exception {
-        BlobId blobId = blobStore.save(blobStore.getDefaultBucketName(), FILE_CONTENT).block();
+        BlobId blobId = Mono.from(blobStore.save(blobStore.getDefaultBucketName(), FILE_CONTENT, LOW_COST)).block();
         String filePrefix = "deleted-message-of-bob@james.org";
 
         testee.blobId(blobId)
             .with(new MailAddress(USER_2.getUsername()))
             .explanation(EXPLANATION)
-            .filePrefix(Optional.of(filePrefix))
+            .filePrefix(filePrefix)
             .fileExtension(FILE_TEXT_EXTENSION)
             .export();
 
-        Document sharedDoc = user2API.receivedShares().get(0).getDocument();
+        Document sharedDoc = user2API.listAllDocuments().get(0);
         assertThat(sharedDoc.getName())
             .startsWith(filePrefix);
     }

@@ -18,16 +18,19 @@
  ****************************************************************/
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.message.StatusDataItems;
+
+import com.google.common.base.MoreObjects;
 
 public class StatusRequest extends AbstractImapRequest {
     private final String mailboxName;
 
     private final StatusDataItems statusDataItems;
 
-    public StatusRequest(ImapCommand command, String mailboxName, StatusDataItems statusDataItems, String tag) {
-        super(tag, command);
+    public StatusRequest(String mailboxName, StatusDataItems statusDataItems, Tag tag) {
+        super(tag, ImapConstants.STATUS_COMMAND);
         this.mailboxName = mailboxName;
         this.statusDataItems = statusDataItems;
     }
@@ -38,5 +41,13 @@ public class StatusRequest extends AbstractImapRequest {
 
     public final StatusDataItems getStatusDataItems() {
         return statusDataItems;
+    }
+
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("mailboxName", mailboxName)
+            .add("statusDataItems", statusDataItems)
+            .toString();
     }
 }

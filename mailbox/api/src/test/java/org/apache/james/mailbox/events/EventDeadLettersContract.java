@@ -30,7 +30,7 @@ import java.util.function.Function;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.model.MailboxConstants;
 import org.apache.james.mailbox.model.MailboxPath;
@@ -93,7 +93,7 @@ interface EventDeadLettersContract {
     }
 
     static Event event(Event.EventId eventId) {
-        return new MailboxListener.MailboxAdded(SESSION_ID, USER, MAILBOX_PATH, MAILBOX_ID, eventId);
+        return new MailboxListener.MailboxAdded(SESSION_ID, USERNAME, MAILBOX_PATH, MAILBOX_ID, eventId);
     }
 
     List<Group> CONCURRENT_GROUPS = ImmutableList.of(new Group0(), new Group1(), new Group2(), new Group3(), new Group4(), new Group5(),
@@ -102,16 +102,16 @@ interface EventDeadLettersContract {
     int THREAD_COUNT = 10;
     int OPERATION_COUNT = 50;
 
-    MailboxPath MAILBOX_PATH = new MailboxPath(MailboxConstants.USER_NAMESPACE, "user", "mailboxName");
-    User USER = User.fromUsername("user");
+    Username USERNAME = Username.of("user");
+    MailboxPath MAILBOX_PATH = new MailboxPath(MailboxConstants.USER_NAMESPACE, USERNAME, "mailboxName");
     MailboxSession.SessionId SESSION_ID = MailboxSession.SessionId.of(235);
     TestId MAILBOX_ID = TestId.of(563);
     Event.EventId EVENT_ID_1 = Event.EventId.of("6e0dd59d-660e-4d9b-b22f-0354479f47b4");
     Event.EventId EVENT_ID_2 = Event.EventId.of("6e0dd59d-660e-4d9b-b22f-0354479f47b5");
     Event.EventId EVENT_ID_3 = Event.EventId.of("6e0dd59d-660e-4d9b-b22f-0354479f47b6");
-    MailboxListener.MailboxAdded EVENT_1 = new MailboxListener.MailboxAdded(SESSION_ID, USER, MAILBOX_PATH, MAILBOX_ID, EVENT_ID_1);
-    MailboxListener.MailboxAdded EVENT_2 = new MailboxListener.MailboxAdded(SESSION_ID, USER, MAILBOX_PATH, MAILBOX_ID, EVENT_ID_2);
-    MailboxListener.MailboxAdded EVENT_3 = new MailboxListener.MailboxAdded(SESSION_ID, USER, MAILBOX_PATH, MAILBOX_ID, EVENT_ID_3);
+    MailboxListener.MailboxAdded EVENT_1 = new MailboxListener.MailboxAdded(SESSION_ID, USERNAME, MAILBOX_PATH, MAILBOX_ID, EVENT_ID_1);
+    MailboxListener.MailboxAdded EVENT_2 = new MailboxListener.MailboxAdded(SESSION_ID, USERNAME, MAILBOX_PATH, MAILBOX_ID, EVENT_ID_2);
+    MailboxListener.MailboxAdded EVENT_3 = new MailboxListener.MailboxAdded(SESSION_ID, USERNAME, MAILBOX_PATH, MAILBOX_ID, EVENT_ID_3);
     EventDeadLetters.InsertionId INSERTION_ID_1 = EventDeadLetters.InsertionId.of("6e0dd59d-660e-4d9b-b22f-0354479f47b7");
     EventDeadLetters.InsertionId INSERTION_ID_2 = EventDeadLetters.InsertionId.of("6e0dd59d-660e-4d9b-b22f-0354479f47b8");
     EventDeadLetters.InsertionId INSERTION_ID_3 = EventDeadLetters.InsertionId.of("6e0dd59d-660e-4d9b-b22f-0354479f47b9");
@@ -138,7 +138,7 @@ interface EventDeadLettersContract {
         default void storeShouldThrowWhenNullGroup() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            assertThatThrownBy(() -> eventDeadLetters.store(NULL_GROUP, EVENT_1, INSERTION_ID_1))
+            assertThatThrownBy(() -> eventDeadLetters.store(NULL_GROUP, EVENT_1))
                 .isInstanceOf(IllegalArgumentException.class);
         }
 
@@ -146,15 +146,7 @@ interface EventDeadLettersContract {
         default void storeShouldThrowWhenNullEvent() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            assertThatThrownBy(() -> eventDeadLetters.store(GROUP_A, NULL_EVENT, INSERTION_ID_1))
-                .isInstanceOf(IllegalArgumentException.class);
-        }
-
-        @Test
-        default void storeShouldThrowWhenNullInsertionId() {
-            EventDeadLetters eventDeadLetters = eventDeadLetters();
-
-            assertThatThrownBy(() -> eventDeadLetters.store(GROUP_A, EVENT_1, NULL_INSERTION_ID))
+            assertThatThrownBy(() -> eventDeadLetters.store(GROUP_A, NULL_EVENT))
                 .isInstanceOf(IllegalArgumentException.class);
         }
 
@@ -162,7 +154,7 @@ interface EventDeadLettersContract {
         default void storeShouldThrowWhenBothGroupAndEventAndInsertionIdAreNull() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            assertThatThrownBy(() -> eventDeadLetters.store(NULL_GROUP, NULL_EVENT, NULL_INSERTION_ID))
+            assertThatThrownBy(() -> eventDeadLetters.store(NULL_GROUP, NULL_EVENT))
                 .isInstanceOf(IllegalArgumentException.class);
         }
 
@@ -170,20 +162,9 @@ interface EventDeadLettersContract {
         default void storeShouldStoreGroupWithCorrespondingEvent() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            assertThat(eventDeadLetters.failedEvent(GROUP_A, INSERTION_ID_1).block())
+            EventDeadLetters.InsertionId insertionId = eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            assertThat(eventDeadLetters.failedEvent(GROUP_A, insertionId).block())
                 .isEqualTo(EVENT_1);
-        }
-
-        @Test
-        default void storeShouldStoreDuplicatedEventsPerGroupWhenStoreWithDifferentInsertionId() {
-            EventDeadLetters eventDeadLetters = eventDeadLetters();
-
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_2).block();
-
-            assertThat(eventDeadLetters.failedIds(GROUP_A).toStream())
-                .containsOnly(INSERTION_ID_1, INSERTION_ID_2);
         }
 
         @Test
@@ -196,9 +177,8 @@ interface EventDeadLettersContract {
             ConcurrentTestRunner.builder()
                 .operation((threadNumber, step) -> {
                     Event.EventId eventId = Event.EventId.random();
-                    EventDeadLetters.InsertionId insertionId = EventDeadLetters.InsertionId.random();
+                    EventDeadLetters.InsertionId insertionId = eventDeadLetters.store(groups.get(threadNumber), event(eventId)).block();
                     storedInsertionIds.put(threadNumber, insertionId);
-                    eventDeadLetters.store(groups.get(threadNumber), event(eventId), insertionId).block();
                 })
                 .threadCount(THREAD_COUNT)
                 .operationCount(OPERATION_COUNT)
@@ -242,8 +222,8 @@ interface EventDeadLettersContract {
         default void removeShouldRemoveMatched() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
+            eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            eventDeadLetters.store(GROUP_A, EVENT_2).block();
 
             eventDeadLetters.remove(GROUP_A, INSERTION_ID_1).block();
 
@@ -255,21 +235,21 @@ interface EventDeadLettersContract {
         default void removeShouldKeepNonMatched() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
-            eventDeadLetters.store(GROUP_A, EVENT_3, INSERTION_ID_3).block();
+            EventDeadLetters.InsertionId insertionId1 = eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            EventDeadLetters.InsertionId insertionId2 = eventDeadLetters.store(GROUP_A, EVENT_2).block();
+            EventDeadLetters.InsertionId insertionId3 = eventDeadLetters.store(GROUP_A, EVENT_3).block();
 
-            eventDeadLetters.remove(GROUP_A, INSERTION_ID_1).block();
+            eventDeadLetters.remove(GROUP_A, insertionId1).block();
 
             assertThat(eventDeadLetters.failedIds(GROUP_A).toStream())
-                .containsOnly(INSERTION_ID_2, INSERTION_ID_3);
+                .containsOnly(insertionId2, insertionId3);
         }
 
         @Test
         default void removeShouldNotThrowWhenNoInsertionIdMatched() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
+            eventDeadLetters.store(GROUP_A, EVENT_1).block();
 
             assertThatCode(() -> eventDeadLetters.remove(GROUP_A, INSERTION_ID_2).block())
                 .doesNotThrowAnyException();
@@ -279,7 +259,7 @@ interface EventDeadLettersContract {
         default void removeShouldNotThrowWhenNoGroupMatched() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
+            eventDeadLetters.store(GROUP_A, EVENT_1).block();
 
             assertThatCode(() -> eventDeadLetters.remove(GROUP_B, INSERTION_ID_1).block())
                 .doesNotThrowAnyException();
@@ -296,9 +276,8 @@ interface EventDeadLettersContract {
                 .operation((threadNumber, step) -> {
                     int operationIndex = threadNumber * OPERATION_COUNT + step;
                     Event.EventId eventId = Event.EventId.random();
-                    EventDeadLetters.InsertionId insertionId = EventDeadLetters.InsertionId.random();
+                    EventDeadLetters.InsertionId insertionId = eventDeadLetters.store(groups.get(threadNumber), event(eventId)).block();
                     storedInsertionIds.put(operationIndex, insertionId);
-                    eventDeadLetters.store(groups.get(threadNumber), event(eventId), insertionId).block();
                 })
                 .threadCount(THREAD_COUNT)
                 .operationCount(OPERATION_COUNT)
@@ -349,8 +328,8 @@ interface EventDeadLettersContract {
         default void failedEventShouldReturnEmptyWhenNotFound() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
+            eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            eventDeadLetters.store(GROUP_A, EVENT_2).block();
 
             assertThat(eventDeadLetters.failedEvent(GROUP_A, INSERTION_ID_3).block())
                 .isNull();
@@ -360,10 +339,10 @@ interface EventDeadLettersContract {
         default void failedEventShouldReturnEventWhenContains() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
+            EventDeadLetters.InsertionId insertionId = eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            eventDeadLetters.store(GROUP_A, EVENT_2).block();
 
-            assertThat(eventDeadLetters.failedEvent(GROUP_A, INSERTION_ID_1).block())
+            assertThat(eventDeadLetters.failedEvent(GROUP_A, insertionId).block())
                 .isEqualTo(EVENT_1);
         }
 
@@ -371,23 +350,23 @@ interface EventDeadLettersContract {
         default void failedEventShouldNotRemoveEvent() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
-            eventDeadLetters.store(GROUP_A, EVENT_3, INSERTION_ID_3).block();
+            EventDeadLetters.InsertionId insertionId1 = eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            EventDeadLetters.InsertionId insertionId2 = eventDeadLetters.store(GROUP_A, EVENT_2).block();
+            EventDeadLetters.InsertionId insertionId3 = eventDeadLetters.store(GROUP_A, EVENT_3).block();
 
-            eventDeadLetters.failedEvent(GROUP_A, INSERTION_ID_1).block();
+            eventDeadLetters.failedEvent(GROUP_A, insertionId1).block();
 
             assertThat(allInsertionIds())
-                .containsOnly(INSERTION_ID_1, INSERTION_ID_2, INSERTION_ID_3);
+                .containsOnly(insertionId1, insertionId2, insertionId3);
         }
 
         @Test
         default void failedEventShouldNotThrowWhenNoGroupMatched() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
+            EventDeadLetters.InsertionId insertionId = eventDeadLetters.store(GROUP_A, EVENT_1).block();
 
-            assertThatCode(() -> eventDeadLetters.failedEvent(GROUP_B, INSERTION_ID_1).block())
+            assertThatCode(() -> eventDeadLetters.failedEvent(GROUP_B, insertionId).block())
                 .doesNotThrowAnyException();
         }
     }
@@ -406,9 +385,9 @@ interface EventDeadLettersContract {
         default void failedEventsByGroupShouldReturnEmptyWhenNonMatch() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
-            eventDeadLetters.store(GROUP_A, EVENT_3, INSERTION_ID_3).block();
+            eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            eventDeadLetters.store(GROUP_A, EVENT_2).block();
+            eventDeadLetters.store(GROUP_A, EVENT_3).block();
 
             assertThat(eventDeadLetters.failedIds(GROUP_B).toStream())
                 .isEmpty();
@@ -418,26 +397,26 @@ interface EventDeadLettersContract {
         default void failedEventsByGroupShouldReturnAllEventsCorrespondingToGivenGroup() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
-            eventDeadLetters.store(GROUP_B, EVENT_3, INSERTION_ID_3).block();
+            EventDeadLetters.InsertionId insertionId = eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            eventDeadLetters.store(GROUP_B, EVENT_2).block();
+            eventDeadLetters.store(GROUP_B, EVENT_3).block();
 
             assertThat(eventDeadLetters.failedIds(GROUP_A).toStream())
-                .containsOnly(INSERTION_ID_1, INSERTION_ID_2);
+                .containsOnly(insertionId);
         }
 
         @Test
         default void failedEventsByGroupShouldNotRemoveEvents() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
 
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_A, EVENT_2, INSERTION_ID_2).block();
-            eventDeadLetters.store(GROUP_B, EVENT_3, INSERTION_ID_3).block();
+            EventDeadLetters.InsertionId insertionId1 = eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            EventDeadLetters.InsertionId insertionId2 = eventDeadLetters.store(GROUP_A, EVENT_2).block();
+            EventDeadLetters.InsertionId insertionId3 = eventDeadLetters.store(GROUP_B, EVENT_3).block();
 
             eventDeadLetters.failedIds(GROUP_A).toStream();
 
             assertThat(allInsertionIds())
-                .containsOnly(INSERTION_ID_1, INSERTION_ID_2, INSERTION_ID_3);
+                .containsOnly(insertionId1, insertionId2, insertionId3);
         }
     }
 
@@ -445,8 +424,8 @@ interface EventDeadLettersContract {
         @Test
         default void groupsWithFailedEventsShouldReturnAllStoredGroups() {
             EventDeadLetters eventDeadLetters = eventDeadLetters();
-            eventDeadLetters.store(GROUP_A, EVENT_1, INSERTION_ID_1).block();
-            eventDeadLetters.store(GROUP_B, EVENT_1, INSERTION_ID_2).block();
+            eventDeadLetters.store(GROUP_A, EVENT_1).block();
+            eventDeadLetters.store(GROUP_B, EVENT_1).block();
 
             assertThat(eventDeadLetters.groupsWithFailedEvents().collectList().block())
                 .containsOnly(GROUP_A, GROUP_B);
@@ -458,5 +437,53 @@ interface EventDeadLettersContract {
 
             assertThat(eventDeadLetters.groupsWithFailedEvents().toStream()).isEmpty();
         }
+    }
+
+    interface ContainEventsContract extends EventDeadLettersContract {
+        @Test
+        default void containEventsShouldReturnFalseOnNothingStored() {
+            EventDeadLetters eventDeadLetters = eventDeadLetters();
+
+            assertThat(eventDeadLetters.containEvents().block()).isFalse();
+        }
+
+        @Test
+        default void containEventsShouldReturnTrueOnStoredEvents() {
+            EventDeadLetters eventDeadLetters = eventDeadLetters();
+            eventDeadLetters.store(GROUP_A, EVENT_1).block();
+
+            assertThat(eventDeadLetters.containEvents().block()).isTrue();
+        }
+
+        @Test
+        default void containEventsShouldReturnFalseWhenRemoveAllStoredEvents() {
+            EventDeadLetters eventDeadLetters = eventDeadLetters();
+            EventDeadLetters.InsertionId insertionId1 = eventDeadLetters().store(GROUP_A, EVENT_1).block();
+            EventDeadLetters.InsertionId insertionId2 = eventDeadLetters().store(GROUP_A, EVENT_2).block();
+
+            assertThat(eventDeadLetters.containEvents().block()).isTrue();
+
+            eventDeadLetters.remove(GROUP_A, insertionId1).block();
+            eventDeadLetters.remove(GROUP_A, insertionId2).block();
+
+            assertThat(eventDeadLetters.containEvents().block()).isFalse();
+        }
+
+        @Test
+        default void containEventsShouldReturnTrueWhenRemoveSomeStoredEvents() {
+            EventDeadLetters eventDeadLetters = eventDeadLetters();
+            EventDeadLetters.InsertionId insertionId1 = eventDeadLetters().store(GROUP_A, EVENT_1).block();
+            eventDeadLetters().store(GROUP_B, EVENT_2).block();
+
+            assertThat(eventDeadLetters.containEvents().block()).isTrue();
+
+            eventDeadLetters.remove(GROUP_A, insertionId1).block();
+
+            assertThat(eventDeadLetters.containEvents().block()).isTrue();
+        }
+    }
+
+    interface AllContracts extends StoreContract, RemoveContract, FailedEventContract, FailedEventsContract, GroupsWithFailedEventsContract, ContainEventsContract {
+
     }
 }

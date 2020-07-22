@@ -19,9 +19,11 @@
 
 package org.apache.james.transport.mailets.remote.delivery;
 
+import static org.apache.james.metrics.api.TimeMetric.ExecutionResult.DEFAULT_100_MS_THRESHOLD;
+import static org.apache.james.transport.mailets.remote.delivery.Bouncer.IS_DELIVERY_PERMANENT_ERROR;
+
 import java.time.Duration;
 import java.util.Date;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 import org.apache.james.dnsservice.api.DNSService;
@@ -31,6 +33,8 @@ import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.metrics.api.TimeMetric;
 import org.apache.james.queue.api.MailPrioritySupport;
 import org.apache.james.queue.api.MailQueue;
+import org.apache.mailet.Attribute;
+import org.apache.mailet.AttributeValue;
 import org.apache.mailet.Mail;
 import org.apache.mailet.MailetContext;
 import org.slf4j.Logger;
@@ -48,7 +52,6 @@ public class DeliveryRunnable implements Disposable {
     private static final Logger LOGGER = LoggerFactory.getLogger(DeliveryRunnable.class);
 
     public static final Supplier<Date> CURRENT_DATE_SUPPLIER = Date::new;
-    public static final AtomicBoolean DEFAULT_NOT_STARTED = new AtomicBoolean(false);
     public static final String OUTGOING_MAILS = "outgoingMails";
     public static final String REMOTE_DELIVERY_TRIAL = "RemoteDeliveryTrial";
 
@@ -60,6 +63,7 @@ public class DeliveryRunnable implements Disposable {
     private final MailDelivrer mailDelivrer;
     private final Supplier<Date> dateSupplier;
     private Disposable disposable;
+    private Scheduler remoteDeliveryScheduler;
 
     public DeliveryRunnable(MailQueue queue, RemoteDeliveryConfiguration configuration, DNSService dnsServer, MetricFactory metricFactory,
                             MailetContext mailetContext, Bouncer bouncer) {
@@ -81,10 +85,9 @@ public class DeliveryRunnable implements Disposable {
     }
 
     public void start() {
-        Scheduler remoteDeliveryScheduler = Schedulers.newElastic("RemoteDelivery");
+        remoteDeliveryScheduler = Schedulers.newBoundedElastic(Schedulers.DEFAULT_BOUNDED_ELASTIC_SIZE, Schedulers.DEFAULT_BOUNDED_ELASTIC_QUEUESIZE, "RemoteDelivery");
         disposable = Flux.from(queue.deQueue())
-            .publishOn(remoteDeliveryScheduler)
-            .flatMap(this::runStep)
+            .flatMap(queueItem -> runStep(queueItem).subscribeOn(remoteDeliveryScheduler))
             .onErrorContinue(((throwable, nothing) -> LOGGER.error("Exception caught in RemoteDelivery", throwable)))
             .subscribeOn(remoteDeliveryScheduler)
             .subscribe();
@@ -93,11 +96,10 @@ public class DeliveryRunnable implements Disposable {
     private Mono<Void> runStep(MailQueue.MailQueueItem queueItem) {
         TimeMetric timeMetric = metricFactory.timer(REMOTE_DELIVERY_TRIAL);
         try {
-            return processMail(queueItem);
+            return processMail(queueItem)
+                .doOnSuccess(any -> timeMetric.stopAndPublish().logWhenExceedP99(DEFAULT_100_MS_THRESHOLD));
         } catch (Throwable e) {
             return Mono.error(e);
-        } finally {
-            timeMetric.stopAndPublish();
         }
     }
 
@@ -132,9 +134,14 @@ public class DeliveryRunnable implements Disposable {
                 handleTemporaryFailure(mail, executionResult);
                 break;
             case PERMANENT_FAILURE:
-                bouncer.bounce(mail, executionResult.getException().orElse(null));
+                handlePermanentFailure(mail, executionResult);
                 break;
         }
+    }
+
+    private void handlePermanentFailure(Mail mail, ExecutionResult executionResult) {
+        mail.setAttribute(new Attribute(IS_DELIVERY_PERMANENT_ERROR, AttributeValue.of(true)));
+        bouncer.bounce(mail, executionResult.getException().orElse(null));
     }
 
     private void handleTemporaryFailure(Mail mail, ExecutionResult executionResult) throws MailQueue.MailQueueException {
@@ -143,6 +150,7 @@ public class DeliveryRunnable implements Disposable {
             DeliveryRetriesHelper.initRetries(mail);
             mail.setLastUpdated(dateSupplier.get());
         }
+        mail.setAttribute(new Attribute(IS_DELIVERY_PERMANENT_ERROR, AttributeValue.of(false)));
         int retries = DeliveryRetriesHelper.retrieveRetries(mail);
 
         if (retries < configuration.getMaxRetries()) {
@@ -177,5 +185,6 @@ public class DeliveryRunnable implements Disposable {
     @Override
     public void dispose() {
         disposable.dispose();
+        remoteDeliveryScheduler.dispose();
     }
 }

@@ -20,6 +20,8 @@
 package org.apache.james.blob.mail;
 
 import static org.apache.commons.io.output.NullOutputStream.NULL_OUTPUT_STREAM;
+import static org.apache.james.blob.api.BlobStore.StoragePolicy.LOW_COST;
+import static org.apache.james.blob.api.BlobStore.StoragePolicy.SIZE_BASED;
 import static org.apache.james.blob.mail.MimeMessagePartsId.BODY_BLOB_TYPE;
 import static org.apache.james.blob.mail.MimeMessagePartsId.HEADER_BLOB_TYPE;
 
@@ -41,9 +43,9 @@ import javax.mail.internet.MimeMessage;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.blob.api.BlobStore;
+import org.apache.james.blob.api.BlobType;
 import org.apache.james.blob.api.Store;
-import org.apache.james.blob.api.Store.BlobType;
-import org.apache.james.util.BodyOffsetInputStream;
+import org.apache.james.util.io.BodyOffsetInputStream;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
@@ -76,8 +78,8 @@ public class MimeMessageStore {
                 byte[] headerBytes = getHeaderBytes(messageAsArray, bodyStartOctet);
                 byte[] bodyBytes = getBodyBytes(messageAsArray, bodyStartOctet);
                 return Stream.of(
-                    Pair.of(HEADER_BLOB_TYPE, new Store.Impl.BytesToSave(headerBytes)),
-                    Pair.of(BODY_BLOB_TYPE, new Store.Impl.BytesToSave(bodyBytes)));
+                    Pair.of(HEADER_BLOB_TYPE, new Store.Impl.BytesToSave(headerBytes, SIZE_BASED)),
+                    Pair.of(BODY_BLOB_TYPE, new Store.Impl.BytesToSave(bodyBytes, LOW_COST)));
             } catch (MessagingException | IOException e) {
                 throw new RuntimeException(e);
             }

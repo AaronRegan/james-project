@@ -25,9 +25,8 @@ import java.util.Optional;
 import javax.inject.Inject;
 import javax.inject.Named;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.core.MailAddress;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
@@ -46,31 +45,27 @@ import org.apache.james.user.api.UsersRepositoryException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import reactor.core.publisher.Mono;
+
 /**
  * {@link DeliverToRecipientHook} which deliver the message directly to the recipients mailbox.
- * 
- *
  */
 public class MailboxDeliverToRecipientHandler implements DeliverToRecipientHook {
     private static final Logger LOGGER = LoggerFactory.getLogger(MailboxDeliverToRecipientHandler.class);
   
-    private UsersRepository users;
-    private MailboxManager mailboxManager;
+    private final UsersRepository users;
+    private final MailboxManager mailboxManager;
 
     @Inject
-    public final void setUsersRepository(UsersRepository users) {
+    public MailboxDeliverToRecipientHandler(UsersRepository users, @Named("mailboxmanager") MailboxManager mailboxManager) {
         this.users = users;
-    }
-
-    @Inject
-    public final void setMailboxManager(@Named("mailboxmanager") MailboxManager mailboxManager) {
         this.mailboxManager = mailboxManager;
     }
-    
+
     @Override
     public HookResult deliver(SMTPSession session, MailAddress recipient, MailEnvelope envelope) {
         try {
-            String username = users.getUser(recipient);
+            Username username = users.getUsername(recipient);
 
             MailboxSession mailboxSession = mailboxManager.createSystemSession(username);
             MailboxPath inbox = MailboxPath.inbox(mailboxSession);
@@ -78,11 +73,11 @@ public class MailboxDeliverToRecipientHandler implements DeliverToRecipientHook 
             mailboxManager.startProcessingRequest(mailboxSession);
 
             // create inbox if not exist
-            if (!mailboxManager.mailboxExists(inbox, mailboxSession)) {
+            if (!Mono.from(mailboxManager.mailboxExists(inbox, mailboxSession)).block()) {
                 Optional<MailboxId> mailboxId = mailboxManager.createMailbox(inbox, mailboxSession);
                 LOGGER.info("Provisioning INBOX. {} created.", mailboxId);
             }
-            mailboxManager.getMailbox(MailboxPath.inbox(mailboxSession), mailboxSession)
+            mailboxManager.getMailbox(MailboxPath.inbox(username), mailboxSession)
                 .appendMessage(MessageManager.AppendCommand.builder()
                     .recent()
                     .build(envelope.getMessageInputStream()),
@@ -100,15 +95,5 @@ public class MailboxDeliverToRecipientHandler implements DeliverToRecipientHook 
                 .smtpDescription(" Temporary error deliver message to " + recipient)
                 .build();
         }
-    }
-
-    @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
     }
 }

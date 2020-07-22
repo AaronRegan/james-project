@@ -18,6 +18,8 @@
  ****************************************************************/
 package org.apache.james.mailbox.jpa.mail.model;
 
+import java.util.Objects;
+
 import javax.persistence.Basic;
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -27,10 +29,13 @@ import javax.persistence.NamedQueries;
 import javax.persistence.NamedQuery;
 import javax.persistence.Table;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.jpa.JPAId;
 import org.apache.james.mailbox.model.Mailbox;
-import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.UidValidity;
+
+import com.google.common.annotations.VisibleForTesting;
 
 @Entity(name = "Mailbox")
 @Table(name = "JAMES_MAILBOX")
@@ -41,8 +46,6 @@ import org.apache.james.mailbox.model.MailboxPath;
         query = "SELECT mailbox FROM Mailbox mailbox WHERE mailbox.name = :nameParam and mailbox.user is NULL and mailbox.namespace= :namespaceParam"),
     @NamedQuery(name = "findMailboxByNameWithUser",
         query = "SELECT mailbox FROM Mailbox mailbox WHERE mailbox.name = :nameParam and mailbox.user= :userParam and mailbox.namespace= :namespaceParam"),
-    @NamedQuery(name = "deleteAllMailboxes",
-        query = "DELETE FROM Mailbox mailbox"),
     @NamedQuery(name = "findMailboxWithNameLikeWithUser",
         query = "SELECT mailbox FROM Mailbox mailbox WHERE mailbox.name LIKE :nameParam and mailbox.user= :userParam and mailbox.namespace= :namespaceParam"),
     @NamedQuery(name = "findMailboxWithNameLike",
@@ -105,9 +108,14 @@ public class JPAMailbox {
     public JPAMailbox() {
     }
     
+    public JPAMailbox(MailboxPath path, UidValidity uidValidity) {
+        this(path, uidValidity.asLong());
+    }
+
+    @VisibleForTesting
     public JPAMailbox(MailboxPath path, long uidValidity) {
         this.name = path.getName();
-        this.user = path.getUser();
+        this.user = path.getUser().asString();
         this.namespace = path.getNamespace();
         this.uidValidity = uidValidity;
     }
@@ -120,10 +128,6 @@ public class JPAMailbox {
         return JPAId.of(mailboxId);
     }
 
-    public void setMailboxId(MailboxId mailboxId) {
-        this.mailboxId = ((JPAId)mailboxId).getRawId();
-    }
-
     public long consumeUid() {
         return ++lastUid;
     }
@@ -133,11 +137,18 @@ public class JPAMailbox {
     }
 
     public Mailbox toMailbox() {
-        return new Mailbox(generateAssociatedPath(), uidValidity, new JPAId(mailboxId));
+        MailboxPath path = new MailboxPath(namespace, Username.of(user), name);
+        return new Mailbox(path, sanitizeUidValidity(), new JPAId(mailboxId));
     }
 
-    public MailboxPath generateAssociatedPath() {
-        return new MailboxPath(namespace, user, name);
+    private UidValidity sanitizeUidValidity() {
+        if (UidValidity.isValid(uidValidity)) {
+            return UidValidity.of(uidValidity);
+        }
+        UidValidity sanitizedUidValidity = UidValidity.generate();
+        // Update storage layer thanks to JPA magics!
+        setUidValidity(sanitizedUidValidity.asLong());
+        return sanitizedUidValidity;
     }
 
     public void setMailboxId(long mailboxId) {
@@ -152,14 +163,6 @@ public class JPAMailbox {
         this.name = name;
     }
 
-    public long getUidValidity() {
-        return uidValidity;
-    }
-
-    public void setUidValidity(long uidValidity) {
-        this.uidValidity = uidValidity;
-    }
-
     public String getUser() {
         return user;
     }
@@ -168,28 +171,12 @@ public class JPAMailbox {
         this.user = user;
     }
 
-    public String getNamespace() {
-        return namespace;
-    }
-
     public void setNamespace(String namespace) {
         this.namespace = namespace;
     }
 
-    public long getLastUid() {
-        return lastUid;
-    }
-
-    public void setLastUid(long lastUid) {
-        this.lastUid = lastUid;
-    }
-
-    public long getHighestModSeq() {
-        return highestModSeq;
-    }
-
-    public void setHighestModSeq(long highestModSeq) {
-        this.highestModSeq = highestModSeq;
+    public void setUidValidity(long uidValidity) {
+        this.uidValidity = uidValidity;
     }
 
     @Override
@@ -202,28 +189,17 @@ public class JPAMailbox {
     }
 
     @Override
-    public int hashCode() {
-        final int PRIME = 31;
-        int result = 1;
-        result = PRIME * result + (int) (mailboxId ^ (mailboxId >>> 32));
-        return result;
+    public final boolean equals(Object o) {
+        if (o instanceof JPAMailbox) {
+            JPAMailbox that = (JPAMailbox) o;
+
+            return Objects.equals(this.mailboxId, that.mailboxId);
+        }
+        return false;
     }
 
     @Override
-    public boolean equals(Object obj) {
-        if (this == obj) {
-            return true;
-        }
-        if (obj == null) {
-            return false;
-        }
-        if (getClass() != obj.getClass()) {
-            return false;
-        }
-        final JPAMailbox other = (JPAMailbox) obj;
-        if (mailboxId != other.mailboxId) {
-            return false;
-        }
-        return true;
+    public final int hashCode() {
+        return Objects.hash(mailboxId);
     }
 }

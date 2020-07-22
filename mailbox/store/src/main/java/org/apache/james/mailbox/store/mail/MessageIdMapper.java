@@ -20,13 +20,13 @@ package org.apache.james.mailbox.store.mail;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 
 import javax.mail.Flags;
 
 import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxNotFoundException;
+import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.UpdatedFlags;
@@ -35,24 +35,44 @@ import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 
 import com.google.common.collect.Multimap;
 
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
 public interface MessageIdMapper {
 
     List<MailboxMessage> find(Collection<MessageId> messageIds, FetchType fetchType);
+
+    default Flux<MailboxMessage> findReactive(Collection<MessageId> messageIds, FetchType fetchType) {
+        return Flux.fromIterable(find(messageIds, fetchType));
+    }
 
     List<MailboxId> findMailboxes(MessageId messageId);
 
     void save(MailboxMessage mailboxMessage) throws MailboxNotFoundException, MailboxException;
 
-    void copyInMailbox(MailboxMessage mailboxMessage) throws MailboxNotFoundException, MailboxException;
+    void copyInMailbox(MailboxMessage mailboxMessage, Mailbox mailbox) throws MailboxException;
 
     void delete(MessageId messageId);
 
     void delete(MessageId messageId, Collection<MailboxId> mailboxIds);
+
+    default Mono<Void> deleteReactive(MessageId messageId, Collection<MailboxId> mailboxIds) {
+        return Mono.fromRunnable(() -> delete(messageId, mailboxIds));
+    }
 
     default void delete(Multimap<MessageId, MailboxId> ids) {
         ids.asMap()
             .forEach(this::delete);
     }
 
-    Map<MailboxId, UpdatedFlags> setFlags(MessageId messageId, List<MailboxId> mailboxIds, Flags newState, MessageManager.FlagsUpdateMode updateMode) throws MailboxException;
+    /**
+     * Updates the flags of the messages with the given MessageId in the supplied mailboxes
+     *
+     * More one message can be updated when a message is contained several time in the same mailbox with distinct
+     * MessageUid.
+     *
+     * @return Metadata of the update, indexed by mailboxIds.
+     * @throws MailboxException
+     */
+    Multimap<MailboxId, UpdatedFlags> setFlags(MessageId messageId, List<MailboxId> mailboxIds, Flags newState, MessageManager.FlagsUpdateMode updateMode) throws MailboxException;
 }

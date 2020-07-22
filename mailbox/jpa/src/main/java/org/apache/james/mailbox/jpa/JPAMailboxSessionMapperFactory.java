@@ -23,8 +23,8 @@ import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
 
 import org.apache.commons.lang3.NotImplementedException;
+import org.apache.james.backends.jpa.EntityManagerUtils;
 import org.apache.james.mailbox.MailboxSession;
-import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.jpa.mail.JPAAnnotationMapper;
 import org.apache.james.mailbox.jpa.mail.JPAMailboxMapper;
 import org.apache.james.mailbox.jpa.mail.JPAMessageMapper;
@@ -53,7 +53,7 @@ public class JPAMailboxSessionMapperFactory extends MailboxSessionMapperFactory 
         this.entityManagerFactory = entityManagerFactory;
         this.uidProvider = uidProvider;
         this.modSeqProvider = modSeqProvider;
-        createEntityManager().close();   
+        EntityManagerUtils.safelyClose(createEntityManager());
     }
     
     @Override
@@ -63,11 +63,11 @@ public class JPAMailboxSessionMapperFactory extends MailboxSessionMapperFactory 
 
     @Override
     public MessageMapper createMessageMapper(MailboxSession session) {
-        return new JPAMessageMapper(session, uidProvider, modSeqProvider, entityManagerFactory);
+        return new JPAMessageMapper(uidProvider, modSeqProvider, entityManagerFactory);
     }
 
     @Override
-    public MessageIdMapper createMessageIdMapper(MailboxSession session) throws MailboxException {
+    public MessageIdMapper createMessageIdMapper(MailboxSession session) {
         throw new NotImplementedException("not implemented");
     }
 
@@ -86,8 +86,7 @@ public class JPAMailboxSessionMapperFactory extends MailboxSessionMapperFactory 
     }
 
     @Override
-    public AnnotationMapper createAnnotationMapper(MailboxSession session)
-            throws MailboxException {
+    public AnnotationMapper createAnnotationMapper(MailboxSession session) {
         return new JPAAnnotationMapper(entityManagerFactory);
     }
 

@@ -24,22 +24,20 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 
 import javax.inject.Inject;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MetadataWithMailboxId;
-import org.apache.james.mailbox.exception.MailboxException;
+import org.apache.james.mailbox.SessionProvider;
 import org.apache.james.mailbox.extension.PreDeletionHook;
+import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.store.MailboxSessionMapperFactory;
-import org.apache.james.mailbox.store.SessionProvider;
 import org.apache.james.mailbox.store.mail.MessageMapper;
-import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.reactivestreams.Publisher;
 
 import com.github.fge.lambdas.Throwing;
@@ -66,10 +64,10 @@ public class DeletedMessageVaultHook implements PreDeletionHook {
         }
 
         private final MessageId messageId;
-        private final User owner;
+        private final Username owner;
         private final List<MailboxId> ownerMailboxes;
 
-        DeletedMessageMailboxContext(MessageId messageId, User owner, List<MailboxId> ownerMailboxes) {
+        DeletedMessageMailboxContext(MessageId messageId, Username owner, List<MailboxId> ownerMailboxes) {
             this.messageId = messageId;
             this.owner = owner;
             this.ownerMailboxes = ownerMailboxes;
@@ -79,7 +77,7 @@ public class DeletedMessageVaultHook implements PreDeletionHook {
             return messageId;
         }
 
-        User getOwner() {
+        Username getOwner() {
             return owner;
         }
 
@@ -117,7 +115,7 @@ public class DeletedMessageVaultHook implements PreDeletionHook {
                             DeletedMessageConverter deletedMessageConverter,
                             MailboxSessionMapperFactory mapperFactory,
                             Clock clock) {
-        this.session = sessionProvider.createSystemSession(getClass().getName());
+        this.session = sessionProvider.createSystemSession(Username.of(getClass().getName()));
         this.deletedMessageVault = deletedMessageVault;
         this.deletedMessageConverter = deletedMessageConverter;
         this.mapperFactory = mapperFactory;
@@ -129,43 +127,42 @@ public class DeletedMessageVaultHook implements PreDeletionHook {
         Preconditions.checkNotNull(deleteOperation);
 
         return groupMetadataByOwnerAndMessageId(deleteOperation)
-            .flatMap(Throwing.function(this::appendToTheVault).sneakyThrow())
+            .flatMap(this::appendToTheVault)
             .then();
     }
 
-    private Mono<Void> appendToTheVault(DeletedMessageMailboxContext deletedMessageMailboxContext) throws MailboxException {
-        Optional<MailboxMessage> maybeMailboxMessage = mapperFactory.getMessageIdMapper(session)
-            .find(ImmutableList.of(deletedMessageMailboxContext.getMessageId()), MessageMapper.FetchType.Full).stream()
-            .findFirst();
-
-        return maybeMailboxMessage.map(Throwing.function(mailboxMessage -> Pair.of(mailboxMessage,
+    private Mono<Void> appendToTheVault(DeletedMessageMailboxContext deletedMessageMailboxContext) {
+        return mapperFactory.getMessageIdMapper(session)
+            .findReactive(ImmutableList.of(deletedMessageMailboxContext.getMessageId()), MessageMapper.FetchType.Full)
+            .next()
+            .map(Throwing.function(mailboxMessage -> Pair.of(mailboxMessage,
                 deletedMessageConverter.convert(deletedMessageMailboxContext, mailboxMessage,
                     ZonedDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)))))
-            .map(Throwing.function(pairs -> Mono.from(deletedMessageVault
-                .append(pairs.getRight(), pairs.getLeft().getFullContent()))))
-            .orElse(Mono.empty());
+            .flatMap(Throwing.function(pairs -> Mono.from(deletedMessageVault
+                .append(pairs.getRight(), pairs.getLeft().getFullContent()))));
     }
 
     private Flux<DeletedMessageMailboxContext> groupMetadataByOwnerAndMessageId(DeleteOperation deleteOperation) {
         return Flux.fromIterable(deleteOperation.getDeletionMetadataList())
             .groupBy(MetadataWithMailboxId::getMailboxId)
-            .flatMap(Throwing.function(this::addOwnerToMetadata).sneakyThrow())
+            .flatMap(this::addOwnerToMetadata)
             .groupBy(this::toMessageIdUserPair)
             .flatMap(groupFlux -> groupFlux.reduce(DeletedMessageMailboxContext::combine));
     }
 
-    private Publisher<DeletedMessageMailboxContext> addOwnerToMetadata(GroupedFlux<MailboxId, MetadataWithMailboxId> groupedFlux) throws MailboxException {
-        User owner = retrieveMailboxUser(groupedFlux.key());
-        return groupedFlux.map(metadata -> new DeletedMessageMailboxContext(metadata.getMessageMetaData().getMessageId(), owner, ImmutableList.of(metadata.getMailboxId())));
+    private Flux<DeletedMessageMailboxContext> addOwnerToMetadata(GroupedFlux<MailboxId, MetadataWithMailboxId> groupedFlux) {
+        return retrieveMailboxUser(groupedFlux.key())
+            .flatMapMany(owner -> groupedFlux.map(metadata ->
+                new DeletedMessageMailboxContext(metadata.getMessageMetaData().getMessageId(), owner, ImmutableList.of(metadata.getMailboxId()))));
     }
 
-    private Pair<MessageId, User> toMessageIdUserPair(DeletedMessageMailboxContext deletedMessageMetadata) {
+    private Pair<MessageId, Username> toMessageIdUserPair(DeletedMessageMailboxContext deletedMessageMetadata) {
         return Pair.of(deletedMessageMetadata.getMessageId(), deletedMessageMetadata.getOwner());
     }
 
-    private User retrieveMailboxUser(MailboxId mailboxId) throws MailboxException {
-        return User.fromUsername(mapperFactory.getMailboxMapper(session)
+    private Mono<Username> retrieveMailboxUser(MailboxId mailboxId) {
+        return mapperFactory.getMailboxMapper(session)
             .findMailboxById(mailboxId)
-            .getUser());
+            .map(Mailbox::getUser);
     }
 }

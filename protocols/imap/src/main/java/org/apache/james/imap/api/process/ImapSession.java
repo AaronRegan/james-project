@@ -19,7 +19,13 @@
 
 package org.apache.james.imap.api.process;
 
+import java.util.Objects;
+import java.util.Optional;
+
+import org.apache.commons.text.RandomStringGenerator;
+import org.apache.james.core.Username;
 import org.apache.james.imap.api.ImapSessionState;
+import org.apache.james.mailbox.MailboxSession;
 
 /**
  * Encapsulates all state held for an ongoing Imap session, which commences when
@@ -29,6 +35,55 @@ import org.apache.james.imap.api.ImapSessionState;
  * @version $Revision: 109034 $
  */
 public interface ImapSession {
+    class SessionId {
+        private static final RandomStringGenerator RANDOM_STRING_GENERATOR = new RandomStringGenerator.Builder()
+            .withinRange('a', 'z')
+            .build();
+        private static final int LENGTH = 12;
+
+        public static SessionId generate() {
+            return new SessionId("SID-" + RANDOM_STRING_GENERATOR.generate(LENGTH));
+        }
+
+        private final String value;
+
+        private SessionId(String value) {
+            this.value = value;
+        }
+
+        public String asString() {
+            return value;
+        }
+
+        @Override
+        public final boolean equals(Object o) {
+            if (o instanceof SessionId) {
+                SessionId sessionId = (SessionId) o;
+
+                return Objects.equals(this.value, sessionId.value);
+            }
+            return false;
+        }
+
+        @Override
+        public final int hashCode() {
+            return Objects.hash(value);
+        }
+
+        @Override
+        public String toString() {
+            return asString();
+        }
+    }
+
+    String MAILBOX_SESSION_ATTRIBUTE_SESSION_KEY = "org.apache.james.api.imap.MAILBOX_SESSION_ATTRIBUTE_SESSION_KEY";
+
+    /**
+     * @return a unique identifier for this session.
+     *
+     * One of its usage is log correlation.
+     */
+    SessionId sessionId();
 
     /**
      * Logs out the session. Marks the connection for closure;
@@ -139,30 +194,36 @@ public interface ImapSession {
 
     /**
      * Push in a new {@link ImapLineHandler} which is called for the next line received
-     * 
-     * @param lineHandler
      */
     void pushLineHandler(ImapLineHandler lineHandler);
 
     /**
      * Pop the current {@link ImapLineHandler}
-     * 
      */
     void popLineHandler();
     
     /**
      * Return true if multiple namespaces are supported
-     * 
-     * @return multipleNamespaces
      */
     boolean supportMultipleNamespaces();
     
     /**
      * Return true if the login / authentication via plain username / password is
      * disallowed
-     * 
-     * @return plainDisallowed
      */
     boolean isPlainAuthDisallowed();
 
+    default void setMailboxSession(MailboxSession mailboxSession) {
+        setAttribute(MAILBOX_SESSION_ATTRIBUTE_SESSION_KEY, mailboxSession);
+    }
+
+    default MailboxSession getMailboxSession() {
+        return (MailboxSession) getAttribute(MAILBOX_SESSION_ATTRIBUTE_SESSION_KEY);
+    }
+
+    default Username getUserName() {
+        return Optional.ofNullable(getMailboxSession())
+            .map(MailboxSession::getUser)
+            .orElse(null);
+    }
 }

@@ -20,7 +20,9 @@
 
 package org.apache.james.webadmin.vault.routes;
 
-import org.apache.james.core.User;
+import java.time.Instant;
+
+import org.apache.james.core.Username;
 import org.apache.james.json.DTOModule;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTOModule;
@@ -31,31 +33,39 @@ public class DeletedMessagesVaultRestoreTaskAdditionalInformationDTO implements 
 
     private static DeletedMessagesVaultRestoreTaskAdditionalInformationDTO fromDomainObject(DeletedMessagesVaultRestoreTask.AdditionalInformation additionalInformation, String type) {
         return new DeletedMessagesVaultRestoreTaskAdditionalInformationDTO(
-            additionalInformation.getUser(),
+            type,
+            additionalInformation.getUsername(),
             additionalInformation.getSuccessfulRestoreCount(),
-            additionalInformation.getErrorRestoreCount()
+            additionalInformation.getErrorRestoreCount(),
+            additionalInformation.timestamp()
         );
     }
 
-    public static final AdditionalInformationDTOModule<DeletedMessagesVaultRestoreTask.AdditionalInformation, DeletedMessagesVaultRestoreTaskAdditionalInformationDTO> MODULE =
-        DTOModule
-            .forDomainObject(DeletedMessagesVaultRestoreTask.AdditionalInformation.class)
+    public static AdditionalInformationDTOModule<DeletedMessagesVaultRestoreTask.AdditionalInformation, DeletedMessagesVaultRestoreTaskAdditionalInformationDTO> module() {
+        return DTOModule.forDomainObject(DeletedMessagesVaultRestoreTask.AdditionalInformation.class)
             .convertToDTO(DeletedMessagesVaultRestoreTaskAdditionalInformationDTO.class)
             .toDomainObjectConverter(DeletedMessagesVaultRestoreTaskAdditionalInformationDTO::toDomainObject)
             .toDTOConverter(DeletedMessagesVaultRestoreTaskAdditionalInformationDTO::fromDomainObject)
             .typeName(DeletedMessagesVaultRestoreTask.TYPE.asString())
             .withFactory(AdditionalInformationDTOModule::new);
+    }
 
+    private final String type;
     private final String user;
     private final Long successfulRestoreCount;
     private final Long errorRestoreCount;
+    private final Instant timestamp;
 
-    public DeletedMessagesVaultRestoreTaskAdditionalInformationDTO(@JsonProperty("user") String user,
+    public DeletedMessagesVaultRestoreTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                                   @JsonProperty("user") String user,
                                                                    @JsonProperty("successfulRestoreCount") Long successfulRestoreCount,
-                                                                   @JsonProperty("errorRestoreCount") Long errorRestoreCount) {
+                                                                   @JsonProperty("errorRestoreCount") Long errorRestoreCount,
+                                                                   @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.user = user;
         this.successfulRestoreCount = successfulRestoreCount;
         this.errorRestoreCount = errorRestoreCount;
+        this.timestamp = timestamp;
     }
 
     public String getUser() {
@@ -72,9 +82,20 @@ public class DeletedMessagesVaultRestoreTaskAdditionalInformationDTO implements 
 
     DeletedMessagesVaultRestoreTask.AdditionalInformation toDomainObject() {
         return new DeletedMessagesVaultRestoreTask.AdditionalInformation(
-            User.fromUsername(user),
+            Username.of(user),
             successfulRestoreCount,
-            errorRestoreCount
+            errorRestoreCount,
+            timestamp
         );
+    }
+
+    @Override
+    public Instant getTimestamp() {
+        return timestamp;
+    }
+
+    @Override
+    public String getType() {
+        return type;
     }
 }

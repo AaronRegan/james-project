@@ -34,15 +34,16 @@ import java.util.stream.Stream;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.james.core.builder.MimeMessageBuilder;
-import org.apache.james.core.quota.QuotaCount;
-import org.apache.james.core.quota.QuotaSize;
+import org.apache.james.core.quota.QuotaCountLimit;
+import org.apache.james.core.quota.QuotaCountUsage;
+import org.apache.james.core.quota.QuotaSizeLimit;
+import org.apache.james.core.quota.QuotaSizeUsage;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.mailbox.model.Quota;
 import org.apache.james.mailbox.quota.mailing.QuotaMailingListenerConfiguration;
 import org.apache.james.mailbox.quota.model.HistoryEvolution;
 import org.apache.james.mailbox.quota.model.QuotaThreshold;
 import org.apache.james.mailbox.quota.model.QuotaThresholdChange;
-import org.apache.james.util.OptionalUtils;
 import org.apache.james.util.SizeFormat;
 
 import com.github.mustachejava.DefaultMustacheFactory;
@@ -56,8 +57,8 @@ public class QuotaThresholdNotice {
     public static class Builder {
         private Optional<QuotaThreshold> countThreshold;
         private Optional<QuotaThreshold> sizeThreshold;
-        private Quota<QuotaSize> sizeQuota;
-        private Quota<QuotaCount> countQuota;
+        private Quota<QuotaSizeLimit, QuotaSizeUsage> sizeQuota;
+        private Quota<QuotaCountLimit, QuotaCountUsage> countQuota;
         private QuotaMailingListenerConfiguration configuration;
 
         public Builder() {
@@ -65,12 +66,12 @@ public class QuotaThresholdNotice {
             sizeThreshold = Optional.empty();
         }
 
-        public Builder sizeQuota(Quota<QuotaSize> sizeQuota) {
+        public Builder sizeQuota(Quota<QuotaSizeLimit, QuotaSizeUsage> sizeQuota) {
             this.sizeQuota = sizeQuota;
             return this;
         }
 
-        public Builder countQuota(Quota<QuotaCount> countQuota) {
+        public Builder countQuota(Quota<QuotaCountLimit, QuotaCountUsage> countQuota) {
             this.countQuota = countQuota;
             return this;
         }
@@ -120,13 +121,13 @@ public class QuotaThresholdNotice {
 
     private final Optional<QuotaThreshold> countThreshold;
     private final Optional<QuotaThreshold> sizeThreshold;
-    private final Quota<QuotaSize> sizeQuota;
-    private final Quota<QuotaCount> countQuota;
+    private final Quota<QuotaSizeLimit, QuotaSizeUsage> sizeQuota;
+    private final Quota<QuotaCountLimit, QuotaCountUsage> countQuota;
     private final QuotaMailingListenerConfiguration configuration;
 
     @VisibleForTesting
     QuotaThresholdNotice(Optional<QuotaThreshold> countThreshold, Optional<QuotaThreshold> sizeThreshold,
-                         Quota<QuotaSize> sizeQuota, Quota<QuotaCount> countQuota, QuotaMailingListenerConfiguration configuration) {
+                         Quota<QuotaSizeLimit, QuotaSizeUsage> sizeQuota, Quota<QuotaCountLimit, QuotaCountUsage> countQuota, QuotaMailingListenerConfiguration configuration) {
         this.countThreshold = countThreshold;
         this.sizeThreshold = sizeThreshold;
         this.sizeQuota = sizeQuota;
@@ -154,7 +155,7 @@ public class QuotaThresholdNotice {
 
     private QuotaThreshold mostSignificantThreshold() {
         return Stream.of(countThreshold, sizeThreshold)
-            .flatMap(OptionalUtils::toStream)
+            .flatMap(Optional::stream)
             .min(Comparator.reverseOrder())
             .get();
     }

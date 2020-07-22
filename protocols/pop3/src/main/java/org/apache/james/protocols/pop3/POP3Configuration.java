@@ -22,11 +22,10 @@ import org.apache.james.protocols.api.ProtocolConfigurationImpl;
 
 /**
  * {@link ProtocolConfigurationImpl} which adds some default configuration for POP3
- *
  */
 public class POP3Configuration extends ProtocolConfigurationImpl {
 
     public POP3Configuration() {
-        setSoftwareName("JAMES Protocols POP3 Server");
+        super("JAMES Protocols POP3 Server");
     }
 }

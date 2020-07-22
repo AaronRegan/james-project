@@ -25,15 +25,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import javax.inject.Inject;
+
 import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
-import org.apache.james.util.OptionalUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,13 +49,14 @@ public class ZipMailArchiveRestorer implements MailArchiveRestorer {
     private final MailboxManager mailboxManager;
     private final MailArchivesLoader archiveLoader;
 
+    @Inject
     public ZipMailArchiveRestorer(MailboxManager mailboxManager, MailArchivesLoader archiveLoader) {
         this.mailboxManager = mailboxManager;
         this.archiveLoader = archiveLoader;
     }
 
-    public void restore(User user, InputStream source) throws MailboxException, IOException {
-        MailboxSession session = mailboxManager.createSystemSession(user.asString());
+    public void restore(Username username, InputStream source) throws MailboxException, IOException {
+        MailboxSession session = mailboxManager.createSystemSession(username);
         restoreEntries(source, session);
     }
 
@@ -68,8 +70,7 @@ public class ZipMailArchiveRestorer implements MailArchiveRestorer {
     private Map<SerializedMailboxId, MessageManager> restoreMailboxes(MailboxSession session, List<MailboxWithAnnotationsArchiveEntry> mailboxes) {
         return mailboxes.stream()
             .flatMap(Throwing.<MailboxWithAnnotationsArchiveEntry, Stream<ImmutablePair<SerializedMailboxId, MessageManager>>>function(
-                mailboxEntry ->
-                    OptionalUtils.toStream(restoreMailboxEntry(session, mailboxEntry))).sneakyThrow())
+                mailboxEntry -> restoreMailboxEntry(session, mailboxEntry).stream()).sneakyThrow())
             .collect(Guavate.entriesToImmutableMap());
     }
 
@@ -95,7 +96,7 @@ public class ZipMailArchiveRestorer implements MailArchiveRestorer {
 
     private Optional<ImmutablePair<SerializedMailboxId, MessageManager>> restoreMailboxEntry(MailboxSession session,
                                                                                              MailboxWithAnnotationsArchiveEntry mailboxWithAnnotationsArchiveEntry) throws MailboxException {
-        MailboxPath mailboxPath = MailboxPath.forUser(session.getUser().asString(), mailboxWithAnnotationsArchiveEntry.getMailboxName());
+        MailboxPath mailboxPath = MailboxPath.forUser(session.getUser(), mailboxWithAnnotationsArchiveEntry.getMailboxName());
         Optional<MailboxId> newMailboxId = mailboxManager.createMailbox(mailboxPath, session);
         mailboxManager.updateAnnotations(mailboxPath, session, mailboxWithAnnotationsArchiveEntry.getAnnotations());
         return newMailboxId.map(Throwing.<MailboxId, ImmutablePair<SerializedMailboxId, MessageManager>>function(newId ->

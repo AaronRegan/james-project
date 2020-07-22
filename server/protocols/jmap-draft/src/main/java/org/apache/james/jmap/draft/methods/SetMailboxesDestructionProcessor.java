@@ -99,8 +99,7 @@ public class SetMailboxesDestructionProcessor implements SetMailboxesProcessor {
                     .id(id)
                     .session(mailboxSession)
                     .build())
-            .filter(Optional::isPresent)
-            .map(Optional::get)
+            .flatMap(Optional::stream)
             .forEach(mailbox -> idToMailboxBuilder.put(mailbox.getId(), mailbox));
         return idToMailboxBuilder.build();
     }
@@ -116,9 +115,8 @@ public class SetMailboxesDestructionProcessor implements SetMailboxesProcessor {
             Mailbox mailbox = entry.getValue();
             preconditions(mailbox, mailboxSession);
 
-            MailboxPath mailboxPath = mailboxManager.getMailbox(mailbox.getId(), mailboxSession).getMailboxPath();
-            mailboxManager.deleteMailbox(mailboxPath, mailboxSession);
-            subscriptionManager.unsubscribe(mailboxSession, mailboxPath.getName());
+            MailboxPath deletedMailbox = mailboxManager.deleteMailbox(mailbox.getId(), mailboxSession).generateAssociatedPath();
+            subscriptionManager.unsubscribe(mailboxSession, deletedMailbox.getName());
             builder.destroyed(entry.getKey());
         } catch (MailboxHasChildException e) {
             builder.notDestroyed(entry.getKey(), SetError.builder()

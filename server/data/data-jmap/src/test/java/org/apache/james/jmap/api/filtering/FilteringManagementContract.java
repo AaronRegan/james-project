@@ -30,105 +30,108 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.eventsourcing.eventstore.EventStore;
 import org.apache.james.jmap.api.filtering.impl.EventSourcingFilteringManagement;
 import org.junit.jupiter.api.Test;
 
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
 public interface FilteringManagementContract {
 
     String BART_SIMPSON_CARTOON = "bart@simpson.cartoon";
-    User USER = User.fromUsername(BART_SIMPSON_CARTOON);
+    Username USERNAME = Username.of(BART_SIMPSON_CARTOON);
 
-    default FilteringManagement instanciateFilteringManagement(EventStore eventStore) {
+    default FilteringManagement instantiateFilteringManagement(EventStore eventStore) {
         return new EventSourcingFilteringManagement(eventStore);
     }
 
     @Test
     default void listingRulesForUnknownUserShouldReturnEmptyList(EventStore eventStore) {
-        assertThat(instanciateFilteringManagement(eventStore).listRulesForUser(USER))
+        assertThat(Flux.from(instantiateFilteringManagement(eventStore).listRulesForUser(USERNAME)).toStream())
             .isEmpty();
     }
 
     @Test
     default void listingRulesShouldThrowWhenNullUser(EventStore eventStore) {
-        User user = null;
-        assertThatThrownBy(() -> instanciateFilteringManagement(eventStore).listRulesForUser(user))
+        Username username = null;
+        assertThatThrownBy(() -> instantiateFilteringManagement(eventStore).listRulesForUser(username))
             .isInstanceOf(NullPointerException.class);
     }
 
     @Test
     default void listingRulesShouldReturnDefinedRules(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
 
-        testee.defineRulesForUser(USER, RULE_1, RULE_2);
+        Mono.from(testee.defineRulesForUser(USERNAME, RULE_1, RULE_2)).block();
 
-        assertThat(testee.listRulesForUser(USER))
+        assertThat(Flux.from(testee.listRulesForUser(USERNAME)).toStream())
             .containsExactly(RULE_1, RULE_2);
     }
 
     @Test
     default void listingRulesShouldReturnLastDefinedRules(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
 
-        testee.defineRulesForUser(USER, RULE_1, RULE_2);
-        testee.defineRulesForUser(USER, RULE_2, RULE_1);
+        Mono.from(testee.defineRulesForUser(USERNAME, RULE_1, RULE_2)).block();
+        Mono.from(testee.defineRulesForUser(USERNAME, RULE_2, RULE_1)).block();
 
-        assertThat(testee.listRulesForUser(USER))
+        assertThat(Flux.from(testee.listRulesForUser(USERNAME)).toStream())
             .containsExactly(RULE_2, RULE_1);
     }
 
     @Test
     default void definingRulesShouldThrowWhenDuplicateRules(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
 
-        assertThatThrownBy(() -> testee.defineRulesForUser(USER, RULE_1, RULE_1))
+        assertThatThrownBy(() -> Mono.from(testee.defineRulesForUser(USERNAME, RULE_1, RULE_1)).block())
             .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     default void definingRulesShouldThrowWhenNullUser(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
 
-        assertThatThrownBy(() -> testee.defineRulesForUser(null, RULE_1, RULE_1))
+        assertThatThrownBy(() -> Mono.from(testee.defineRulesForUser(null, RULE_1, RULE_1)).block())
             .isInstanceOf(NullPointerException.class);
     }
 
     @Test
     default void definingRulesShouldThrowWhenNullRuleList(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
 
         List<Rule> rules = null;
-        assertThatThrownBy(() -> testee.defineRulesForUser(USER, rules))
+        assertThatThrownBy(() -> Mono.from(testee.defineRulesForUser(USERNAME, rules)).block())
             .isInstanceOf(NullPointerException.class);
     }
 
     @Test
     default void definingRulesShouldKeepOrdering(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
-        testee.defineRulesForUser(USER, RULE_3, RULE_2, RULE_1);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
+        Mono.from(testee.defineRulesForUser(USERNAME, RULE_3, RULE_2, RULE_1)).block();
 
-        assertThat(testee.listRulesForUser(USER))
+        assertThat(Flux.from(testee.listRulesForUser(USERNAME)).toStream())
             .containsExactly(RULE_3, RULE_2, RULE_1);
     }
 
     @Test
     default void definingEmptyRuleListShouldRemoveExistingRules(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
 
-        testee.defineRulesForUser(USER, RULE_3, RULE_2, RULE_1);
-        testee.clearRulesForUser(USER);
+        Mono.from(testee.defineRulesForUser(USERNAME, RULE_3, RULE_2, RULE_1)).block();
+        Mono.from(testee.clearRulesForUser(USERNAME)).block();
 
-        assertThat(testee.listRulesForUser(USER)).isEmpty();
+        assertThat(Flux.from(testee.listRulesForUser(USERNAME)).toStream()).isEmpty();
     }
 
     @Test
     default void allFieldsAndComparatorShouldWellBeStored(EventStore eventStore) {
-        FilteringManagement testee = instanciateFilteringManagement(eventStore);
+        FilteringManagement testee = instantiateFilteringManagement(eventStore);
 
-        testee.defineRulesForUser(USER, RULE_FROM, RULE_RECIPIENT, RULE_SUBJECT, RULE_TO, RULE_1);
+        Mono.from(testee.defineRulesForUser(USERNAME, RULE_FROM, RULE_RECIPIENT, RULE_SUBJECT, RULE_TO, RULE_1)).block();
 
-        assertThat(testee.listRulesForUser(USER))
+        assertThat(Flux.from(testee.listRulesForUser(USERNAME)).toStream())
             .containsExactly(RULE_FROM, RULE_RECIPIENT, RULE_SUBJECT, RULE_TO, RULE_1);
     }
 

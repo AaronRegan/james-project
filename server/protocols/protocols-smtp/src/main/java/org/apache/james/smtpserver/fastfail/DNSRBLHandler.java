@@ -33,11 +33,10 @@ import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.protocols.api.handler.ProtocolHandler;
 
 public class DNSRBLHandler extends org.apache.james.protocols.smtp.core.fastfail.DNSRBLHandler implements ProtocolHandler {
-
-    private DNSService dns;
+    private final DNSService dns;
 
     @Inject
-    public void setDNSService(DNSService dns) {
+    public DNSRBLHandler(DNSService dns) {
         this.dns = dns;
     }
 
@@ -49,13 +48,13 @@ public class DNSRBLHandler extends org.apache.james.protocols.smtp.core.fastfail
 
         Collections.addAll(rblserverCollection, handlerConfiguration.getStringArray("rblservers.whitelist"));
         if (rblserverCollection.size() > 0) {
-            setWhitelist(rblserverCollection.toArray(new String[rblserverCollection.size()]));
+            setWhitelist(rblserverCollection.toArray(String[]::new));
             rblserverCollection.clear();
             validConfig = true;
         }
         Collections.addAll(rblserverCollection, handlerConfiguration.getStringArray("rblservers.blacklist"));
         if (rblserverCollection.size() > 0) {
-            setBlacklist(rblserverCollection.toArray(new String[rblserverCollection.size()]));
+            setBlacklist(rblserverCollection.toArray(String[]::new));
             rblserverCollection.clear();
             validConfig = true;
         }
@@ -66,11 +65,6 @@ public class DNSRBLHandler extends org.apache.james.protocols.smtp.core.fastfail
         }
 
         setGetDetail(handlerConfiguration.getBoolean("getDetail", false));
-    }
-
-    @Override
-    public void destroy() {
-        // Do nothing
     }
 
     @Override

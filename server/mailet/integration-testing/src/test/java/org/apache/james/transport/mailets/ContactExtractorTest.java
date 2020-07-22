@@ -43,8 +43,8 @@ import org.apache.james.util.docker.DockerContainer;
 import org.apache.james.util.docker.Images;
 import org.apache.james.util.docker.RateLimiters;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.apache.mailet.base.test.FakeMail;
 import org.junit.After;
 import org.junit.Before;
@@ -73,7 +73,7 @@ public class ContactExtractorTest {
     @Rule
     public RuleChain chain = RuleChain.outerRule(rabbit).around(amqpRule).around(folder);
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
     @Rule
     public SMTPMessageSender messageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
 
@@ -82,7 +82,7 @@ public class ContactExtractorTest {
     @Before
     public void setup() throws Exception {
         String attribute = "ExtractedContacts";
-        MailetContainer.Builder mailets = TemporaryJamesServer.DEFAULT_MAILET_CONTAINER_CONFIGURATION
+        MailetContainer.Builder mailets = TemporaryJamesServer.defaultMailetContainerConfiguration()
             .postmaster(SENDER)
             .putProcessor(
                 ProcessorConfiguration.transport()
@@ -102,6 +102,7 @@ public class ContactExtractorTest {
             .withBase(MemoryJamesServerMain.SMTP_AND_IMAP_MODULE)
             .withMailetContainer(mailets)
             .build(folder.newFolder());
+        jamesServer.start();
 
         jamesServer.getProbe(DataProbeImpl.class)
             .fluent()
@@ -137,9 +138,9 @@ public class ContactExtractorTest {
                 .sender(SENDER)
                 .recipients(TO, TO2, CC, CC2, BCC, BCC2));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(TO, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
         Optional<String> actual = amqpRule.readContent();

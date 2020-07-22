@@ -38,7 +38,6 @@ import org.apache.james.dlp.api.DLPConfigurationItem;
 import org.apache.james.dlp.api.DLPConfigurationItem.Targets;
 import org.apache.james.javax.AddressHelper;
 import org.apache.james.javax.MultipartUtil;
-import org.apache.james.util.OptionalUtils;
 import org.apache.mailet.Mail;
 
 import com.github.fge.lambdas.Throwing;
@@ -89,8 +88,10 @@ public class DlpDomainRules {
             private Stream<String> getMessageSubjects(Mail mail) throws MessagingException {
                 MimeMessage message = mail.getMessage();
                 if (message != null) {
-                    return OptionalUtils.toStream(
-                        Optional.ofNullable(message.getSubject()));
+                    String subject = message.getSubject();
+                    if (subject != null) {
+                        return Stream.of(subject);
+                    }
                 }
                 return Stream.of();
             }
@@ -106,16 +107,22 @@ public class DlpDomainRules {
                 if (content instanceof String) {
                     return Stream.of((String) content);
                 }
+
+                return extractContentsComplexType(content)
+                    .flatMap(Throwing.function(this::getMessageBodiesFromContent).sneakyThrow());
+            }
+
+            private Stream<Object> extractContentsComplexType(Object content) throws IOException, MessagingException {
                 if (content instanceof Message) {
                     Message message = (Message) content;
-                    return getMessageBodiesFromContent(message.getContent());
+                    return Stream.of(message.getContent());
                 }
                 if (content instanceof Multipart) {
                     return MultipartUtil.retrieveBodyParts((Multipart) content)
                         .stream()
-                        .map(Throwing.function(BodyPart::getContent).sneakyThrow())
-                        .flatMap(Throwing.function(this::getMessageBodiesFromContent).sneakyThrow());
+                        .map(Throwing.function(BodyPart::getContent).sneakyThrow());
                 }
+
                 return Stream.of();
             }
         }

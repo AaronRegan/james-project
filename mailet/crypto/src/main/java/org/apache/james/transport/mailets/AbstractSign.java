@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.util.Enumeration;
 import java.util.Optional;
+import java.util.Set;
 
 import javax.inject.Inject;
 import javax.mail.MessagingException;
@@ -36,6 +37,7 @@ import javax.mail.internet.MimeMultipart;
 import javax.mail.internet.ParseException;
 
 import org.apache.james.core.MailAddress;
+import org.apache.james.core.Username;
 import org.apache.james.transport.KeyHolder;
 import org.apache.james.transport.SMIMEAttributeNames;
 import org.apache.james.user.api.UsersRepository;
@@ -160,9 +162,9 @@ public abstract class AbstractSign extends GenericMailet {
     
     /**
      * Gets the expected init parameters.
-     * @return An array containing the parameter names allowed for this mailet.
+     * @return A set containing the parameter names allowed for this mailet.
      */
-    protected abstract String[] getAllowedInitParameters();
+    protected abstract Set<String> getAllowedInitParameters();
     
     /* ******************************************************************** */
     /* ****************** Begin of setters and getters ******************** */
@@ -258,7 +260,7 @@ public abstract class AbstractSign extends GenericMailet {
     protected void initKeyHolder() throws Exception {
         Constructor<?> keyHolderConstructor;
         try {
-            keyHolderConstructor = keyHolderClass.getConstructor(new Class[] {String.class, String.class, String.class, String.class, String.class});
+            keyHolderConstructor = keyHolderClass.getConstructor(String.class, String.class, String.class, String.class, String.class);
         } catch (NoSuchMethodException nsme) {
             throw new MessagingException("The needed constructor does not exist: "
                     + keyHolderClass + "(String, String, String, String, String)");
@@ -573,7 +575,7 @@ public abstract class AbstractSign extends GenericMailet {
             return false;
         }
 
-        String authUser = fetchedAuthUser.get();
+        Username authUser = Username.of(fetchedAuthUser.get());
 
         // The sender is the postmaster?
         if (Objects.equal(getMailetContext().getPostmaster(), reversePath)) {
@@ -584,9 +586,9 @@ public abstract class AbstractSign extends GenericMailet {
             }
         } else {
             // is the reverse-path user different from the SMTP authorized user?
-            String username = getUsername(reversePath);
+            Username username = getUsername(reversePath);
             if (!username.equals(authUser)) {
-                LOGGER.info("SMTP logged in as <{}> but pretend to be sender <{}>", authUser, username);
+                LOGGER.info("SMTP logged in as <{}> but pretend to be sender <{}>", authUser.asString(), username.asString());
                 return false;
             }
             // is there no "From:" address same as the reverse-path?
@@ -607,9 +609,9 @@ public abstract class AbstractSign extends GenericMailet {
 
     }
 
-    private String getUsername(MailAddress mailAddress) {
+    private Username getUsername(MailAddress mailAddress) {
         try {
-            return usersRepository.getUser(mailAddress);
+            return usersRepository.getUsername(mailAddress);
         } catch (UsersRepositoryException e) {
             throw new RuntimeException(e);
         }
@@ -712,7 +714,7 @@ public abstract class AbstractSign extends GenericMailet {
             int fromIndex = 0;
             int index;
             while ((index = template.indexOf(pattern, fromIndex)) >= 0) {
-                sb.append(template.substring(fromIndex, index));
+                sb.append(template, fromIndex, index);
                 sb.append(actual);
                 fromIndex = index + pattern.length();
             }

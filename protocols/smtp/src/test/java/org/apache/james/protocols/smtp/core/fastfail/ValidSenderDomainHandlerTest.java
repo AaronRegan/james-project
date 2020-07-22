@@ -23,8 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
-import org.apache.commons.configuration2.Configuration;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.MaybeSender;
 import org.apache.james.protocols.api.ProtocolSession.State;
@@ -33,21 +33,12 @@ import org.apache.james.protocols.smtp.hook.HookReturnCode;
 import org.apache.james.protocols.smtp.utils.BaseFakeSMTPSession;
 import org.junit.Test;
 
+import com.google.common.base.Preconditions;
+
 public class ValidSenderDomainHandlerTest {
     
     private ValidSenderDomainHandler createHandler() {
         return new ValidSenderDomainHandler() {
-
-            @Override
-            public void init(Configuration config) {
-
-            }
-
-            @Override
-            public void destroy() {
-
-            }
-
             @Override
             protected boolean hasMXRecord(SMTPSession session, String domain) {
                 if (domain.equals("test.james.apache.org")) {
@@ -60,11 +51,10 @@ public class ValidSenderDomainHandlerTest {
     
     private SMTPSession setupMockedSession(final MailAddress sender) {
         return new BaseFakeSMTPSession() {
-            HashMap<String,Object> map = new HashMap<>();
+            Map<AttachmentKey<?>, Object> map = new HashMap<>();
 
             @Override
-            public Map<String,Object> getState() {
-
+            public Map<AttachmentKey<?>, Object> getState() {
                 map.put(SMTPSession.SENDER, MaybeSender.of(sender));
 
                 return map;
@@ -76,25 +66,34 @@ public class ValidSenderDomainHandlerTest {
             }
 
             @Override
-            public Object setAttachment(String key, Object value, State state) {
+            public <T> Optional<T> setAttachment(AttachmentKey<T> key, T value, State state) {
+                Preconditions.checkNotNull(key, "key cannot be null");
+                Preconditions.checkNotNull(value, "value cannot be null");
+
                 if (state == State.Connection) {
                     throw new UnsupportedOperationException();
-
                 } else {
-                    if (value == null) {
-                        return getState().remove(key);
-                    } else {
-                        return getState().put(key, value);
-                    }
+                    return key.convert(getState().put(key, value));
                 }
             }
 
             @Override
-            public Object getAttachment(String key, State state) {
+            public <T> Optional<T> removeAttachment(AttachmentKey<T> key, State state) {
+                Preconditions.checkNotNull(key, "key cannot be null");
+
                 if (state == State.Connection) {
                     throw new UnsupportedOperationException();
                 } else {
-                    return getState().get(key);
+                    return key.convert(getState().remove(key));
+                }
+            }
+
+            @Override
+            public <T> Optional<T> getAttachment(AttachmentKey<T> key, State state) {
+                if (state == State.Connection) {
+                    throw new UnsupportedOperationException();
+                } else {
+                    return key.convert(getState().get(key));
                 }
             }
 
@@ -115,7 +114,7 @@ public class ValidSenderDomainHandlerTest {
     public void testInvalidSenderDomainReject() throws Exception {
         ValidSenderDomainHandler handler = createHandler();
         SMTPSession session = setupMockedSession(new MailAddress("invalid@invalid"));
-        MaybeSender sender = (MaybeSender) session.getAttachment(SMTPSession.SENDER, State.Transaction);
+        MaybeSender sender = session.getAttachment(SMTPSession.SENDER, State.Transaction).get();
         HookReturnCode response = handler.doMail(session, sender).getResult();
         
         assertThat(HookReturnCode.deny()).describedAs("Blocked cause we use reject action").isEqualTo(response);

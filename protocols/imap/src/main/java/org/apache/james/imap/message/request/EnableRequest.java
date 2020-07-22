@@ -20,14 +20,18 @@ package org.apache.james.imap.message.request;
 
 import java.util.List;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
+import org.apache.james.imap.api.message.Capability;
+
+import com.google.common.base.MoreObjects;
 
 public class EnableRequest extends AbstractImapRequest {
 
-    private final List<String> capabilities;
+    private final List<Capability> capabilities;
 
-    public EnableRequest(String tag, ImapCommand command, List<String> capabilities) {
-        super(tag, command);
+    public EnableRequest(Tag tag, List<Capability> capabilities) {
+        super(tag, ImapConstants.ENABLE_COMMAND);
         this.capabilities = capabilities;
     }
     
@@ -36,7 +40,14 @@ public class EnableRequest extends AbstractImapRequest {
      * 
      * @return caps
      */
-    public List<String> getCapabilities() {
+    public List<Capability> getCapabilities() {
         return capabilities;
+    }
+
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("capabilities", capabilities)
+            .toString();
     }
 }

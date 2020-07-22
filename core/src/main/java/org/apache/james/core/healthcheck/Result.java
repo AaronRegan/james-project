@@ -18,30 +18,39 @@
  ****************************************************************/
 package org.apache.james.core.healthcheck;
 
+import java.util.Objects;
 import java.util.Optional;
+
+import com.google.common.base.MoreObjects;
 
 public class Result {
 
     public static Result healthy(ComponentName componentName) {
-        return new Result(componentName, ResultStatus.HEALTHY, Optional.empty());
+        return new Result(componentName, ResultStatus.HEALTHY, Optional.empty(), Optional.empty());
     }
 
     public static Result unhealthy(ComponentName componentName, String cause) {
-        return new Result(componentName, ResultStatus.UNHEALTHY, Optional.of(cause));
+        return new Result(componentName, ResultStatus.UNHEALTHY, Optional.of(cause), Optional.empty());
+    }
+
+    public static Result unhealthy(ComponentName componentName, String cause, Throwable error) {
+        return new Result(componentName, ResultStatus.UNHEALTHY, Optional.of(cause), Optional.of(error));
     }
 
     public static Result degraded(ComponentName componentName, String cause) {
-        return new Result(componentName, ResultStatus.DEGRADED, Optional.of(cause));
+        return new Result(componentName, ResultStatus.DEGRADED, Optional.of(cause), Optional.empty());
     }
 
     private final ComponentName componentName;
     private final ResultStatus status;
     private final Optional<String> cause;
+    private final Optional<Throwable> error;
 
-    private Result(ComponentName componentName, ResultStatus status, Optional<String> cause) {
+    private Result(ComponentName componentName, ResultStatus status, Optional<String> cause, Optional<Throwable> error) {
         this.componentName = componentName;
         this.status = status;
         this.cause = cause;
+        this.error = error;
     }
 
     public ComponentName getComponentName() {
@@ -50,6 +59,14 @@ public class Result {
 
     public ResultStatus getStatus() {
         return status;
+    }
+
+    public Optional<String> getCause() {
+        return cause;
+    }
+
+    public Optional<Throwable> getError() {
+        return error;
     }
 
     public boolean isHealthy() {
@@ -64,7 +81,30 @@ public class Result {
         return status == ResultStatus.UNHEALTHY;
     }
 
-    public Optional<String> getCause() {
-        return cause;
+    @Override
+    public final boolean equals(Object o) {
+        if (o instanceof Result) {
+            Result result = (Result) o;
+
+            return Objects.equals(this.componentName, result.componentName)
+                && Objects.equals(this.status, result.status)
+                && Objects.equals(this.cause, result.cause)
+                && Objects.equals(this.error, result.error);
+        }
+        return false;
+    }
+
+    @Override
+    public final int hashCode() {
+        return Objects.hash(componentName, status, cause, error);
+    }
+
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("componentName", componentName)
+            .add("status", status)
+            .add("cause", cause)
+            .toString();
     }
 }

@@ -33,10 +33,11 @@ import org.apache.james.mailrepository.api.MailRepositoryUrl;
 import org.apache.james.mailrepository.api.Protocol;
 import org.apache.james.mailrepository.memory.MailRepositoryStoreConfiguration;
 import org.apache.james.mailrepository.memory.MemoryMailRepository;
-import org.apache.james.mailrepository.memory.MemoryMailRepositoryProvider;
 import org.apache.james.mailrepository.memory.MemoryMailRepositoryStore;
 import org.apache.james.mailrepository.memory.MemoryMailRepositoryUrlStore;
+import org.apache.james.mailrepository.memory.SimpleMailRepositoryLoader;
 import org.apache.james.queue.api.MailQueueFactory;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.queue.api.ManageableMailQueue;
 import org.apache.james.queue.api.RawMailQueueItemDecoratorFactory;
 import org.apache.james.queue.memory.MemoryMailQueueFactory;
@@ -47,7 +48,6 @@ import org.junit.Test;
 import com.github.fge.lambdas.Throwing;
 import com.github.fge.lambdas.consumers.ConsumerChainer;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Sets;
 
 public class ReprocessingServiceTest {
     private static final String MEMORY_PROTOCOL = "memory";
@@ -58,13 +58,13 @@ public class ReprocessingServiceTest {
     private static final MailKey KEY_1 = new MailKey(NAME_1);
     private static final MailKey KEY_2 = new MailKey(NAME_2);
     private static final MailKey KEY_3 = new MailKey(NAME_3);
-    private static final String SPOOL = "spool";
+    private static final MailQueueName SPOOL = MailQueueName.of("spool");
     private static final Consumer<MailKey> NOOP_CONSUMER = key -> { };
     private static final Optional<String> NO_TARGET_PROCESSOR = Optional.empty();
 
     private ReprocessingService reprocessingService;
     private MemoryMailRepositoryStore mailRepositoryStore;
-    private MailQueueFactory<ManageableMailQueue> queueFactory;
+    private MailQueueFactory<? extends ManageableMailQueue> queueFactory;
     private FakeMail mail1;
     private FakeMail mail2;
     private FakeMail mail3;
@@ -187,7 +187,7 @@ public class ReprocessingServiceTest {
                 MemoryMailRepository.class.getName(),
                 new BaseHierarchicalConfiguration()));
 
-        MemoryMailRepositoryStore mailRepositoryStore = new MemoryMailRepositoryStore(urlStore, Sets.newHashSet(new MemoryMailRepositoryProvider()), configuration);
+        MemoryMailRepositoryStore mailRepositoryStore = new MemoryMailRepositoryStore(urlStore, new SimpleMailRepositoryLoader(), configuration);
         mailRepositoryStore.init();
         return mailRepositoryStore;
     }

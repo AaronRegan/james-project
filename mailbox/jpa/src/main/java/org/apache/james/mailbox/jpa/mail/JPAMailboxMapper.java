@@ -19,8 +19,6 @@
 
 package org.apache.james.mailbox.jpa.mail;
 
-import java.util.List;
-
 import javax.persistence.EntityExistsException;
 import javax.persistence.EntityManagerFactory;
 import javax.persistence.NoResultException;
@@ -28,6 +26,7 @@ import javax.persistence.PersistenceException;
 import javax.persistence.RollbackException;
 import javax.persistence.TypedQuery;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.acl.ACLDiff;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxExistsException;
@@ -40,11 +39,15 @@ import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxACL.Right;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.UidValidity;
+import org.apache.james.mailbox.model.search.MailboxQuery;
+import org.apache.james.mailbox.store.MailboxExpressionBackwardCompatibility;
 import org.apache.james.mailbox.store.mail.MailboxMapper;
 
-import com.github.steveash.guavate.Guavate;
-import com.google.common.base.Objects;
-import com.google.common.collect.ImmutableList;
+import com.google.common.base.Preconditions;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 /**
  * Data access management for mailbox.
@@ -72,7 +75,7 @@ public class JPAMailboxMapper extends JPATransactionalMapper implements MailboxM
             }
             if (e instanceof RollbackException) {
                 Throwable t = e.getCause();
-                if (t != null && t instanceof EntityExistsException) {
+                if (t instanceof EntityExistsException) {
                     throw new MailboxExistsException(lastMailboxName);
                 }
             }
@@ -81,79 +84,62 @@ public class JPAMailboxMapper extends JPATransactionalMapper implements MailboxM
     }
     
     @Override
-    public MailboxId save(Mailbox mailbox) throws MailboxException {
-        try {
-            if (isPathAlreadyUsedByAnotherMailbox(mailbox)) {
-                throw new MailboxExistsException(mailbox.getName());
-            }
+    public Mono<Mailbox> create(MailboxPath mailboxPath, UidValidity uidValidity) {
+        return assertPathIsNotAlreadyUsedByAnotherMailbox(mailboxPath)
+            .then(Mono.fromCallable(() -> {
+                this.lastMailboxName = mailboxPath.getName();
+                JPAMailbox persistedMailbox = new JPAMailbox(mailboxPath, uidValidity);
+                getEntityManager().persist(persistedMailbox);
 
-            this.lastMailboxName = mailbox.getName();
-            JPAMailbox persistedMailbox = jpaMailbox(mailbox);
-
-            getEntityManager().persist(persistedMailbox);
-            mailbox.setMailboxId(persistedMailbox.getMailboxId());
-            return persistedMailbox.getMailboxId();
-        } catch (PersistenceException e) {
-            throw new MailboxException("Save of mailbox " + mailbox.getName() + " failed", e);
-        } 
-    }
-
-    private JPAMailbox jpaMailbox(Mailbox mailbox) {
-        if (mailbox.getMailboxId() == null) {
-            return JPAMailbox.from(mailbox);
-        }
-        try {
-            JPAMailbox result = loadJpaMailbox(mailbox.getMailboxId());
-            result.setNamespace(mailbox.getNamespace());
-            result.setUser(mailbox.getUser());
-            result.setName(mailbox.getName());
-            return result;
-        } catch (MailboxNotFoundException e) {
-            return JPAMailbox.from(mailbox);
-        }
-    }
-
-    private boolean isPathAlreadyUsedByAnotherMailbox(Mailbox mailbox) throws MailboxException {
-        try {
-            Mailbox storedMailbox = findMailboxByPath(mailbox.generateAssociatedPath());
-            return !Objects.equal(storedMailbox.getMailboxId(), mailbox.getMailboxId());
-        } catch (MailboxNotFoundException e) {
-            return false;
-        }
+                return new Mailbox(mailboxPath, uidValidity, persistedMailbox.getMailboxId());
+            }))
+            .onErrorMap(PersistenceException.class, e -> new MailboxException("Save of mailbox " + mailboxPath.getName() + " failed", e));
     }
 
     @Override
-    public Mailbox findMailboxByPath(MailboxPath mailboxPath) throws MailboxException, MailboxNotFoundException {
-        try {
-            if (mailboxPath.getUser() == null) {
-                return getEntityManager().createNamedQuery("findMailboxByName", JPAMailbox.class)
-                    .setParameter("nameParam", mailboxPath.getName())
-                    .setParameter("namespaceParam", mailboxPath.getNamespace())
-                    .getSingleResult()
-                    .toMailbox();
-            } else {
-                return getEntityManager().createNamedQuery("findMailboxByNameWithUser", JPAMailbox.class)
-                    .setParameter("nameParam", mailboxPath.getName())
-                    .setParameter("namespaceParam", mailboxPath.getNamespace())
-                    .setParameter("userParam", mailboxPath.getUser())
-                    .getSingleResult()
-                    .toMailbox();
-            }
-        } catch (NoResultException e) {
-            throw new MailboxNotFoundException(mailboxPath);
-        } catch (PersistenceException e) {
-            throw new MailboxException("Search of mailbox " + mailboxPath + " failed", e);
-        }
+    public Mono<MailboxId> rename(Mailbox mailbox) {
+        Preconditions.checkNotNull(mailbox.getMailboxId(), "A mailbox we want to rename should have a defined mailboxId");
+
+        return assertPathIsNotAlreadyUsedByAnotherMailbox(mailbox.generateAssociatedPath())
+            .then(Mono.fromCallable(() -> {
+                this.lastMailboxName = mailbox.getName();
+                JPAMailbox persistedMailbox = jpaMailbox(mailbox);
+
+                getEntityManager().persist(persistedMailbox);
+                return (MailboxId) persistedMailbox.getMailboxId();
+            }))
+            .onErrorMap(PersistenceException.class, e -> new MailboxException("Save of mailbox " + mailbox.getName() + " failed", e));
+    }
+
+    private JPAMailbox jpaMailbox(Mailbox mailbox) throws MailboxException {
+        JPAMailbox result = loadJpaMailbox(mailbox.getMailboxId());
+        result.setNamespace(mailbox.getNamespace());
+        result.setUser(mailbox.getUser().asString());
+        result.setName(mailbox.getName());
+        return result;
+    }
+
+    private Mono<Void> assertPathIsNotAlreadyUsedByAnotherMailbox(MailboxPath mailboxPath) {
+        return findMailboxByPath(mailboxPath)
+            .flatMap(ignored -> Mono.error(new MailboxExistsException(mailboxPath.getName())));
     }
 
     @Override
-    public Mailbox findMailboxById(MailboxId id) throws MailboxException, MailboxNotFoundException {
+    public Mono<Mailbox> findMailboxByPath(MailboxPath mailboxPath)  {
+        return Mono.fromCallable(() -> getEntityManager().createNamedQuery("findMailboxByNameWithUser", JPAMailbox.class)
+            .setParameter("nameParam", mailboxPath.getName())
+            .setParameter("namespaceParam", mailboxPath.getNamespace())
+            .setParameter("userParam", mailboxPath.getUser().asString())
+            .getSingleResult()
+            .toMailbox())
+            .onErrorResume(NoResultException.class, e -> Mono.empty())
+            .onErrorResume(PersistenceException.class, e -> Mono.error(new MailboxException("Exception upon JPA execution", e)));
+    }
 
-        try {
-            return loadJpaMailbox(id).toMailbox();
-        } catch (PersistenceException e) {
-            throw new MailboxException("Search of mailbox " + id.serialize() + " failed", e);
-        } 
+    @Override
+    public Mono<Mailbox> findMailboxById(MailboxId id) {
+        return Mono.fromCallable(() -> loadJpaMailbox(id).toMailbox())
+            .onErrorMap(PersistenceException.class, e -> new MailboxException("Search of mailbox " + id.serialize() + " failed", e));
     }
 
     private JPAMailbox loadJpaMailbox(MailboxId id) throws MailboxNotFoundException {
@@ -167,110 +153,78 @@ public class JPAMailboxMapper extends JPATransactionalMapper implements MailboxM
         }
     }
 
-    public boolean exists(MailboxId id) throws MailboxException, MailboxNotFoundException {
-        try {
-            loadJpaMailbox(id);
-            return true;
-        } catch (MailboxNotFoundException e) {
-            return false;
-        }
-    }
-
     @Override
-    public void delete(Mailbox mailbox) throws MailboxException {
-        try {  
+    public Mono<Void> delete(Mailbox mailbox) {
+        return Mono.fromRunnable(() -> {
             JPAId mailboxId = (JPAId) mailbox.getMailboxId();
             getEntityManager().createNamedQuery("deleteMessages").setParameter("idParam", mailboxId.getRawId()).executeUpdate();
             JPAMailbox jpaMailbox = getEntityManager().find(JPAMailbox.class, mailboxId.getRawId());
             getEntityManager().remove(jpaMailbox);
-        } catch (PersistenceException e) {
-            throw new MailboxException("Delete of mailbox " + mailbox + " failed", e);
-        } 
+        })
+        .onErrorMap(PersistenceException.class, e -> new MailboxException("Delete of mailbox " + mailbox + " failed", e))
+        .then();
     }
 
     @Override
-    public List<Mailbox> findMailboxWithPathLike(MailboxPath path) throws MailboxException {
-        try {
-            return findMailboxWithPathLikeTypedQuery(path)
-                .getResultList()
-                .stream()
-                .map(JPAMailbox::toMailbox)
-                .collect(Guavate.toImmutableList());
-        } catch (PersistenceException e) {
-            throw new MailboxException("Search of mailbox " + path + " failed", e);
-        }
+    public Flux<Mailbox> findMailboxWithPathLike(MailboxQuery.UserBound query) {
+        String pathLike = MailboxExpressionBackwardCompatibility.getPathLike(query);
+        return Mono.fromCallable(() -> findMailboxWithPathLikeTypedQuery(query.getFixedNamespace(), query.getFixedUser(), pathLike))
+            .flatMapIterable(TypedQuery::getResultList)
+            .map(JPAMailbox::toMailbox)
+            .filter(query::matches)
+            .onErrorMap(PersistenceException.class, e -> new MailboxException("Search of mailbox " + query + " failed", e));
     }
 
-    private TypedQuery<JPAMailbox> findMailboxWithPathLikeTypedQuery(MailboxPath path) {
-        if (path.getUser() == null) {
-            return getEntityManager().createNamedQuery("findMailboxWithNameLike", JPAMailbox.class)
-                .setParameter("nameParam", path.getName())
-                .setParameter("namespaceParam", path.getNamespace());
-        } else {
-            return getEntityManager().createNamedQuery("findMailboxWithNameLikeWithUser", JPAMailbox.class)
-                .setParameter("nameParam", path.getName())
-                .setParameter("namespaceParam", path.getNamespace())
-                .setParameter("userParam", path.getUser());
-        }
-    }
-
-    public void deleteAllMemberships() throws MailboxException {
-        try {
-            getEntityManager().createNamedQuery("deleteAllMemberships").executeUpdate();
-        } catch (PersistenceException e) {
-            throw new MailboxException("Delete of mailboxes failed", e);
-        } 
-    }
-    
-    public void deleteAllMailboxes() throws MailboxException {
-        try {
-            getEntityManager().createNamedQuery("deleteAllMailboxes").executeUpdate();
-        } catch (PersistenceException e) {
-            throw new MailboxException("Delete of mailboxes failed", e);
-        } 
+    private TypedQuery<JPAMailbox> findMailboxWithPathLikeTypedQuery(String namespace, Username username, String pathLike) {
+        return getEntityManager().createNamedQuery("findMailboxWithNameLikeWithUser", JPAMailbox.class)
+            .setParameter("nameParam", pathLike)
+            .setParameter("namespaceParam", namespace)
+            .setParameter("userParam", username.asString());
     }
     
     @Override
-    public boolean hasChildren(Mailbox mailbox, char delimiter) throws MailboxException, MailboxNotFoundException {
+    public Mono<Boolean> hasChildren(Mailbox mailbox, char delimiter) {
         final String name = mailbox.getName() + delimiter + SQL_WILDCARD_CHAR; 
-        final Long numberOfChildMailboxes;
-        if (mailbox.getUser() == null) {
-            numberOfChildMailboxes = (Long) getEntityManager().createNamedQuery("countMailboxesWithNameLike").setParameter("nameParam", name).setParameter("namespaceParam", mailbox.getNamespace()).getSingleResult();
-        } else {
-            numberOfChildMailboxes = (Long) getEntityManager().createNamedQuery("countMailboxesWithNameLikeWithUser").setParameter("nameParam", name).setParameter("namespaceParam", mailbox.getNamespace()).setParameter("userParam", mailbox.getUser()).getSingleResult();
-        }
-        return numberOfChildMailboxes != null && numberOfChildMailboxes > 0;
+
+        return Mono.defer(() -> Mono.justOrEmpty((Long) getEntityManager()
+                .createNamedQuery("countMailboxesWithNameLikeWithUser")
+                .setParameter("nameParam", name)
+                .setParameter("namespaceParam", mailbox.getNamespace())
+                .setParameter("userParam", mailbox.getUser().asString())
+                .getSingleResult()))
+            .filter(numberOfChildMailboxes -> numberOfChildMailboxes > 0)
+            .hasElement();
     }
 
     @Override
-    public List<Mailbox> list() throws MailboxException {
-        try {
-            return getEntityManager().createNamedQuery("listMailboxes", JPAMailbox.class).getResultList()
-                .stream()
-                .map(JPAMailbox::toMailbox)
-                .collect(Guavate.toImmutableList());
-        } catch (PersistenceException e) {
-            throw new MailboxException("Delete of mailboxes failed", e);
-        } 
+    public Flux<Mailbox> list() {
+        return Mono.fromCallable(() -> getEntityManager().createNamedQuery("listMailboxes", JPAMailbox.class))
+            .flatMapIterable(TypedQuery::getResultList)
+            .onErrorMap(PersistenceException.class, e -> new MailboxException("Delete of mailboxes failed", e))
+            .map(JPAMailbox::toMailbox);
     }
 
     @Override
-    public ACLDiff updateACL(Mailbox mailbox, MailboxACL.ACLCommand mailboxACLCommand) throws MailboxException {
-        MailboxACL oldACL = mailbox.getACL();
-        MailboxACL newACL = mailbox.getACL().apply(mailboxACLCommand);
-        mailbox.setACL(newACL);
-        return ACLDiff.computeDiff(oldACL, newACL);
+    public Mono<ACLDiff> updateACL(Mailbox mailbox, MailboxACL.ACLCommand mailboxACLCommand) {
+        return Mono.fromCallable(() -> {
+            MailboxACL oldACL = mailbox.getACL();
+            MailboxACL newACL = mailbox.getACL().apply(mailboxACLCommand);
+            mailbox.setACL(newACL);
+            return ACLDiff.computeDiff(oldACL, newACL);
+        });
     }
 
     @Override
-    public ACLDiff setACL(Mailbox mailbox, MailboxACL mailboxACL) throws MailboxException {
-        MailboxACL oldMailboxAcl = mailbox.getACL();
-        mailbox.setACL(mailboxACL);
-        return ACLDiff.computeDiff(oldMailboxAcl, mailboxACL);
+    public Mono<ACLDiff> setACL(Mailbox mailbox, MailboxACL mailboxACL) {
+        return Mono.fromCallable(() -> {
+            MailboxACL oldMailboxAcl = mailbox.getACL();
+            mailbox.setACL(mailboxACL);
+            return ACLDiff.computeDiff(oldMailboxAcl, mailboxACL);
+        });
     }
 
     @Override
-    public List<Mailbox> findNonPersonalMailboxes(String userName, Right right) throws MailboxException {
-        return ImmutableList.of();
+    public Flux<Mailbox> findNonPersonalMailboxes(Username userName, Right right) {
+        return Flux.empty();
     }
 }

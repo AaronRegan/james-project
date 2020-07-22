@@ -25,19 +25,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.ZonedDateTime;
 
 import org.apache.james.blob.api.BucketName;
-import org.apache.james.server.task.json.JsonTaskAdditionalInformationsSerializer;
+import org.apache.james.server.task.json.JsonTaskAdditionalInformationSerializer;
 import org.apache.james.server.task.json.JsonTaskSerializer;
 import org.apache.james.task.Task;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.google.common.collect.ImmutableList;
-
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.google.common.collect.ImmutableSet;
 
 import reactor.core.publisher.Flux;
 
@@ -45,17 +45,18 @@ class BlobStoreVaultGarbageCollectionTaskSerializationTest {
    private static final BlobStoreDeletedMessageVault DELETED_MESSAGE_VAULT = Mockito.mock(BlobStoreDeletedMessageVault.class);
    private static final BlobStoreVaultGarbageCollectionTask.Factory TASK_FACTORY = new BlobStoreVaultGarbageCollectionTask.Factory(DELETED_MESSAGE_VAULT);
 
-    private static final JsonTaskSerializer TASK_SERIALIZER = new JsonTaskSerializer(BlobStoreVaultGarbageCollectionTaskDTO.MODULE.apply(TASK_FACTORY));
+    private static final JsonTaskSerializer TASK_SERIALIZER = JsonTaskSerializer.of(BlobStoreVaultGarbageCollectionTaskDTO.module(TASK_FACTORY));
     private static final ZonedDateTime BEGINNING_OF_RETENTION_PERIOD = ZonedDateTime.parse("2019-09-03T15:26:13.356+02:00[Europe/Paris]");
-    private static final ImmutableList<BucketName> BUCKET_IDS = ImmutableList.of(BucketName.of("1"), BucketName.of("2"), BucketName.of("3"));
+    private static final ImmutableSet<BucketName> BUCKET_IDS = ImmutableSet.of(BucketName.of("1"), BucketName.of("2"), BucketName.of("3"));
     private static final Flux<BucketName> RETENTION_OPERATION = Flux.fromIterable(BUCKET_IDS);
-    private static final BlobStoreVaultGarbageCollectionTask.AdditionalInformation DETAILS = new BlobStoreVaultGarbageCollectionTask.AdditionalInformation(BEGINNING_OF_RETENTION_PERIOD, BUCKET_IDS);
+    private static final Instant TIMESTAMP = Instant.parse("2018-11-13T12:00:55Z");
+    private static final BlobStoreVaultGarbageCollectionTask.AdditionalInformation DETAILS = new BlobStoreVaultGarbageCollectionTask.AdditionalInformation(BEGINNING_OF_RETENTION_PERIOD, BUCKET_IDS, TIMESTAMP);
     private static final BlobStoreVaultGarbageCollectionTask TASK = TASK_FACTORY.create();
 
-    private static final String SERIALIZED_TASK = "{\"type\":\"deletedMessages/blobStoreBasedGarbageCollection\"}";
-    private static final String SERIALIZED_ADDITIONAL_INFORMATION_TASK = "{\"beginningOfRetentionPeriod\":\"2019-09-03T15:26:13.356+02:00[Europe/Paris]\",\"deletedBuckets\":[\"1\", \"2\", \"3\"]}";
+    private static final String SERIALIZED_TASK = "{\"type\":\"deleted-messages-blob-store-based-garbage-collection\"}";
+    private static final String SERIALIZED_ADDITIONAL_INFORMATION_TASK = "{\"type\":\"deleted-messages-blob-store-based-garbage-collection\", \"beginningOfRetentionPeriod\":\"2019-09-03T15:26:13.356+02:00[Europe/Paris]\",\"deletedBuckets\":[\"1\", \"2\", \"3\"], \"timestamp\": \"2018-11-13T12:00:55Z\"}";
 
-    private static final JsonTaskAdditionalInformationsSerializer JSON_TASK_ADDITIONAL_INFORMATIONS_SERIALIZER = new JsonTaskAdditionalInformationsSerializer(BlobStoreVaultGarbageCollectionTaskAdditionalInformationDTO.MODULE);
+    private static final JsonTaskAdditionalInformationSerializer JSON_TASK_ADDITIONAL_INFORMATION_SERIALIZER = JsonTaskAdditionalInformationSerializer.of(BlobStoreVaultGarbageCollectionTaskAdditionalInformationDTO.module());
 
     @BeforeAll
     static void setUp() {
@@ -80,12 +81,12 @@ class BlobStoreVaultGarbageCollectionTaskSerializationTest {
 
     @Test
     void additionalInformationShouldBeSerializable() throws JsonProcessingException {
-        assertThatJson(JSON_TASK_ADDITIONAL_INFORMATIONS_SERIALIZER.serialize(DETAILS)).isEqualTo(SERIALIZED_ADDITIONAL_INFORMATION_TASK);
+        assertThatJson(JSON_TASK_ADDITIONAL_INFORMATION_SERIALIZER.serialize(DETAILS)).isEqualTo(SERIALIZED_ADDITIONAL_INFORMATION_TASK);
     }
 
     @Test
     void additonalInformationShouldBeDeserializable() throws IOException {
-        assertThat(JSON_TASK_ADDITIONAL_INFORMATIONS_SERIALIZER.deserialize("deletedMessages/blobStoreBasedGarbageCollection", SERIALIZED_ADDITIONAL_INFORMATION_TASK))
+        assertThat(JSON_TASK_ADDITIONAL_INFORMATION_SERIALIZER.deserialize(SERIALIZED_ADDITIONAL_INFORMATION_TASK))
             .isEqualToComparingFieldByField(DETAILS);
     }
 }

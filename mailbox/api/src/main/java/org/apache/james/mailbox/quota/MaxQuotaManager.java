@@ -20,16 +20,18 @@
 package org.apache.james.mailbox.quota;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import org.apache.james.core.Domain;
-import org.apache.james.core.quota.QuotaCount;
-import org.apache.james.core.quota.QuotaSize;
+import org.apache.james.core.quota.QuotaCountLimit;
+import org.apache.james.core.quota.QuotaSizeLimit;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.Quota;
 import org.apache.james.mailbox.model.Quota.Scope;
 import org.apache.james.mailbox.model.QuotaRoot;
-import org.apache.james.util.OptionalUtils;
 
 import com.github.fge.lambdas.Throwing;
 
@@ -45,7 +47,7 @@ public interface MaxQuotaManager {
      * @param quotaRoot Quota root argument from RFC 2087 ( correspond to the user owning this mailbox )
      * @param maxStorageQuota The new storage quota ( in bytes ) for this user
      */
-    void setMaxStorage(QuotaRoot quotaRoot, QuotaSize maxStorageQuota) throws MailboxException;
+    void setMaxStorage(QuotaRoot quotaRoot, QuotaSizeLimit maxStorageQuota) throws MailboxException;
 
     /**
      * Method allowing you to set the maximum message count allowed for this quotaroot
@@ -53,7 +55,7 @@ public interface MaxQuotaManager {
      * @param quotaRoot Quota root argument from RFC 2087
      * @param maxMessageCount The new message count allowed.
      */
-    void setMaxMessage(QuotaRoot quotaRoot, QuotaCount maxMessageCount) throws MailboxException;
+    void setMaxMessage(QuotaRoot quotaRoot, QuotaCountLimit maxMessageCount) throws MailboxException;
 
     /**
      * Method allowing you to remove the maximum messages count allowed for this quotaroot
@@ -74,7 +76,7 @@ public interface MaxQuotaManager {
      *
      * @param globalMaxStorage new global maximum storage
      */
-    void setGlobalMaxStorage(QuotaSize globalMaxStorage) throws MailboxException;
+    void setGlobalMaxStorage(QuotaSizeLimit globalMaxStorage) throws MailboxException;
 
     /**
      * Method allowing you to remove the global maximum messages size in bytes.
@@ -86,7 +88,7 @@ public interface MaxQuotaManager {
      *
      * @param globalMaxMessageCount new global message count
      */
-    void setGlobalMaxMessage(QuotaCount globalMaxMessageCount) throws MailboxException;
+    void setGlobalMaxMessage(QuotaCountLimit globalMaxMessageCount) throws MailboxException;
 
     /**
      * Method allowing you to remove the global maximum messages count.
@@ -98,14 +100,14 @@ public interface MaxQuotaManager {
      *
      * @return global maximum storage, if defined
      */
-    Optional<QuotaSize> getGlobalMaxStorage() throws MailboxException;
+    Optional<QuotaSizeLimit> getGlobalMaxStorage() throws MailboxException;
 
     /**
      * Method allowing you to get the global maximum message count allowed
      *
      * @return global maximum message count, if defined
      */
-    Optional<QuotaCount> getGlobalMaxMessage() throws MailboxException;
+    Optional<QuotaCountLimit> getGlobalMaxMessage() throws MailboxException;
 
     /**
      * Return the maximum storage which is allowed for the given {@link QuotaRoot} (in fact the user which the session is bound to)
@@ -115,16 +117,17 @@ public interface MaxQuotaManager {
      * @param quotaRoot Quota root argument from RFC 2087 ( correspond to the user owning this mailbox )
      * @return The maximum storage in bytes if any
      */
-    default Optional<QuotaSize> getMaxStorage(QuotaRoot quotaRoot) throws MailboxException {
-        Map<Scope, QuotaSize> maxStorageDetails = listMaxStorageDetails(quotaRoot);
+    default Optional<QuotaSizeLimit> getMaxStorage(QuotaRoot quotaRoot) throws MailboxException {
+        Map<Scope, QuotaSizeLimit> maxStorageDetails = listMaxStorageDetails(quotaRoot);
         return getMaxStorage(maxStorageDetails);
     }
 
-    default Optional<QuotaSize> getMaxStorage(Map<Quota.Scope, QuotaSize> maxStorageDetails) {
-        return OptionalUtils.or(
-            Optional.ofNullable(maxStorageDetails.get(Quota.Scope.User)),
-            Optional.ofNullable(maxStorageDetails.get(Quota.Scope.Domain)),
-            Optional.ofNullable(maxStorageDetails.get(Quota.Scope.Global)));
+    default Optional<QuotaSizeLimit> getMaxStorage(Map<Quota.Scope, QuotaSizeLimit> maxStorageDetails) {
+        return Quota.allScopes()
+            .stream()
+            .map(maxStorageDetails::get)
+            .filter(Objects::nonNull)
+            .findFirst();
     }
 
     /**
@@ -133,43 +136,49 @@ public interface MaxQuotaManager {
      * @param quotaRoot Quota root argument from RFC 2087 ( correspond to the user owning this mailbox )
      * @return maximum of allowed message count
      */
-    default Optional<QuotaCount> getMaxMessage(QuotaRoot quotaRoot) throws MailboxException {
-        Map<Scope, QuotaCount> maxMessagesDetails = listMaxMessagesDetails(quotaRoot);
+    default Optional<QuotaCountLimit> getMaxMessage(QuotaRoot quotaRoot) throws MailboxException {
+        Map<Scope, QuotaCountLimit> maxMessagesDetails = listMaxMessagesDetails(quotaRoot);
         return getMaxMessage(maxMessagesDetails);
     }
 
-    default Optional<QuotaCount> getMaxMessage(Map<Quota.Scope, QuotaCount> maxMessagesDetails) {
-        return OptionalUtils.or(
-            Optional.ofNullable(maxMessagesDetails.get(Quota.Scope.User)),
-            Optional.ofNullable(maxMessagesDetails.get(Quota.Scope.Domain)),
-            Optional.ofNullable(maxMessagesDetails.get(Quota.Scope.Global)));
+    default Optional<QuotaCountLimit> getMaxMessage(Map<Quota.Scope, QuotaCountLimit> maxMessagesDetails) {
+        return Stream.of(Quota.Scope.User, Quota.Scope.Domain, Quota.Scope.Global)
+            .map(maxMessagesDetails::get)
+            .filter(Objects::nonNull)
+            .findFirst();
     }
 
-    Map<Quota.Scope, QuotaCount> listMaxMessagesDetails(QuotaRoot quotaRoot);
+    Map<Quota.Scope, QuotaCountLimit> listMaxMessagesDetails(QuotaRoot quotaRoot);
 
-    Map<Quota.Scope, QuotaSize> listMaxStorageDetails(QuotaRoot quotaRoot);
+    Map<Quota.Scope, QuotaSizeLimit> listMaxStorageDetails(QuotaRoot quotaRoot);
 
-    Optional<QuotaCount> getDomainMaxMessage(Domain domain);
+    Optional<QuotaCountLimit> getDomainMaxMessage(Domain domain);
 
-    void setDomainMaxMessage(Domain domain, QuotaCount count) throws MailboxException;
+    void setDomainMaxMessage(Domain domain, QuotaCountLimit count) throws MailboxException;
 
     void removeDomainMaxMessage(Domain domain) throws MailboxException;
 
-    void setDomainMaxStorage(Domain domain, QuotaSize size) throws MailboxException;
+    void setDomainMaxStorage(Domain domain, QuotaSizeLimit size) throws MailboxException;
 
-    Optional<QuotaSize> getDomainMaxStorage(Domain domain);
+    Optional<QuotaSizeLimit> getDomainMaxStorage(Domain domain);
 
     void removeDomainMaxStorage(Domain domain) throws MailboxException;
 
-    default Optional<QuotaCount> getComputedMaxMessage(Domain domain) throws MailboxException {
-        return OptionalUtils.orSuppliers(
-            Throwing.supplier(() -> getDomainMaxMessage(domain)).sneakyThrow(),
-            Throwing.supplier(this::getGlobalMaxMessage).sneakyThrow());
+    default Optional<QuotaCountLimit> getComputedMaxMessage(Domain domain) throws MailboxException {
+        return Stream.of(
+                Throwing.supplier(() -> getDomainMaxMessage(domain)).sneakyThrow(),
+                Throwing.supplier(this::getGlobalMaxMessage).sneakyThrow())
+            .map(Supplier::get)
+            .flatMap(Optional::stream)
+            .findFirst();
     }
 
-    default Optional<QuotaSize> getComputedMaxStorage(Domain domain) throws MailboxException {
-        return OptionalUtils.orSuppliers(
-            Throwing.supplier(() -> getDomainMaxStorage(domain)).sneakyThrow(),
-            Throwing.supplier(this::getGlobalMaxStorage).sneakyThrow());
+    default Optional<QuotaSizeLimit> getComputedMaxStorage(Domain domain) throws MailboxException {
+        return Stream.of(
+                Throwing.supplier(() -> getDomainMaxStorage(domain)).sneakyThrow(),
+                Throwing.supplier(this::getGlobalMaxStorage).sneakyThrow())
+            .map(Supplier::get)
+            .flatMap(Optional::stream)
+            .findFirst();
     }
 }

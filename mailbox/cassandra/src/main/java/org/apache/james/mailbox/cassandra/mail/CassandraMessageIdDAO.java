@@ -50,12 +50,14 @@ import javax.mail.Flags.Flag;
 
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId.Factory;
 import org.apache.james.mailbox.model.ComposedMessageId;
 import org.apache.james.mailbox.model.ComposedMessageIdWithMetaData;
 import org.apache.james.mailbox.model.MessageRange;
+import org.apache.james.util.streams.Limit;
 
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Row;
@@ -70,6 +72,7 @@ public class CassandraMessageIdDAO {
 
     private static final String IMAP_UID_GTE = IMAP_UID + "_GTE";
     private static final String IMAP_UID_LTE = IMAP_UID + "_LTE";
+    public static final String LIMIT = "LIMIT_BIND_MARKER";
 
     private final CassandraAsyncExecutor cassandraAsyncExecutor;
     private final Factory messageIdFactory;
@@ -77,9 +80,13 @@ public class CassandraMessageIdDAO {
     private final PreparedStatement insert;
     private final PreparedStatement select;
     private final PreparedStatement selectAllUids;
+    private final PreparedStatement selectAllUidsLimited;
     private final PreparedStatement selectUidGte;
+    private final PreparedStatement selectUidGteLimited;
     private final PreparedStatement selectUidRange;
+    private final PreparedStatement selectUidRangeLimited;
     private final PreparedStatement update;
+    private final PreparedStatement listStatement;
 
     @Inject
     public CassandraMessageIdDAO(Session session, CassandraMessageId.Factory messageIdFactory) {
@@ -90,8 +97,12 @@ public class CassandraMessageIdDAO {
         this.update = prepareUpdate(session);
         this.select = prepareSelect(session);
         this.selectAllUids = prepareSelectAllUids(session);
+        this.selectAllUidsLimited = prepareSelectAllUidsLimited(session);
         this.selectUidGte = prepareSelectUidGte(session);
+        this.selectUidGteLimited = prepareSelectUidGteLimited(session);
         this.selectUidRange = prepareSelectUidRange(session);
+        this.selectUidRangeLimited = prepareSelectUidRangeLimited(session);
+        this.listStatement = prepareList(session);
     }
 
     private PreparedStatement prepareDelete(Session session) {
@@ -141,23 +152,52 @@ public class CassandraMessageIdDAO {
 
     private PreparedStatement prepareSelectAllUids(Session session) {
         return session.prepare(select(FIELDS)
-                .from(TABLE_NAME)
-                .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID))));
+            .from(TABLE_NAME)
+            .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID))));
+    }
+
+    private PreparedStatement prepareSelectAllUidsLimited(Session session) {
+        return session.prepare(select(FIELDS)
+            .from(TABLE_NAME)
+            .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID)))
+            .limit(bindMarker(LIMIT)));
+    }
+
+    private PreparedStatement prepareList(Session session) {
+        return session.prepare(select(FIELDS)
+            .from(TABLE_NAME));
     }
 
     private PreparedStatement prepareSelectUidGte(Session session) {
         return session.prepare(select(FIELDS)
-                .from(TABLE_NAME)
-                .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID)))
-                .and(gte(IMAP_UID, bindMarker(IMAP_UID))));
+            .from(TABLE_NAME)
+            .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID)))
+            .and(gte(IMAP_UID, bindMarker(IMAP_UID))));
+    }
+
+    private PreparedStatement prepareSelectUidGteLimited(Session session) {
+        return session.prepare(select(FIELDS)
+            .from(TABLE_NAME)
+            .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID)))
+            .and(gte(IMAP_UID, bindMarker(IMAP_UID)))
+            .limit(bindMarker(LIMIT)));
     }
 
     private PreparedStatement prepareSelectUidRange(Session session) {
         return session.prepare(select(FIELDS)
-                .from(TABLE_NAME)
-                .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID)))
-                .and(gte(IMAP_UID, bindMarker(IMAP_UID_GTE)))
-                .and(lte(IMAP_UID, bindMarker(IMAP_UID_LTE))));
+            .from(TABLE_NAME)
+            .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID)))
+            .and(gte(IMAP_UID, bindMarker(IMAP_UID_GTE)))
+            .and(lte(IMAP_UID, bindMarker(IMAP_UID_LTE))));
+    }
+
+    private PreparedStatement prepareSelectUidRangeLimited(Session session) {
+        return session.prepare(select(FIELDS)
+            .from(TABLE_NAME)
+            .where(eq(MAILBOX_ID, bindMarker(MAILBOX_ID)))
+            .and(gte(IMAP_UID, bindMarker(IMAP_UID_GTE)))
+            .and(lte(IMAP_UID, bindMarker(IMAP_UID_LTE)))
+            .limit(bindMarker(LIMIT)));
     }
 
     public Mono<Void> delete(CassandraId mailboxId, MessageUid uid) {
@@ -173,7 +213,7 @@ public class CassandraMessageIdDAO {
                 .setUUID(MAILBOX_ID, ((CassandraId) composedMessageId.getMailboxId()).asUuid())
                 .setLong(IMAP_UID, composedMessageId.getUid().asLong())
                 .setUUID(MESSAGE_ID, ((CassandraMessageId) composedMessageId.getMessageId()).get())
-                .setLong(MOD_SEQ, composedMessageIdWithMetaData.getModSeq())
+                .setLong(MOD_SEQ, composedMessageIdWithMetaData.getModSeq().asLong())
                 .setBool(ANSWERED, flags.contains(Flag.ANSWERED))
                 .setBool(DELETED, flags.contains(Flag.DELETED))
                 .setBool(DRAFT, flags.contains(Flag.DRAFT))
@@ -188,7 +228,7 @@ public class CassandraMessageIdDAO {
         ComposedMessageId composedMessageId = composedMessageIdWithMetaData.getComposedMessageId();
         Flags flags = composedMessageIdWithMetaData.getFlags();
         return cassandraAsyncExecutor.executeVoid(update.bind()
-                .setLong(MOD_SEQ, composedMessageIdWithMetaData.getModSeq())
+                .setLong(MOD_SEQ, composedMessageIdWithMetaData.getModSeq().asLong())
                 .setBool(ANSWERED, flags.contains(Flag.ANSWERED))
                 .setBool(DELETED, flags.contains(Flag.DELETED))
                 .setBool(DRAFT, flags.contains(Flag.DRAFT))
@@ -209,7 +249,7 @@ public class CassandraMessageIdDAO {
         return row
                 .map(this::fromRowToComposedMessageIdWithFlags)
                 .map(Optional::of)
-                .switchIfEmpty(Mono.just(Optional.empty()));
+                .defaultIfEmpty(Optional.empty());
     }
 
     private Mono<Row> selectOneRow(CassandraId mailboxId, MessageUid uid) {
@@ -218,41 +258,61 @@ public class CassandraMessageIdDAO {
                 .setLong(IMAP_UID, uid.asLong()));
     }
 
-    public Flux<ComposedMessageIdWithMetaData> retrieveMessages(CassandraId mailboxId, MessageRange set) {
-        return retrieveRows(mailboxId, set)
+    public Flux<ComposedMessageIdWithMetaData> retrieveMessages(CassandraId mailboxId, MessageRange set, Limit limit) {
+        return retrieveRows(mailboxId, set, limit)
             .map(this::fromRowToComposedMessageIdWithFlags);
     }
 
-    private Flux<Row> retrieveRows(CassandraId mailboxId, MessageRange set) {
+    public Flux<ComposedMessageIdWithMetaData> retrieveAllMessages() {
+        return cassandraAsyncExecutor.executeRows(listStatement.bind())
+            .map(this::fromRowToComposedMessageIdWithFlags);
+    }
+
+    private Flux<Row> retrieveRows(CassandraId mailboxId, MessageRange set, Limit limit) {
         switch (set.getType()) {
         case ALL:
-            return selectAll(mailboxId);
+            return selectAll(mailboxId, limit);
         case FROM:
-            return selectFrom(mailboxId, set.getUidFrom());
+            return selectFrom(mailboxId, set.getUidFrom(), limit);
         case RANGE:
-            return selectRange(mailboxId, set.getUidFrom(), set.getUidTo());
+            return selectRange(mailboxId, set.getUidFrom(), set.getUidTo(), limit);
         case ONE:
             return Flux.concat(selectOneRow(mailboxId, set.getUidFrom()));
         }
         throw new UnsupportedOperationException();
     }
 
-    private Flux<Row> selectAll(CassandraId mailboxId) {
-        return cassandraAsyncExecutor.executeRows(selectAllUids.bind()
-                .setUUID(MAILBOX_ID, mailboxId.asUuid()));
-    }
-
-    private Flux<Row> selectFrom(CassandraId mailboxId, MessageUid uid) {
-        return cassandraAsyncExecutor.executeRows(selectUidGte.bind()
+    private Flux<Row> selectAll(CassandraId mailboxId, Limit limit) {
+        return cassandraAsyncExecutor.executeRows(limit.getLimit()
+            .map(limitAsInt -> selectAllUidsLimited.bind()
                 .setUUID(MAILBOX_ID, mailboxId.asUuid())
-                .setLong(IMAP_UID, uid.asLong()));
+                .setInt(LIMIT, limitAsInt))
+            .orElse(selectAllUids.bind()
+                .setUUID(MAILBOX_ID, mailboxId.asUuid())));
     }
 
-    private Flux<Row> selectRange(CassandraId mailboxId, MessageUid from, MessageUid to) {
-        return cassandraAsyncExecutor.executeRows(selectUidRange.bind()
+    private Flux<Row> selectFrom(CassandraId mailboxId, MessageUid uid, Limit limit) {
+        return cassandraAsyncExecutor.executeRows(limit.getLimit()
+            .map(limitAsInt -> selectUidGteLimited.bind()
+                .setUUID(MAILBOX_ID, mailboxId.asUuid())
+                .setLong(IMAP_UID, uid.asLong())
+                .setInt(LIMIT, limitAsInt))
+            .orElse(selectUidGte.bind()
+                .setUUID(MAILBOX_ID, mailboxId.asUuid())
+                .setLong(IMAP_UID, uid.asLong())));
+    }
+
+    private Flux<Row> selectRange(CassandraId mailboxId, MessageUid from, MessageUid to, Limit limit) {
+        return cassandraAsyncExecutor.executeRows(limit.getLimit()
+            .map(limitAsInt -> selectUidRangeLimited.bind()
                 .setUUID(MAILBOX_ID, mailboxId.asUuid())
                 .setLong(IMAP_UID_GTE, from.asLong())
-                .setLong(IMAP_UID_LTE, to.asLong()));
+                .setLong(IMAP_UID_LTE, to.asLong())
+                .setInt(LIMIT, limitAsInt))
+            .orElse(selectUidRange.bind()
+                .setUUID(MAILBOX_ID, mailboxId.asUuid())
+                .setLong(IMAP_UID_GTE, from.asLong())
+                .setLong(IMAP_UID_LTE, to.asLong())));
     }
 
     private ComposedMessageIdWithMetaData fromRowToComposedMessageIdWithFlags(Row row) {
@@ -262,7 +322,7 @@ public class CassandraMessageIdDAO {
                         messageIdFactory.of(row.getUUID(MESSAGE_ID)),
                         MessageUid.of(row.getLong(IMAP_UID))))
                 .flags(new FlagsExtractor(row).getFlags())
-                .modSeq(row.getLong(MOD_SEQ))
+                .modSeq(ModSeq.of(row.getLong(MOD_SEQ)))
                 .build();
     }
 }

@@ -50,15 +50,19 @@ import com.google.inject.Module;
 
 public class TemporaryJamesServer {
 
-    public static final MailetContainer.Builder DEFAULT_MAILET_CONTAINER_CONFIGURATION = MailetContainer.builder()
-        .putProcessor(CommonProcessors.root())
-        .putProcessor(CommonProcessors.error())
-        .putProcessor(CommonProcessors.transport());
+    public static MailetContainer.Builder defaultMailetContainerConfiguration() {
+        return MailetContainer.builder()
+            .putProcessor(CommonProcessors.root())
+            .putProcessor(CommonProcessors.error())
+            .putProcessor(CommonProcessors.transport());
+    }
 
-    public static final MailetContainer.Builder SIMPLE_MAILET_CONTAINER_CONFIGURATION = MailetContainer.builder()
-        .putProcessor(CommonProcessors.simpleRoot())
-        .putProcessor(CommonProcessors.error())
-        .putProcessor(CommonProcessors.transport());
+    public static MailetContainer.Builder simpleMailetContainerConfiguration() {
+        return MailetContainer.builder()
+            .putProcessor(CommonProcessors.simpleRoot())
+            .putProcessor(CommonProcessors.error())
+            .putProcessor(CommonProcessors.transport());
+    }
 
 
     public static class Builder {
@@ -106,7 +110,7 @@ public class TemporaryJamesServer {
         public TemporaryJamesServer build(File workingDir) throws Exception {
             return new TemporaryJamesServer(
                 workingDir,
-                mailetConfiguration.orElse(DEFAULT_MAILET_CONTAINER_CONFIGURATION.build()),
+                mailetConfiguration.orElse(defaultMailetContainerConfiguration().build()),
                 smtpConfiguration.orElse(SmtpConfiguration.DEFAULT),
                 module.orElse(MemoryJamesServerMain.IN_MEMORY_SERVER_AGGREGATE_MODULE),
                 overrideModules.build());
@@ -132,8 +136,6 @@ public class TemporaryJamesServer {
         "usersrepository.xml",
         "smime.p12");
 
-    private static final int LIMIT_TO_3_MESSAGES = 3;
-
     private final GuiceJamesServer jamesServer;
 
     private TemporaryJamesServer(File workingDir, MailetContainer mailetContainer, SmtpConfiguration smtpConfiguration,
@@ -148,9 +150,11 @@ public class TemporaryJamesServer {
             .combineWith(serverBaseModule)
             .overrideWith((binder) -> binder.bind(PersistenceAdapter.class).to(MemoryPersistenceAdapter.class))
             .overrideWith(additionalModules)
-            .overrideWith(new TestJMAPServerModule(LIMIT_TO_3_MESSAGES))
+            .overrideWith(new TestJMAPServerModule())
             .overrideWith((binder) -> binder.bind(WebAdminConfiguration.class).toInstance(WebAdminConfiguration.TEST_CONFIGURATION));
+    }
 
+    public void start() throws Exception {
         jamesServer.start();
     }
 
@@ -162,7 +166,7 @@ public class TemporaryJamesServer {
 
     private void copyResource(Path resourcesFolder, String resourceName) {
         try (OutputStream outputStream = new FileOutputStream(resourcesFolder.resolve(resourceName).toFile())) {
-            IOUtils.copy(ClassLoader.getSystemClassLoader().getResource(resourceName).openStream(), outputStream);
+            ClassLoader.getSystemClassLoader().getResource(resourceName).openStream().transferTo(outputStream);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

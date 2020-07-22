@@ -2,7 +2,7 @@
 #
 # VERSION	1.0
 
-FROM openjdk:8u222-jre
+FROM adoptopenjdk:11-jre-hotspot
 
 # Ports that are used
 #
@@ -34,7 +34,7 @@ VOLUME /root/conf
 VOLUME /root/glowroot/plugins
 VOLUME /root/glowroot/data
 
-ENV PATH "$PATH:/root/glowroot/lib" \
+ENV PATH="$PATH:/root/glowroot/lib" \
     JVM_OPTIONS="" \
     GLOWROOT_ACTIVATED="false"
 

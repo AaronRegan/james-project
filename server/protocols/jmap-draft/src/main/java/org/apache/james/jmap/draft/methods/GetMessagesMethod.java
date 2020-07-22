@@ -19,66 +19,49 @@
 
 package org.apache.james.jmap.draft.methods;
 
-import java.util.Collection;
+import static org.apache.james.util.ReactorUtils.context;
+
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Stream;
 
 import javax.inject.Inject;
 
-import org.apache.james.jmap.draft.JmapFieldNotSupportedException;
+import org.apache.james.jmap.draft.exceptions.JmapFieldNotSupportedException;
 import org.apache.james.jmap.draft.json.FieldNamePropertyFilter;
 import org.apache.james.jmap.draft.model.GetMessagesRequest;
 import org.apache.james.jmap.draft.model.GetMessagesResponse;
-import org.apache.james.jmap.draft.model.Keywords;
-import org.apache.james.jmap.draft.model.Message;
-import org.apache.james.jmap.draft.model.MessageFactory;
-import org.apache.james.jmap.draft.model.MessageFactory.MetaDataWithContent;
 import org.apache.james.jmap.draft.model.MessageProperties;
 import org.apache.james.jmap.draft.model.MessageProperties.HeaderProperty;
 import org.apache.james.jmap.draft.model.MethodCallId;
-import org.apache.james.jmap.draft.utils.KeywordsCombiner;
+import org.apache.james.jmap.draft.model.message.view.MessageView;
+import org.apache.james.jmap.draft.model.message.view.MessageViewFactory;
+import org.apache.james.jmap.draft.model.message.view.MetaMessageViewFactory;
 import org.apache.james.mailbox.MailboxSession;
-import org.apache.james.mailbox.MessageIdManager;
-import org.apache.james.mailbox.exception.MailboxException;
-import org.apache.james.mailbox.model.FetchGroupImpl;
-import org.apache.james.mailbox.model.MailboxId;
-import org.apache.james.mailbox.model.MessageResult;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.util.MDCBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ser.PropertyFilter;
 import com.fasterxml.jackson.databind.ser.impl.SimpleFilterProvider;
-import com.github.steveash.guavate.Guavate;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 public class GetMessagesMethod implements Method {
 
     public static final String HEADERS_FILTER = "headersFilter";
     private static final String ISSUER = "GetMessagesMethod";
-    private static final Logger LOGGER = LoggerFactory.getLogger(GetMessagesMethod.class);
     private static final Method.Request.Name METHOD_NAME = Method.Request.name("getMessages");
     private static final Method.Response.Name RESPONSE_NAME = Method.Response.name("messages");
-    private static final KeywordsCombiner ACCUMULATOR = new KeywordsCombiner();
-    private final MessageFactory messageFactory;
-    private final MessageIdManager messageIdManager;
+    private final MetaMessageViewFactory messageViewFactory;
     private final MetricFactory metricFactory;
-    private final Keywords.KeywordsFactory keywordsFactory;
 
     @Inject
-    @VisibleForTesting GetMessagesMethod(
-            MessageFactory messageFactory,
-            MessageIdManager messageIdManager,
-            MetricFactory metricFactory) {
-        this.messageFactory = messageFactory;
-        this.messageIdManager = messageIdManager;
+    @VisibleForTesting GetMessagesMethod(MetaMessageViewFactory messageViewFactory, MetricFactory metricFactory) {
+        this.messageViewFactory = messageViewFactory;
         this.metricFactory = metricFactory;
-        this.keywordsFactory = Keywords.lenientFactory();
     }
     
     @Override
@@ -92,7 +75,7 @@ public class GetMessagesMethod implements Method {
     }
     
     @Override
-    public Stream<JmapResponse> process(JmapRequest request, MethodCallId methodCallId, MailboxSession mailboxSession) {
+    public Flux<JmapResponse> process(JmapRequest request, MethodCallId methodCallId, MailboxSession mailboxSession) {
         Preconditions.checkNotNull(request);
         Preconditions.checkNotNull(mailboxSession);
         Preconditions.checkArgument(request instanceof GetMessagesRequest);
@@ -100,19 +83,23 @@ public class GetMessagesMethod implements Method {
         GetMessagesRequest getMessagesRequest = (GetMessagesRequest) request;
         MessageProperties outputProperties = getMessagesRequest.getProperties().toOutputProperties();
 
-        return metricFactory.runPublishingTimerMetric(JMAP_PREFIX + METHOD_NAME.getName(),
-            MDCBuilder.create()
-                .addContext(MDCBuilder.ACTION, "GET_MESSAGES")
-                .addContext("accountId", getMessagesRequest.getAccountId())
-                .addContext("ids", getMessagesRequest.getIds())
-                .addContext("properties", getMessagesRequest.getProperties())
-                .wrapArround(
-                    () -> Stream.of(JmapResponse.builder().methodCallId(methodCallId)
-                        .response(getMessagesResponse(mailboxSession, getMessagesRequest))
-                        .responseName(RESPONSE_NAME)
-                        .properties(outputProperties.getOptionalMessageProperties())
-                        .filterProvider(buildOptionalHeadersFilteringFilterProvider(outputProperties))
-                        .build())));
+        return metricFactory.decorateSupplierWithTimerMetricLogP99(JMAP_PREFIX + METHOD_NAME.getName(),
+            () -> Flux.from(getMessagesResponse(mailboxSession, getMessagesRequest)
+                .map(response -> JmapResponse.builder().methodCallId(methodCallId)
+                    .response(response)
+                    .responseName(RESPONSE_NAME)
+                    .properties(outputProperties.getOptionalMessageProperties())
+                    .filterProvider(buildOptionalHeadersFilteringFilterProvider(outputProperties))
+                    .build()))
+            .subscriberContext(context("GET_MESSAGES", mdc(getMessagesRequest))));
+    }
+
+    private MDCBuilder mdc(GetMessagesRequest getMessagesRequest) {
+        return MDCBuilder.create()
+            .addContext(MDCBuilder.ACTION, "GET_MESSAGES")
+            .addContext("accountId", getMessagesRequest.getAccountId())
+            .addContext("ids", getMessagesRequest.getIds())
+            .addContext("properties", getMessagesRequest.getProperties());
     }
 
     private Optional<SimpleFilterProvider> buildOptionalHeadersFilteringFilterProvider(MessageProperties properties) {
@@ -126,64 +113,19 @@ public class GetMessagesMethod implements Method {
         return new FieldNamePropertyFilter((fieldName) -> headerProperties.contains(HeaderProperty.fromFieldName(fieldName)));
     }
 
-    private GetMessagesResponse getMessagesResponse(MailboxSession mailboxSession, GetMessagesRequest getMessagesRequest) {
-        getMessagesRequest.getAccountId().ifPresent((input) -> notImplemented("accountId"));
+    private Mono<GetMessagesResponse> getMessagesResponse(MailboxSession mailboxSession, GetMessagesRequest getMessagesRequest) {
+        getMessagesRequest.getAccountId().ifPresent(input -> notImplemented("accountId"));
 
-        try {
-            return GetMessagesResponse.builder()
-                .messages(
-                    messageIdManager.getMessages(getMessagesRequest.getIds(), FetchGroupImpl.FULL_CONTENT, mailboxSession)
-                        .stream()
-                        .collect(Guavate.toImmutableListMultimap(MessageResult::getMessageId))
-                        .asMap()
-                        .values()
-                        .stream()
-                        .filter(collection -> !collection.isEmpty())
-                        .flatMap(toMetaDataWithContent())
-                        .flatMap(toMessage())
-                        .collect(Guavate.toImmutableList()))
+        MessageProperties.ReadProfile readProfile = getMessagesRequest.getProperties().computeReadLevel();
+        MessageViewFactory<? extends MessageView> factory = messageViewFactory.getFactory(readProfile);
+        Mono<? extends List<? extends MessageView>> messageViewsMono = factory.fromMessageIds(getMessagesRequest.getIds(), mailboxSession)
+            .collectList();
+
+        return messageViewsMono.map(messageViews ->
+            GetMessagesResponse.builder()
+                .messages(messageViews)
                 .expectedMessageIds(getMessagesRequest.getIds())
-                .build();
-        } catch (MailboxException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private Function<MetaDataWithContent, Stream<Message>> toMessage() {
-        return metaDataWithContent -> {
-            try {
-                return Stream.of(messageFactory.fromMetaDataWithContent(metaDataWithContent));
-            } catch (Exception e) {
-                LOGGER.error("Can not convert metaData with content to Message for {}", metaDataWithContent.getMessageId(), e);
-                return Stream.of();
-            }
-        };
-    }
-
-    private Function<Collection<MessageResult>, Stream<MetaDataWithContent>> toMetaDataWithContent() {
-        return messageResults -> {
-            MessageResult firstMessageResult = messageResults.iterator().next();
-            List<MailboxId> mailboxIds = messageResults.stream()
-                .map(MessageResult::getMailboxId)
-                .distinct()
-                .collect(Guavate.toImmutableList());
-            try {
-                Keywords keywords = messageResults.stream()
-                    .map(MessageResult::getFlags)
-                    .map(keywordsFactory::fromFlags)
-                    .reduce(ACCUMULATOR)
-                    .get();
-                return Stream.of(
-                    MetaDataWithContent.builderFromMessageResult(firstMessageResult)
-                        .messageId(firstMessageResult.getMessageId())
-                        .mailboxIds(mailboxIds)
-                        .keywords(keywords)
-                        .build());
-            } catch (Exception e) {
-                LOGGER.error("Can not convert MessageResults to MetaData with content for messageId {} in {}", firstMessageResult.getMessageId(), mailboxIds, e);
-                return Stream.of();
-            }
-        };
+                .build());
     }
 
     private static void notImplemented(String field) {

@@ -4,6 +4,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
+
+### Added
+- Distributed task management for Guice cassandra-rabbitmq product. This enables several James servers to share a consistent view
+of tasks being currently executed.
+- JAMES-2563 Health check for ElasticSearch
+- JAMES-2904 Authentication and SSL support for Cassandra backend
+- JAMES-2904 Authentication and SSL support for ElasticSearch backend
+- JAMES-3066 Add "allowed From headers" webadmin endpoint
+- JAMES-3062 EventDeadLettersHealthCheck
+- JAMES-3058 WebAdmin offline task to correct mailbox inconsistencies on top of Cassandra products
+- JAMES-3105 WebAdmin offline task to recompute mailbox counters on top of Cassandra products
+- JAMES-3072 WebAdmin endpoint to export mailbox backup
+- JAMES-3117 Add PeriodicalHealthChecks for periodical calling all health checks
+- JAMES-3143 WebAdmin endpoint to solve Cassandra message inconsistencies
+- JAMES-3138 Webadmin endpoint to recompute users current quotas on top of Guice products
+
+### Changed
+- Switch to Java 11 for build and run
+- Multiple changes have been made to enhance ElasticSearch performance:
+  - Use of routing keys to collocate documents per mailbox
+  - Under some configuration, html was not extracted before document indexing
+  - Removed unnecessary fields from mailbox mapping
+  - Disable dynamic mapping thanks to a change of the header structure 
+  - Read related [upgrade instructions](upgrade-instructions.md)
+- JAMES-2855 Multiple library/plugin/docker images/build tool upgrades
+- By default the cassandra keyspace creation by James is now disabled by default. This allow to have credentials limited to a keyspace. It can be enabled by setting cassandra.keyspace.create=true in the cassandra.properties file.
+- Usernames are assumed to be always lower cased. Many users recently complained about mails non received when sending to upper cased local recipients. We decided to simplify the handling of case for local recipients and users by always storing them lower cased.
+- Unhealthy health checks now return HTTP 503 instead of 500, degraded now returns 200 instead of 500. See JAMES-2576.
+- In order to fasten JMAP-draft message retrieval upon calls on properties expected to be fast to fetch, we now compute the preview and hasAttachment properties asynchronously and persist them in Cassandra to improve performance. See JAMES-2919.
+- It is now forbidden to create new Usernames with the following set of characters in its local part : `"(),:; <>@\[]`, as we prefer it to stay simple to handle. However, the read of Usernames already existing with some of those characters is still allowed, to not introduce any breaking change. See JAMES-2950.
+- Linshare blob export configuration and mechanism change. See JAMES-3040.
+- Differentiation between domain alias and domain mapping. Read upgrade instructions.
+- JAMES-3122 Log4J2 adoption for Spring product. Log file configuration needs to be updated. See upgrade instructions.
+- JAMES-2760 mailqueue.size.metricsEnabled should be false by default
+- JAMES-3252 DomainList autoDetection should be turned off by default. Operators relying on implicit values for enabling DomainList autoDetection now needs to explicitly configure it.
+
+### Fixed
+- JAMES-2828 & JAMES-2929 bugs affecting JDBCMailRepository usage with PostgresSQL thanks to Jörg Thomas & Sergey B
+- JAMES-2936 Creating a mailbox using consecutive delimiter character leads to creation of list of unnamed mailbox
+- JAMES-2911 Unable to send mail from James using an SMTP gateway
+- JAMES-2944 Inlined attachments should be wrapped in multipart/related by JMAP draft
+- JAMES-2941 Return NO when an IMAP command unexpectedly fails
+- JAMES-2943 Deleting auto detected domain should fail
+- JAMES-2957 dlp.Dlp matcher should parse emails containing attachments
+- JAMES-2958 Limit domain name size to not longer than 255 characters
+- JAMES-2939 Prevent mixed case INBOX creation
+- JAMES-2903 Rework default LOG4J log file for Spring
+- JAMES-2739 fixed browse mails from queue over JMX
+- JAMES-2375 DSNBounce mailet should provide a subject
+- JAMES-2097 RemoteDelivery: Avoid retrying already succeeded recipients when sendPartial
+- MAILBOX-392 Mailbox name validation upon mailbox creation is stricter: forbid `#&*%` and empty sub-mailboxes names.
+- JAMES-2972 Incorrect attribute name in the mailet configuration thanks to jtconsol
+- JAMES-2632 JMAP Draft GetMailboxes performance enhancements when retrieving all mailboxes of a user
+- JAMES-2964 Forbid to create User quota/ Domain quota/ Global quota using negative number
+- JAMES-3074 Fixing UidValidity generation, sanitizing of invalid values upon reads. Read upgrade instructions.
+
+### Deprecated
+- HybridBlobStore. This will be removed after 3.6.0 release. Introduced to fasten small blob access, its usage could be 
+compared to a cache, but with a sub-optimal implementation (no eviction, default replication factor, no  circuit breaking).
+Use BlobStore cache instead.
+
+### Removed
+- Classes marked as deprecated whose removal was planned after 3.4.0 release (See JAMES-2703). This includes:
+  - SieveDefaultRepository. Please use SieveFileRepository instead.
+  - JDBCRecipientRewriteTable, XMLRecipientRewriteTable, UsersRepositoryAliasingForwarding, JDBCAlias mailets. Please use RecipientRewriteTable mailet instead.
+  - JDBCRecipientRewriteTable implementation. Please use JPARecipientRewriteTable instead.
+  - JamesUsersJdbcRepository, DefaultUsersJdbcRepository. Please use JpaUsersRepository instead.
+  - MailboxQuotaFixed matcher. Please use IsOverQuota instead.
+- UsersFileRepository, which was marked as deprecated for years
+  - We accordingly removed deprecated methods within UsersRepositoryManagementMBean exposed over JMX (unsetAlias, getAlias, unsetForwardAddress, getForwardAddress). RecipientRewriteTables should be used instead.
+- JAMES-3016 RemoteDelivery now doesn't enable `allow8bitmime` property by default. 
+This parameter could cause body content alteration leading to DKIM invalid DKIM signatures to be positioned. 
+Thanks to Sergey B. for the report. 
+More details about the property is at [java mail doc](https://javaee.github.io/javamail/docs/api/com/sun/mail/smtp/package-summary.html)
+ - JAMES-3122 LogEnabled API in Spring product had been removed for Log4J2 adoption for Java 9+ runtime compatibility. 
+ 
+### Third party softwares
+ - The distributed James server product (relying on Guice, Cassandra, ElasticSearch, RabbitMQ and optionally Swift) now needs at least RabbitMQ 3.8.1.
+ - Tika prior 1.24 is subject to multiple CVEs. We recommend the upgrade.
+
+## [3.4.0] - 2019-09-05
 ### Added
 - Add in-memory docker image
 - Support of AWS S3 as blobstore

@@ -23,28 +23,26 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.james.backends.rabbitmq.ReceiverProvider;
 import org.apache.james.event.json.EventSerializer;
 
-import com.rabbitmq.client.Connection;
-
-import reactor.core.publisher.Mono;
 import reactor.rabbitmq.Sender;
 
 class GroupRegistrationHandler {
     private final Map<Group, GroupRegistration> groupRegistrations;
     private final EventSerializer eventSerializer;
     private final Sender sender;
-    private final Mono<Connection> connectionMono;
+    private final ReceiverProvider receiverProvider;
     private final RetryBackoffConfiguration retryBackoff;
     private final EventDeadLetters eventDeadLetters;
     private final MailboxListenerExecutor mailboxListenerExecutor;
 
-    GroupRegistrationHandler(EventSerializer eventSerializer, Sender sender, Mono<Connection> connectionMono,
+    GroupRegistrationHandler(EventSerializer eventSerializer, Sender sender, ReceiverProvider receiverProvider,
                              RetryBackoffConfiguration retryBackoff,
                              EventDeadLetters eventDeadLetters, MailboxListenerExecutor mailboxListenerExecutor) {
         this.eventSerializer = eventSerializer;
         this.sender = sender;
-        this.connectionMono = connectionMono;
+        this.receiverProvider = receiverProvider;
         this.retryBackoff = retryBackoff;
         this.eventDeadLetters = eventDeadLetters;
         this.mailboxListenerExecutor = mailboxListenerExecutor;
@@ -60,7 +58,7 @@ class GroupRegistrationHandler {
         groupRegistrations.values().forEach(GroupRegistration::unregister);
     }
 
-    Registration register(MailboxListener listener, Group group) {
+    Registration register(MailboxListener.ReactiveMailboxListener listener, Group group) {
         return groupRegistrations
             .compute(group, (groupToRegister, oldGroupRegistration) -> {
                 if (oldGroupRegistration != null) {
@@ -71,10 +69,10 @@ class GroupRegistrationHandler {
             .start();
     }
 
-    private GroupRegistration newGroupRegistration(MailboxListener listener, Group group) {
+    private GroupRegistration newGroupRegistration(MailboxListener.ReactiveMailboxListener listener, Group group) {
         return new GroupRegistration(
-            connectionMono,
             sender,
+            receiverProvider,
             eventSerializer,
             listener,
             group,

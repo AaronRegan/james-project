@@ -26,6 +26,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 import javax.mail.MessagingException;
 import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMessage;
@@ -146,9 +147,9 @@ public class AddFooter extends GenericMailet {
         }
         int insertionIndex = matcher.start(matcher.groupCount() - 1);
         return new StringBuilder()
-                .append(content.substring(0, insertionIndex))
+                .append(content, 0, insertionIndex)
                 .append(getFooterHTML())
-                .append(content.substring(insertionIndex, content.length()))
+                .append(content.substring(insertionIndex))
                 .toString();
     }
 

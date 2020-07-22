@@ -18,6 +18,7 @@
  ****************************************************************/
 package org.apache.james.mailbox.model;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MailboxUtil;
 
@@ -28,23 +29,19 @@ import com.google.common.base.Objects;
  * Models long term mailbox data.
  */
 public class Mailbox {
-    private MailboxId id = null;
+    private final MailboxId id;
     private String namespace;
-    private String user;
+    private Username user;
     private String name;
-    private final long uidValidity;
+    private final UidValidity uidValidity;
     private MailboxACL acl = MailboxACL.EMPTY;
 
-    public Mailbox(MailboxPath path, long uidValidity, MailboxId mailboxId) {
+    public Mailbox(MailboxPath path, UidValidity uidValidity, MailboxId mailboxId) {
         this.id = mailboxId;
         this.namespace = path.getNamespace();
         this.user = path.getUser();
         this.name = path.getName();
         this.uidValidity = uidValidity;
-    }
-
-    public Mailbox(MailboxPath path, long uidValidity) {
-        this(path, uidValidity, null);
     }
 
     public Mailbox(Mailbox mailbox) {
@@ -84,7 +81,7 @@ public class Mailbox {
      * Gets the current user for this mailbox.
      * @return not null
      */
-    public String getUser() {
+    public Username getUser() {
         return user;
     }
 
@@ -92,7 +89,7 @@ public class Mailbox {
      * Sets the current user for this mailbox.
      * @param user not null
      */
-    public void setUser(String user) {
+    public void setUser(Username user) {
         this.user = user;
     }
 
@@ -116,7 +113,7 @@ public class Mailbox {
      * Gets the current UID VALIDITY for this mailbox.
      * @return uid validity
      */
-    public long getUidValidity() {
+    public UidValidity getUidValidity() {
         return uidValidity;
     }
 
@@ -124,15 +121,8 @@ public class Mailbox {
         return new MailboxPath(getNamespace(), getUser(), getName());
     }
 
-
-    public void setMailboxId(MailboxId id) {
-        this.id = id;
-    }
-
     /**
      * Gets the current ACL for this mailbox.
-     *
-     * @return ACL
      */
     public MailboxACL getACL() {
         return acl;
@@ -140,8 +130,6 @@ public class Mailbox {
 
     /**
      * Sets the current ACL for this mailbox.
-     *
-     * @param acl
      */
     public void setACL(MailboxACL acl) {
         this.acl = acl;
@@ -168,6 +156,7 @@ public class Mailbox {
     @Override
     public String toString() {
         return MoreObjects.toStringHelper(this)
+            .add("id", getMailboxId().serialize())
             .add("namespace", namespace)
             .add("user", user)
             .add("name", name)

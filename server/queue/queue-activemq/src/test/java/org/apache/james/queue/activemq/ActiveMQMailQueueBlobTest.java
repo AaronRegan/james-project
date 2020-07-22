@@ -27,6 +27,7 @@ import java.io.InputStream;
 import java.time.temporal.ChronoUnit;
 
 import org.apache.activemq.ActiveMQConnectionFactory;
+import org.apache.activemq.ActiveMQPrefetchPolicy;
 import org.apache.activemq.broker.BrokerService;
 import org.apache.commons.io.FileUtils;
 import org.apache.james.filesystem.api.FileSystem;
@@ -37,6 +38,7 @@ import org.apache.james.queue.api.DelayedPriorityMailQueueContract;
 import org.apache.james.queue.api.MailQueue;
 import org.apache.james.queue.api.MailQueueMetricContract;
 import org.apache.james.queue.api.MailQueueMetricExtension;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.queue.api.ManageableMailQueue;
 import org.apache.james.queue.api.PriorityManageableMailQueueContract;
 import org.apache.james.queue.api.RawMailQueueItemDecoratorFactory;
@@ -58,13 +60,16 @@ public class ActiveMQMailQueueBlobTest implements DelayedManageableMailQueueCont
     static final String BASE_DIR = "file://target/james-test";
     static final boolean USE_BLOB = true;
 
-    ActiveMQMailQueue mailQueue;
+    ActiveMQCacheableMailQueue mailQueue;
     MyFileSystem fileSystem;
 
     @BeforeEach
     public void setUp(BrokerService broker, MailQueueMetricExtension.MailQueueMetricTestSystem metricTestSystem) {
         fileSystem = new MyFileSystem();
         ActiveMQConnectionFactory connectionFactory = createConnectionFactory();
+        ActiveMQPrefetchPolicy prefetchPolicy = new ActiveMQPrefetchPolicy();
+        prefetchPolicy.setQueuePrefetch(0);
+        connectionFactory.setPrefetchPolicy(prefetchPolicy);
         FileSystemBlobTransferPolicy policy = new FileSystemBlobTransferPolicy();
         policy.setFileSystem(fileSystem);
         policy.setDefaultUploadUrl(BASE_DIR);
@@ -73,8 +78,8 @@ public class ActiveMQMailQueueBlobTest implements DelayedManageableMailQueueCont
         RawMailQueueItemDecoratorFactory mailQueueItemDecoratorFactory = new RawMailQueueItemDecoratorFactory();
         MetricFactory metricFactory = metricTestSystem.getMetricFactory();
         GaugeRegistry gaugeRegistry = metricTestSystem.getSpyGaugeRegistry();
-        String queueName = BrokerExtension.generateRandomQueueName(broker);
-        mailQueue = new ActiveMQMailQueue(connectionFactory, mailQueueItemDecoratorFactory, queueName, USE_BLOB, metricFactory, gaugeRegistry);
+        MailQueueName queueName = BrokerExtension.generateRandomQueueName(broker);
+        mailQueue = new ActiveMQCacheableMailQueue(connectionFactory, mailQueueItemDecoratorFactory, queueName, USE_BLOB, metricFactory, gaugeRegistry);
     }
 
     @AfterEach

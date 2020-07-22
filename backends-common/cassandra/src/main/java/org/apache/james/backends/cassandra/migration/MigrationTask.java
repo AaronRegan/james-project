@@ -21,6 +21,8 @@ package org.apache.james.backends.cassandra.migration;
 
 import static org.apache.james.backends.cassandra.versions.CassandraSchemaVersionManager.DEFAULT_VERSION;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 
 import javax.inject.Inject;
@@ -36,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 import com.github.fge.lambdas.Throwing;
 import com.google.common.annotations.VisibleForTesting;
+
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
@@ -63,18 +66,25 @@ public class MigrationTask implements Task {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MigrationTask.class);
 
-    public static final TaskType CASSANDRA_MIGRATION = TaskType.of("CassandraMigration");
+    public static final TaskType CASSANDRA_MIGRATION = TaskType.of("cassandra-migration");
 
-    public static class AdditionalInformations implements TaskExecutionDetails.AdditionalInformation {
+    public static class AdditionalInformation implements TaskExecutionDetails.AdditionalInformation {
 
         private final SchemaVersion toVersion;
+        private final Instant timestamp;
 
-        public AdditionalInformations(SchemaVersion toVersion) {
+        public AdditionalInformation(SchemaVersion toVersion, Instant timestamp) {
             this.toVersion = toVersion;
+            this.timestamp = timestamp;
         }
 
         public int getToVersion() {
             return toVersion.getValue();
+        }
+
+        @Override
+        public Instant timestamp() {
+            return timestamp;
         }
     }
 
@@ -148,7 +158,7 @@ public class MigrationTask implements Task {
 
     @Override
     public Optional<TaskExecutionDetails.AdditionalInformation> details() {
-        return Optional.of(new AdditionalInformations(target));
+        return Optional.of(new AdditionalInformation(target, Clock.systemUTC().instant()));
     }
 
 }

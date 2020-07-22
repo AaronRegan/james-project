@@ -21,6 +21,7 @@ package org.apache.james.protocols.pop3.core;
 
 import java.util.Collection;
 
+import org.apache.james.core.Username;
 import org.apache.james.protocols.api.ProtocolSession.State;
 import org.apache.james.protocols.api.Request;
 import org.apache.james.protocols.api.Response;
@@ -36,10 +37,11 @@ import com.google.common.collect.ImmutableSet;
 public abstract class AbstractApopCmdHandler extends AbstractPassCmdHandler {
 
     private static final Collection<String> COMMANDS = ImmutableSet.of("APOP");
-    
+    private static final String MISSING_APOP_TIMESTAMP = "";
+
     @Override
     public Response onCommand(POP3Session session, Request request) {
-        if (session.getAttachment(POP3Session.APOP_TIMESTAMP, State.Connection) == null) {
+        if (!session.getAttachment(POP3Session.APOP_TIMESTAMP, State.Connection).isPresent()) {
             // APOP timestamp was not found in the session so APOP is not supported
             return POP3Response.ERR;
         }
@@ -57,11 +59,12 @@ public abstract class AbstractApopCmdHandler extends AbstractPassCmdHandler {
         }
         if (!syntaxError && session.getHandlerState() == POP3Session.AUTHENTICATION_READY) {
 
-            Response response = doAuth(session, parts[0], parts[1]);
+            Username username = Username.of(parts[0]);
+            Response response = doAuth(session, username, parts[1]);
             
             if (POP3Response.OK_RESPONSE.equals(response.getRetCode())) {
                 // the auth was successful so set the user
-                session.setUser(parts[0]);
+                session.setUsername(username);
             }
             return response;
         } else {
@@ -78,20 +81,15 @@ public abstract class AbstractApopCmdHandler extends AbstractPassCmdHandler {
 
     
     @Override
-    protected final Mailbox auth(POP3Session session, String username, String password) throws Exception {
-        return auth(session, (String)session.getAttachment(POP3Session.APOP_TIMESTAMP, State.Connection), username, password);
+    protected final Mailbox auth(POP3Session session, Username username, String password) throws Exception {
+        return auth(session, session.getAttachment(POP3Session.APOP_TIMESTAMP, State.Connection).orElse(MISSING_APOP_TIMESTAMP), username, password);
     }
 
 
     /**
      * Authenticate a {@link POP3Session} and returns the {@link Mailbox} for it. If it can not get authenticated it will return <code>null</code>.
-     * 
-     * @param session
-     * @param apopTimestamp
-     * @param user
-     * @param digest
+     *
      * @return mailbox
-     * @throws Exception
      */
-    protected abstract Mailbox auth(POP3Session session, String apopTimestamp, String user, String digest) throws Exception;
+    protected abstract Mailbox auth(POP3Session session, String apopTimestamp, Username user, String digest) throws Exception;
 }

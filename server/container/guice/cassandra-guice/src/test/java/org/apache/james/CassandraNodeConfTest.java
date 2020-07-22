@@ -18,7 +18,6 @@
  ****************************************************************/
 package org.apache.james;
 
-import static org.apache.james.CassandraJamesServerMain.ALL_BUT_JMX_CASSANDRA_MODULE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
@@ -27,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 
+import org.apache.james.backends.cassandra.DockerCassandra;
 import org.apache.james.backends.cassandra.init.configuration.ClusterConfiguration;
 import org.apache.james.modules.TestJMAPServerModule;
 import org.apache.james.modules.protocols.ImapGuiceProbe;
@@ -40,15 +40,13 @@ import org.testcontainers.DockerClientFactory;
 
 class CassandraNodeConfTest {
     private static final int CASSANDRA_PORT = 9042;
-    private static final int LIMIT_TO_10_MESSAGES = 10;
 
     private static JamesServerBuilder extensionBuilder() {
-        return new JamesServerBuilder()
+        return TestingDistributedJamesServerBuilder.withSearchConfiguration(SearchConfiguration.elasticSearch())
             .extension(new DockerElasticSearchExtension())
             .extension(new CassandraExtension())
-            .server(configuration -> GuiceJamesServer.forConfiguration(configuration)
-                .combineWith(ALL_BUT_JMX_CASSANDRA_MODULE)
-                .overrideWith(new TestJMAPServerModule(LIMIT_TO_10_MESSAGES)))
+            .server(configuration -> CassandraJamesServerMain.createServer(configuration)
+                .overrideWith(new TestJMAPServerModule()))
             .disableAutoStart();
     }
 
@@ -90,9 +88,10 @@ class CassandraNodeConfTest {
         @RegisterExtension
         JamesServerExtension testExtension = extensionBuilder()
             .overrideServerModule(binder -> binder.bind(ClusterConfiguration.class)
-                .toInstance(clusterWithHosts(
-                    Host.from(unreachableNode, 9042),
-                    cassandra.getHost())))
+                .toInstance(DockerCassandra.configurationBuilder(
+                        Host.from(unreachableNode, 9042),
+                        cassandra.getHost())
+                    .build()))
             .build();
 
         @Test
@@ -108,8 +107,9 @@ class CassandraNodeConfTest {
         @RegisterExtension
         JamesServerExtension testExtension =  extensionBuilder()
             .overrideServerModule(binder -> binder.bind(ClusterConfiguration.class)
-                .toInstance(clusterWithHosts(
-                    Host.from(getDockerHostIp(), cassandra.getMappedPort(CASSANDRA_PORT)))))
+                .toInstance(DockerCassandra.configurationBuilder(
+                        Host.from(getDockerHostIp(), cassandra.getMappedPort(CASSANDRA_PORT)))
+                    .build()))
             .build();
 
         @Test
@@ -122,16 +122,6 @@ class CassandraNodeConfTest {
         server.start();
         socketChannel.connect(new InetSocketAddress("127.0.0.1", server.getProbe(ImapGuiceProbe.class).getImapPort()));
         assertThat(getServerConnectionResponse(socketChannel)).startsWith("* OK JAMES IMAP4rev1 Server");
-    }
-
-    private ClusterConfiguration clusterWithHosts(Host... hosts) {
-        return ClusterConfiguration.builder()
-            .hosts(hosts)
-            .keyspace("apache_james")
-            .replicationFactor(1)
-            .maxRetry(10)
-            .minDelay(5000)
-            .build();
     }
 
     private String getServerConnectionResponse(SocketChannel socketChannel) throws IOException {

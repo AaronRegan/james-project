@@ -34,8 +34,10 @@ import static org.apache.james.mailbox.cassandra.table.CassandraMailboxPathTable
 import javax.inject.Inject;
 
 import org.apache.james.backends.cassandra.init.CassandraTypesProvider;
+import org.apache.james.backends.cassandra.init.configuration.CassandraConsistenciesConfiguration;
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
 import org.apache.james.backends.cassandra.utils.CassandraUtils;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.cassandra.GhostMailbox;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.mail.utils.MailboxBaseTupleUtil;
@@ -44,6 +46,7 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.util.FunctionalUtils;
 import org.apache.james.util.ReactorUtils;
 
+import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
@@ -53,7 +56,7 @@ import com.google.common.annotations.VisibleForTesting;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
+public class CassandraMailboxPathDAOImpl {
 
     private static final int FIRST_CELL = 0;
 
@@ -66,12 +69,16 @@ public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
     private final PreparedStatement selectAllForUser;
     private final PreparedStatement selectAll;
     private final PreparedStatement countAll;
+    private final ConsistencyLevel consistencyLevel;
 
     @Inject
-    public CassandraMailboxPathDAOImpl(Session session, CassandraTypesProvider typesProvider, CassandraUtils cassandraUtils) {
+    public CassandraMailboxPathDAOImpl(Session session, CassandraTypesProvider typesProvider,
+                                       CassandraUtils cassandraUtils,
+                                       CassandraConsistenciesConfiguration consistenciesConfiguration) {
         this.cassandraAsyncExecutor = new CassandraAsyncExecutor(session);
         this.mailboxBaseTupleUtil = new MailboxBaseTupleUtil(typesProvider);
         this.cassandraUtils = cassandraUtils;
+        this.consistencyLevel = consistenciesConfiguration.getRegular();
         this.insert = prepareInsert(session);
         this.delete = prepareDelete(session);
         this.select = prepareSelect(session);
@@ -81,8 +88,9 @@ public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
     }
 
     @VisibleForTesting
-     CassandraMailboxPathDAOImpl(Session session, CassandraTypesProvider typesProvider) {
-        this(session, typesProvider, CassandraUtils.WITH_DEFAULT_CONFIGURATION);
+    public CassandraMailboxPathDAOImpl(Session session, CassandraTypesProvider typesProvider,
+                                       CassandraConsistenciesConfiguration consistenciesConfiguration) {
+        this(session, typesProvider, CassandraUtils.WITH_DEFAULT_CONFIGURATION, consistenciesConfiguration);
     }
 
     private PreparedStatement prepareDelete(Session session) {
@@ -96,8 +104,7 @@ public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
         return session.prepare(insertInto(TABLE_NAME)
             .value(NAMESPACE_AND_USER, bindMarker(NAMESPACE_AND_USER))
             .value(MAILBOX_NAME, bindMarker(MAILBOX_NAME))
-            .value(MAILBOX_ID, bindMarker(MAILBOX_ID))
-            .ifNotExists());
+            .value(MAILBOX_ID, bindMarker(MAILBOX_ID)));
     }
 
     private PreparedStatement prepareSelect(Session session) {
@@ -127,20 +134,20 @@ public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
         return cassandraAsyncExecutor.executeSingleRow(
             select.bind()
                 .setUDTValue(NAMESPACE_AND_USER, mailboxBaseTupleUtil.createMailboxBaseUDT(mailboxPath.getNamespace(), mailboxPath.getUser()))
-                .setString(MAILBOX_NAME, mailboxPath.getName()))
+                .setString(MAILBOX_NAME, mailboxPath.getName())
+                .setConsistencyLevel(consistencyLevel))
             .map(this::fromRowToCassandraIdAndPath)
             .map(FunctionalUtils.toFunction(this::logGhostMailboxSuccess))
             .switchIfEmpty(ReactorUtils.executeAndEmpty(() -> logGhostMailboxFailure(mailboxPath)));
     }
 
-    @Override
-    public Flux<CassandraIdAndPath> listUserMailboxes(String namespace, String user) {
+    public Flux<CassandraIdAndPath> listUserMailboxes(String namespace, Username user) {
         return cassandraAsyncExecutor.execute(
             selectAllForUser.bind()
                 .setUDTValue(NAMESPACE_AND_USER, mailboxBaseTupleUtil.createMailboxBaseUDT(namespace, user)))
-            .flatMapMany(resultSet -> cassandraUtils.convertToFlux(resultSet)
-                .map(this::fromRowToCassandraIdAndPath)
-                .map(FunctionalUtils.toFunction(this::logReadSuccess)));
+            .flatMapMany(cassandraUtils::convertToFlux)
+            .map(this::fromRowToCassandraIdAndPath)
+            .map(FunctionalUtils.toFunction(this::logReadSuccess));
     }
 
     /**
@@ -149,12 +156,10 @@ public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
      * A missed read on an existing mailbox is the cause of the ghost mailbox bug. Here we log missing reads. Successful
      * reads and write operations are also added in order to allow audit in order to know if the mailbox existed.
      */
-    @Override
     public void logGhostMailboxSuccess(CassandraIdAndPath value) {
         logReadSuccess(value);
     }
 
-    @Override
     public void logGhostMailboxFailure(MailboxPath mailboxPath) {
         GhostMailbox.logger()
                 .addField(GhostMailbox.MAILBOX_NAME, mailboxPath)
@@ -181,11 +186,11 @@ public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
         return new CassandraIdAndPath(
             CassandraId.of(row.getUUID(MAILBOX_ID)),
             new MailboxPath(row.getUDTValue(NAMESPACE_AND_USER).getString(CassandraMailboxTable.MailboxBase.NAMESPACE),
-                row.getUDTValue(NAMESPACE_AND_USER).getString(CassandraMailboxTable.MailboxBase.USER),
+                Username.of(row.getUDTValue(NAMESPACE_AND_USER).getString(CassandraMailboxTable.MailboxBase.USER)),
                 row.getString(MAILBOX_NAME)));
     }
 
-    @Override
+    @VisibleForTesting
     public Mono<Boolean> save(MailboxPath mailboxPath, CassandraId mailboxId) {
         return cassandraAsyncExecutor.executeReturnApplied(insert.bind()
             .setUDTValue(NAMESPACE_AND_USER, mailboxBaseTupleUtil.createMailboxBaseUDT(mailboxPath.getNamespace(), mailboxPath.getUser()))
@@ -193,7 +198,6 @@ public class CassandraMailboxPathDAOImpl implements CassandraMailboxPathDAO {
             .setUUID(MAILBOX_ID, mailboxId.asUuid()));
     }
 
-    @Override
     public Mono<Void> delete(MailboxPath mailboxPath) {
         return cassandraAsyncExecutor.executeVoid(delete.bind()
             .setUDTValue(NAMESPACE_AND_USER, mailboxBaseTupleUtil.createMailboxBaseUDT(mailboxPath.getNamespace(), mailboxPath.getUser()))

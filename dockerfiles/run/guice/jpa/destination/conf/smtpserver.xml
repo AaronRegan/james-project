@@ -19,6 +19,8 @@
   under the License.
  -->
 
+<!-- Read https://james.apache.org/server/config-smtp-lmtp.html#SMTP_Configuration for further details -->
+
 <smtpservers>
     <smtpserver enabled="true">
         <jmxName>smtpserver-global</jmxName>
@@ -38,7 +40,7 @@
         <verifyIdentity>true</verifyIdentity>
         <maxmessagesize>0</maxmessagesize>
         <addressBracketsEnforcement>true</addressBracketsEnforcement>
-        <smtpGreeting>JAMES Linagora's SMTP awesome Server</smtpGreeting>
+        <smtpGreeting>Apache JAMES awesome SMTP Server</smtpGreeting>
         <handlerchain>
             <handler class="org.apache.james.smtpserver.fastfail.ValidRcptHandler"/>
             <handler class="org.apache.james.smtpserver.CoreCmdHandlerLoader"/>
@@ -66,7 +68,7 @@
         <verifyIdentity>false</verifyIdentity>
         <maxmessagesize>0</maxmessagesize>
         <addressBracketsEnforcement>true</addressBracketsEnforcement>
-        <smtpGreeting>JAMES Linagora's SMTP awesome Server</smtpGreeting>
+        <smtpGreeting>Apache JAMES awesome SMTP Server</smtpGreeting>
         <handlerchain>
             <handler class="org.apache.james.smtpserver.fastfail.ValidRcptHandler"/>
             <handler class="org.apache.james.smtpserver.CoreCmdHandlerLoader"/>
@@ -94,7 +96,7 @@
         <verifyIdentity>false</verifyIdentity>
         <maxmessagesize>0</maxmessagesize>
         <addressBracketsEnforcement>true</addressBracketsEnforcement>
-        <smtpGreeting>JAMES Linagora's SMTP awesome Server</smtpGreeting>
+        <smtpGreeting>Apache JAMES awesome SMTP Server</smtpGreeting>
         <handlerchain>
             <handler class="org.apache.james.smtpserver.fastfail.ValidRcptHandler"/>
             <handler class="org.apache.james.smtpserver.CoreCmdHandlerLoader"/>

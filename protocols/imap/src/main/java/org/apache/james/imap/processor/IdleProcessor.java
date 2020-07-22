@@ -30,13 +30,12 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.apache.james.imap.api.ImapCommand;
 import org.apache.james.imap.api.ImapConfiguration;
 import org.apache.james.imap.api.ImapSessionState;
 import org.apache.james.imap.api.display.HumanReadableText;
+import org.apache.james.imap.api.message.Capability;
 import org.apache.james.imap.api.message.response.StatusResponse;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
-import org.apache.james.imap.api.process.ImapLineHandler;
 import org.apache.james.imap.api.process.ImapProcessor;
 import org.apache.james.imap.api.process.ImapSession;
 import org.apache.james.imap.api.process.SelectedMailbox;
@@ -54,8 +53,11 @@ import org.apache.james.util.concurrent.NamedThreadFactory;
 
 import com.google.common.collect.ImmutableList;
 
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
 public class IdleProcessor extends AbstractMailboxProcessor<IdleRequest> implements CapabilityImplementingProcessor {
-    private static final List<String> CAPS = ImmutableList.of(SUPPORTS_IDLE);
+    private static final List<Capability> CAPS = ImmutableList.of(SUPPORTS_IDLE);
     public static final int DEFAULT_SCHEDULED_POOL_CORE_SIZE = 5;
     private static final String DONE = "DONE";
 
@@ -85,40 +87,39 @@ public class IdleProcessor extends AbstractMailboxProcessor<IdleRequest> impleme
     }
 
     @Override
-    protected void doProcess(IdleRequest message, ImapSession session, String tag, ImapCommand command, Responder responder) {
+    protected void processRequest(IdleRequest request, ImapSession session, Responder responder) {
         SelectedMailbox sm = session.getSelected();
         Registration registration;
         if (sm != null) {
-            registration = eventBus.register(new IdleMailboxListener(session, responder), new MailboxIdRegistrationKey(sm.getMailboxId()));
+            registration = Mono.from(eventBus.register(new IdleMailboxListener(session, responder), new MailboxIdRegistrationKey(sm.getMailboxId())))
+                .subscribeOn(Schedulers.elastic())
+                .block();
         } else {
             registration = null;
         }
 
         final AtomicBoolean idleActive = new AtomicBoolean(true);
 
-        session.pushLineHandler(new ImapLineHandler() {
-            @Override
-            public void onLine(ImapSession session, byte[] data) {
-                String line;
-                if (data.length > 2) {
-                    line = new String(data, 0, data.length - 2);
-                } else {
-                    line = "";
-                }
-
-                if (registration != null) {
-                    registration.unregister();
-                }
-                session.popLineHandler();
-                if (!DONE.equals(line.toUpperCase(Locale.US))) {
-                    StatusResponse response = getStatusResponseFactory().taggedBad(tag, command, HumanReadableText.INVALID_COMMAND);
-                    responder.respond(response);
-                } else {
-                    okComplete(command, tag, responder);
-
-                }
-                idleActive.set(false);
+        session.pushLineHandler((session1, data) -> {
+            String line;
+            if (data.length > 2) {
+                line = new String(data, 0, data.length - 2);
+            } else {
+                line = "";
             }
+
+            if (registration != null) {
+                registration.unregister();
+            }
+            session1.popLineHandler();
+            if (!DONE.equals(line.toUpperCase(Locale.US))) {
+                StatusResponse response = getStatusResponseFactory().taggedBad(request.getTag(), request.getCommand(), HumanReadableText.INVALID_COMMAND);
+                responder.respond(response);
+            } else {
+                okComplete(request, responder);
+
+            }
+            idleActive.set(false);
         });
 
         // Check if we should send heartbeats
@@ -155,7 +156,7 @@ public class IdleProcessor extends AbstractMailboxProcessor<IdleRequest> impleme
     }
 
     @Override
-    public List<String> getImplementedCapabilities(ImapSession session) {
+    public List<Capability> getImplementedCapabilities(ImapSession session) {
         return CAPS;
     }
 

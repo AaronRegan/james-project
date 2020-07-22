@@ -26,32 +26,23 @@ import java.util.Map;
 import javax.mail.Flags;
 
 import org.apache.james.imap.api.message.response.ImapResponseMessage;
+import org.apache.james.mailbox.MessageSequenceNumber;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 
 public final class FetchResponse implements ImapResponseMessage {
-
-    private final int messageNumber;
-
+    private final MessageSequenceNumber messageNumber;
     private final Flags flags;
-
     private final MessageUid uid;
-
     private final Date internalDate;
-
     private final Long size;
-
     private final List<BodyElement> elements;
-
     private final Envelope envelope;
-
     private final Structure body;
-
     private final Structure bodystructure;
+    private final ModSeq modSeq;
 
-    private final Long modSeq;
-
-    public FetchResponse(int messageNumber, Flags flags, MessageUid uid, Long modSeq, Date internalDate, Long size, Envelope envelope, Structure body, Structure bodystructure, List<BodyElement> elements) {
-        super();
+    public FetchResponse(MessageSequenceNumber messageNumber, Flags flags, MessageUid uid, ModSeq modSeq, Date internalDate, Long size, Envelope envelope, Structure body, Structure bodystructure, List<BodyElement> elements) {
         this.messageNumber = messageNumber;
         this.flags = flags;
         this.uid = uid;
@@ -89,7 +80,7 @@ public final class FetchResponse implements ImapResponseMessage {
      * 
      * @return message number
      */
-    public int getMessageNumber() {
+    public MessageSequenceNumber getMessageNumber() {
         return messageNumber;
     }
 
@@ -159,7 +150,7 @@ public final class FetchResponse implements ImapResponseMessage {
      * 
      * @return modSeq
      */
-    public Long getModSeq() {
+    public ModSeq getModSeq() {
         return modSeq;
     }
 
@@ -385,9 +376,6 @@ public final class FetchResponse implements ImapResponseMessage {
          * Values an envelope address.
          */
         interface Address {
-
-            /** Empty array */
-            Address[] EMPTY = {};
 
             /**
              * Gets the personal name.

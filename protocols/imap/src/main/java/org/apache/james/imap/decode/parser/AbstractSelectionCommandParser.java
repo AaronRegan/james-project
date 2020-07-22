@@ -21,33 +21,33 @@ package org.apache.james.imap.decode.parser;
 import org.apache.james.imap.api.ImapCommand;
 import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.api.ImapMessage;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.display.HumanReadableText;
 import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.UidRange;
+import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapSession;
+import org.apache.james.imap.decode.DecodingException;
 import org.apache.james.imap.decode.ImapRequestLineReader;
-import org.apache.james.imap.decode.ImapRequestLineReader.CharacterValidator;
+import org.apache.james.imap.decode.ImapRequestLineReader.StringMatcherCharacterValidator;
 import org.apache.james.imap.decode.base.AbstractImapCommandParser;
 import org.apache.james.imap.message.request.AbstractMailboxSelectionRequest;
+import org.apache.james.imap.message.request.AbstractMailboxSelectionRequest.ClientSpecifiedUidValidity;
 import org.apache.james.mailbox.MessageUid;
-import org.apache.james.protocols.imap.DecodingException;
 
 public abstract class AbstractSelectionCommandParser extends AbstractImapCommandParser {
-    private static final byte[] CONDSTORE = ImapConstants.SUPPORTS_CONDSTORE.getBytes();
-    private static final byte[] QRESYNC = ImapConstants.SUPPORTS_QRESYNC.getBytes();
+    private static final String CONDSTORE = ImapConstants.SUPPORTS_CONDSTORE.asString();
+    private static final String QRESYNC = ImapConstants.SUPPORTS_QRESYNC.asString();
 
-    public AbstractSelectionCommandParser(ImapCommand command) {
-        super(command);
+    public AbstractSelectionCommandParser(ImapCommand command, StatusResponseFactory statusResponseFactory) {
+        super(command, statusResponseFactory);
     }
     
-
-
-    
     @Override
-    protected ImapMessage decode(ImapCommand command, ImapRequestLineReader request, String tag, ImapSession session) throws DecodingException {
+    protected ImapMessage decode(ImapRequestLineReader request, Tag tag, ImapSession session) throws DecodingException {
         final String mailboxName = request.mailbox();
         boolean condstore = false;
-        Long lastKnownUidValidity = null;
+        ClientSpecifiedUidValidity lastKnownUidValidity = ClientSpecifiedUidValidity.UNKNOWN;
         Long knownModSeq = null;
         UidRange[] uidSet = null;
         UidRange[] knownUidSet = null;
@@ -68,36 +68,21 @@ public abstract class AbstractSelectionCommandParser extends AbstractImapCommand
             switch (n) {
             case 'C':
                 // It starts with C so it should be CONDSTORE
-                int pos = 0;
-                while (pos < CONDSTORE.length) {
-                    if (CONDSTORE[pos++] != ImapRequestLineReader.cap(request.consume())) {
-                        throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Unknown option");
-                    }
-                }
+                request.consumeWord(StringMatcherCharacterValidator.ignoreCase(CONDSTORE));
                 condstore = true;
                 break;
             case 'Q':
                 // It starts with Q so it should be QRESYNC
-                request.consumeWord(new CharacterValidator() {
-                    int pos = 0;
-
-                    @Override
-                    public boolean isValid(char chr) {
-                        if (pos >= QRESYNC.length) {
-                            return false;
-                        } else {
-                            return ImapRequestLineReader.cap(chr) == QRESYNC[pos++];
-                        }
-                    }
-                });
+                request.consumeWord(StringMatcherCharacterValidator.ignoreCase(QRESYNC));
                 
                 // Consume the SP
                 request.consumeChar(' ');
                 
                 // Consume enclosing paren
                 request.consumeChar('(');
-                lastKnownUidValidity = request.number();
-                
+                long uidValidityAsNumber = request.number();
+                lastKnownUidValidity = ClientSpecifiedUidValidity.of(uidValidityAsNumber);
+
                 // Consume the SP
                 request.consumeChar(' ');
                 knownModSeq = request.number(true);
@@ -143,9 +128,9 @@ public abstract class AbstractSelectionCommandParser extends AbstractImapCommand
         }
 
         request.eol();
-        return createRequest(command, mailboxName, condstore, lastKnownUidValidity, knownModSeq, uidSet, knownUidSet, knownSequenceSet, tag);
+        return createRequest(mailboxName, condstore, lastKnownUidValidity, knownModSeq, uidSet, knownUidSet, knownSequenceSet, tag);
     }
-    
+
     /**
      * Check if the {@link IdRange}'s are formatted like stated in the QRESYNC RFC.
      * 
@@ -163,11 +148,6 @@ public abstract class AbstractSelectionCommandParser extends AbstractImapCommand
      *                          ;; set of UIDs corresponding to the messages in
      *                          ;; known-sequence-set, in ascending order.
      *                          ;; * is not allowed.
-     * 
-     * 
-     * @param ranges
-     * @param checkOrder
-     * @throws DecodingException
      */
     private void checkIdRanges(IdRange[] ranges, boolean checkOrder) throws DecodingException {
         long last = 0;
@@ -205,11 +185,6 @@ public abstract class AbstractSelectionCommandParser extends AbstractImapCommand
      *                          ;; set of UIDs corresponding to the messages in
      *                          ;; known-sequence-set, in ascending order.
      *                          ;; * is not allowed.
-     * 
-     * 
-     * @param ranges
-     * @param checkOrder
-     * @throws DecodingException
      */
     private void checkUidRanges(UidRange[] ranges, boolean checkOrder) throws DecodingException {
         MessageUid last = MessageUid.MIN_VALUE;
@@ -233,5 +208,5 @@ public abstract class AbstractSelectionCommandParser extends AbstractImapCommand
     /**
      * Create a new {@link AbstractMailboxSelectionRequest} for the given arguments
      */
-    protected abstract AbstractMailboxSelectionRequest createRequest(ImapCommand command, String mailboxName, boolean condstore, Long lastKnownUidValidity, Long knownModSeq, UidRange[] uidSet, UidRange[] knownUidSet, IdRange[] knownSequenceSet, String tag);
+    protected abstract AbstractMailboxSelectionRequest createRequest(String mailboxName, boolean condstore, ClientSpecifiedUidValidity lastKnownUidValidity, Long knownModSeq, UidRange[] uidSet, UidRange[] knownUidSet, IdRange[] knownSequenceSet, Tag tag);
 }

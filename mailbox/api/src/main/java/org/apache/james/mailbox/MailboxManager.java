@@ -21,12 +21,13 @@ package org.apache.james.mailbox;
 
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
-import org.apache.james.mailbox.exception.BadCredentialsException;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxExistsException;
 import org.apache.james.mailbox.exception.MailboxNotFoundException;
+import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxMetaData;
 import org.apache.james.mailbox.model.MailboxPath;
@@ -34,6 +35,9 @@ import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
 import org.apache.james.mailbox.model.search.MailboxQuery;
+import org.reactivestreams.Publisher;
+
+import reactor.core.publisher.Flux;
 
 /**
  * <p>
@@ -68,7 +72,7 @@ import org.apache.james.mailbox.model.search.MailboxQuery;
  * </p>
  */
 
-public interface MailboxManager extends RequestAware, RightManager, MailboxAnnotationManager {
+public interface MailboxManager extends RequestAware, RightManager, MailboxAnnotationManager, SessionProvider {
 
     int MAX_MAILBOX_NAME_LENGTH = 200;
 
@@ -107,14 +111,6 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
     
     EnumSet<SearchCapabilities> getSupportedSearchCapabilities();
 
-    
-    /**
-     * Return the delimiter to use for folders
-     * 
-     * @return delimiter
-     */
-    char getDelimiter();
-
     /**
      * Gets an object managing the given mailbox.
      * 
@@ -123,9 +119,9 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
      * @param session
      *            the context for this call, not null
      * @throws MailboxException
-     *             when the mailbox cannot be opened
+     *            when the mailbox cannot be opened
      * @throws MailboxNotFoundException
-     *             when the given mailbox does not exist
+     *            when the given mailbox does not exist
      */
     MessageManager getMailbox(MailboxPath mailboxPath, MailboxSession session) throws MailboxException;
 
@@ -137,21 +133,20 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
      * @param session
      *            the context for this call, not null
      * @throws MailboxException
-     *             when the mailbox cannot be opened
+     *            when the mailbox cannot be opened
      * @throws MailboxNotFoundException
-     *             when the given mailbox does not exist
+     *            when the given mailbox does not exist
      */
     MessageManager getMailbox(MailboxId mailboxId, MailboxSession session) throws MailboxException;
 
     /**
      * Creates a new mailbox. Any intermediary mailboxes missing from the
      * hierarchy should be created.
-     * 
-     * @param mailboxPath
+     *
      * @param mailboxSession
      *            the context for this call, not null
      * @throws MailboxException
-     *             when creation fails
+     *            when creation fails
      * @return Empty optional when the mailbox name is empty. If mailbox is created, the id of the mailboxPath specified as
      *  parameter is returned (and potential mailboxIds of parent mailboxes created in the process will be omitted)
      */
@@ -159,30 +154,104 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
 
     /**
      * Delete the mailbox with the name
-     * 
-     * @param mailboxPath
-     * @param session
-     * @throws MailboxException
      */
     void deleteMailbox(MailboxPath mailboxPath, MailboxSession session) throws MailboxException;
+
+    /**
+     * Delete the mailbox with the given id
+     *
+     * @return the Mailbox when deleted
+     */
+    Mailbox deleteMailbox(MailboxId mailboxId, MailboxSession session) throws MailboxException;
+
+    class MailboxRenamedResult {
+        private final MailboxId mailboxId;
+        private final MailboxPath originPath;
+        private final MailboxPath destinationPath;
+
+        public MailboxRenamedResult(MailboxId mailboxId, MailboxPath originPath, MailboxPath destinationPath) {
+            this.mailboxId = mailboxId;
+            this.originPath = originPath;
+            this.destinationPath = destinationPath;
+        }
+
+        public MailboxId getMailboxId() {
+            return mailboxId;
+        }
+
+        public MailboxPath getOriginPath() {
+            return originPath;
+        }
+
+        public MailboxPath getDestinationPath() {
+            return destinationPath;
+        }
+
+        @Override
+        public final boolean equals(Object o) {
+            if (o instanceof MailboxRenamedResult) {
+                MailboxRenamedResult that = (MailboxRenamedResult) o;
+
+                return Objects.equals(this.mailboxId, that.mailboxId)
+                    && Objects.equals(this.originPath, that.originPath)
+                    && Objects.equals(this.destinationPath, that.destinationPath);
+            }
+            return false;
+        }
+
+        @Override
+        public final int hashCode() {
+            return Objects.hash(mailboxId, originPath, destinationPath);
+        }
+    }
+
+    enum RenameOption {
+        NONE, RENAME_SUBSCRIPTIONS
+    }
 
     /**
      * Renames a mailbox.
      * 
      * @param from
-     *            original mailbox
+     *            original mailbox path
      * @param to
-     *            new mailbox
+     *            new mailbox path
      * @param session
-     *            the context for this call, not nul
+     *            the context for this call, not null
      * @throws MailboxException
-     *             otherwise
+     *            upon unexpected failure
      * @throws MailboxExistsException
-     *             when the <code>to</code> mailbox exists
+     *            when the <code>to</code> mailbox exists
      * @throws MailboxNotFoundException
-     *             when the <code>from</code> mailbox does not exist
+     *            when the <code>from</code> mailbox does not exist
      */
-    void renameMailbox(MailboxPath from, MailboxPath to, MailboxSession session) throws MailboxException;
+    List<MailboxRenamedResult> renameMailbox(MailboxPath from, MailboxPath to, RenameOption option, MailboxSession session) throws MailboxException;
+
+    default List<MailboxRenamedResult> renameMailbox(MailboxPath from, MailboxPath to, MailboxSession session) throws MailboxException {
+        return renameMailbox(from, to, RenameOption.NONE, session);
+    }
+
+    /**
+     * Renames a mailbox.
+     *
+     * @param mailboxId
+     *            original mailbox
+     * @param newMailboxPath
+     *            new mailbox path
+     * @param session
+     *            the context for this call, not null
+     * @throws MailboxException
+     *            upon unexpected failure
+     * @throws MailboxExistsException
+     *            when the <code>newMailboxPath</code> mailbox exists
+     * @throws MailboxNotFoundException
+     *            when the <code>mailboxId</code> original mailbox does not exist
+     */
+    List<MailboxRenamedResult> renameMailbox(MailboxId mailboxId, MailboxPath newMailboxPath, RenameOption option, MailboxSession session) throws MailboxException;
+
+    default List<MailboxRenamedResult> renameMailbox(MailboxId mailboxId, MailboxPath newMailboxPath, MailboxSession session) throws MailboxException {
+        return renameMailbox(mailboxId, newMailboxPath, RenameOption.NONE, session);
+    }
 
     /**
      * Copy the given {@link MessageRange} from one Mailbox to the other. 
@@ -227,9 +296,8 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
      *            not null
      * @param session
      *            the context for this call, not null
-     * @throws MailboxException
      */
-    List<MailboxMetaData> search(MailboxQuery expression, MailboxSession session) throws MailboxException;
+    Flux<MailboxMetaData> search(MailboxQuery expression, MailboxSession session);
 
     /**
      * Searches for messages matching the given query.
@@ -238,9 +306,8 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
      *            not null
      * @param session
      *            the context for this call, not null
-     * @throws MailboxException
      */
-    List<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, long limit) throws MailboxException;
+    Publisher<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, long limit) throws MailboxException;
 
     /**
      * Does the given mailbox exist?
@@ -249,97 +316,25 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
      *            not null
      * @param session
      *            the context for this call, not null
-     * @return true when the mailbox exists and is accessible for the given
-     *         user, false otherwise
-     * @throws MailboxException
+     * @return A publisher holding true when the mailbox exists and is accessible for the given
+     *            user, false otherwise
      */
-    boolean mailboxExists(MailboxPath mailboxPath, MailboxSession session) throws MailboxException;
+    Publisher<Boolean> mailboxExists(MailboxPath mailboxPath, MailboxSession session) throws MailboxException;
 
     /**
-     * Creates a new system session.<br>
-     * A system session is intended to be used for programmatic access.<br>
-     * Use {@link #login(String, String)} when accessing this API from a
-     * protocol.
-     * 
-     * @param userName
-     *            the name of the user whose session is being created
-     * @return <code>MailboxSession</code>, not null
-     * @throws BadCredentialsException
-     *             when system access is not allowed for the given user
-     * @throws MailboxException
-     *             when the creation fails for other reasons
-     */
-    MailboxSession createSystemSession(String userName) throws BadCredentialsException, MailboxException;
-
-    /**
-     * Autenticates the given user against the given password.<br>
-     * When authenticated and authorized, a session will be supplied
-     * 
-     * @param userid
-     *            user name
-     * @param passwd
-     *            password supplied
-     * @return a <code>MailboxSession</code> when the user is authenticated and
-     *         authorized to access
-     * @throws BadCredentialsException
-     *             when system access is denied for the given user
-     * @throws MailboxException
-     *             when the creation fails for other reasons
-     */
-    MailboxSession login(String userid, String passwd) throws BadCredentialsException, MailboxException;
-
-    /**
-     * Autenticates the given administrator against the given password,
-     * then switch to an other user<br>
-     * When authenticated and authorized, a session for the other user will be supplied
-     * 
-     * @param adminUserId
-     *            user name of the admin user, matching the credentials
-     * @param passwd
-     *            password supplied for the admin user
-     * @param otherUserId
-     *            user name of the real user
-     * @return a <code>MailboxSession</code> for the real user
-     *         when the admin is authenticated and authorized to access
-     * @throws BadCredentialsException
-     *             when system access is denied for the given user
-     * @throws MailboxException
-     *             when the creation fails for other reasons
-     */
-    MailboxSession loginAsOtherUser(String adminUserId, String passwd, String otherUserId) throws BadCredentialsException, MailboxException;
-
-    /**
-     * <p>
-     * Logs the session out, freeing any resources. Clients who open session
-     * should make best efforts to call this when the session is closed.
-     * </p>
-     * <p>
-     * Note that clients may not always be able to call logout (whether forced
-     * or not). Mailboxes that create sessions which are expensive to maintain
-     * <code>MUST</code> retain a reference and periodically check
-     * {@link MailboxSession#isOpen()}.
-     * </p>
-     * <p>
-     * Note that implementations much be aware that it is possible that this
-     * method may be called more than once with the same session.
-     * </p>
-     * 
+     * Does the user INBOX exist?
+     *
      * @param session
-     *            not null
-     * @param force
-     *            true when the session logout is forced by premature connection
-     *            termination
-     * @throws MailboxException
-     *             when logout fails
+     *            the context for this call, not null
+     * @return true when the INBOX exists and is accessible for the given
+     *            user, false otherwise
      */
-    void logout(MailboxSession session, boolean force) throws MailboxException;
+    default Publisher<Boolean> hasInbox(MailboxSession session) throws MailboxException {
+        return mailboxExists(MailboxPath.inbox(session), session);
+    }
 
     /**
      * Return a unmodifiable {@link List} of {@link MailboxPath} objects
-     * 
-     * @param session
-     * @return pathList
-     * @throws MailboxException
      */
     List<MailboxPath> list(MailboxSession session) throws MailboxException;
 

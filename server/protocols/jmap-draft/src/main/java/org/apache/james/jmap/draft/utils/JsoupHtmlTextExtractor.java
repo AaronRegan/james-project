@@ -20,9 +20,11 @@
 package org.apache.james.jmap.draft.utils;
 
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.james.util.html.HtmlTextExtractor;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -30,6 +32,8 @@ import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Strings;
 
 public class JsoupHtmlTextExtractor implements HtmlTextExtractor {
 
@@ -92,7 +96,7 @@ public class JsoupHtmlTextExtractor implements HtmlTextExtractor {
     private String generateImageAlternativeText(Element element) {
         return Optional.ofNullable(element.attributes().get(ALT_TAG))
             .map(StringUtils::normalizeSpace)
-            .filter(s -> !s.isEmpty())
+            .filter(Predicate.not(Strings::isNullOrEmpty))
             .map(s -> "[" + s + "]")
             .orElse("");
     }

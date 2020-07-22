@@ -22,8 +22,8 @@ package org.apache.james.jmap;
 import static io.restassured.RestAssured.given;
 import static io.restassured.RestAssured.with;
 import static org.apache.james.jmap.HttpJmapAuthentication.authenticateJamesUser;
+import static org.apache.james.jmap.JMAPTestingConstants.jmapRequestSpecBuilder;
 import static org.apache.james.jmap.JmapURIBuilder.baseUri;
-import static org.apache.james.jmap.TestingConstants.jmapRequestSpecBuilder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
@@ -33,12 +33,13 @@ import java.io.IOException;
 import java.time.Duration;
 
 import org.apache.james.GuiceJamesServer;
-import org.apache.james.jmap.categories.BasicFeature;
+import org.apache.james.core.Username;
+import org.apache.james.jmap.draft.JmapGuiceProbe;
+import org.apache.james.junit.categories.BasicFeature;
 import org.apache.james.mailbox.DefaultMailboxes;
 import org.apache.james.modules.MailboxProbeImpl;
 import org.apache.james.util.concurrency.ConcurrentTestRunner;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -50,25 +51,27 @@ public abstract class ProvisioningTest {
     private static final String NAME = "[0][0]";
     private static final String ARGUMENTS = "[0][1]";
     private static final String DOMAIN = "mydomain.tld";
-    private static final String USER = "myuser@" + DOMAIN;
+    private static final Username USER = Username.of("myuser@" + DOMAIN);
     private static final String PASSWORD = "secret";
-    
+
     protected abstract GuiceJamesServer createJmapServer() throws IOException;
 
     private GuiceJamesServer jmapServer;
+    private AccessToken userToken;
 
     @Before
     public void setup() throws Throwable {
         jmapServer = createJmapServer();
         jmapServer.start();
         RestAssured.requestSpecification = jmapRequestSpecBuilder
-            .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort())
+            .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort().getValue())
             .build();
 
         jmapServer.getProbe(DataProbeImpl.class)
             .fluent()
             .addDomain(DOMAIN)
-            .addUser(USER, PASSWORD);
+            .addUser(USER.asString(), PASSWORD);
+        userToken = authenticateJamesUser(baseUri(jmapServer), USER, PASSWORD);
     }
 
     @After
@@ -78,18 +81,16 @@ public abstract class ProvisioningTest {
 
     @Test
     public void provisionMailboxesShouldNotDuplicateMailboxByName() throws Exception {
-        String token = authenticateJamesUser(baseUri(jmapServer), USER, PASSWORD).serialize();
-
         ConcurrentTestRunner.builder()
             .operation((a, b) -> with()
-                .header("Authorization", token)
+                .header("Authorization", userToken.asString())
                 .body("[[\"getMailboxes\", {}, \"#0\"]]")
                 .post("/jmap"))
             .threadCount(10)
             .runSuccessfullyWithin(Duration.ofMinutes(1));
 
         given()
-            .header("Authorization", token)
+            .header("Authorization", userToken.asString())
             .body("[[\"getMailboxes\", {}, \"#0\"]]")
         .when()
             .post("/jmap")
@@ -103,15 +104,13 @@ public abstract class ProvisioningTest {
     @Category(BasicFeature.class)
     @Test
     public void provisionMailboxesShouldSubscribeToThem() throws Exception {
-        String token = authenticateJamesUser(baseUri(jmapServer), USER, PASSWORD).serialize();
-
         with()
-            .header("Authorization", token)
+            .header("Authorization", userToken.asString())
             .body("[[\"getMailboxes\", {}, \"#0\"]]")
             .post("/jmap");
 
         assertThat(jmapServer.getProbe(MailboxProbeImpl.class)
-            .listSubscriptions(USER))
+            .listSubscriptions(USER.asString()))
             .containsAll(DefaultMailboxes.DEFAULT_MAILBOXES);
     }
 }

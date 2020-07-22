@@ -19,8 +19,9 @@
 
 package org.apache.james.jmap.draft.methods.integration.cucumber;
 
-import static org.apache.james.jmap.TestingConstants.ARGUMENTS;
-import static org.apache.james.jmap.TestingConstants.NAME;
+import static org.apache.james.jmap.JMAPTestingConstants.ARGUMENTS;
+import static org.apache.james.jmap.JMAPTestingConstants.NAME;
+import static org.apache.james.jmap.JMAPTestingConstants.calmlyAwait;
 import static org.apache.james.mailbox.model.MailboxConstants.INBOX;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -41,22 +42,19 @@ import javax.mail.Flags;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.text.StringEscapeUtils;
-import org.apache.james.jmap.TestingConstants;
+import org.apache.james.core.Username;
+import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.apache.james.jmap.draft.methods.integration.cucumber.util.TableRow;
-import org.apache.james.jmap.draft.model.MessagePreviewGenerator;
 import org.apache.james.mailbox.model.MailboxConstants;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.modules.protocols.SmtpGuiceProbe;
 import org.apache.james.util.ClassLoaderUtils;
-import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.apache.james.utils.SMTPMessageSender;
-import org.javatuples.Pair;
 
 import com.github.fge.lambdas.Throwing;
 import com.github.steveash.guavate.Guavate;
-import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 
@@ -75,6 +73,7 @@ public class GetMessagesMethodStepdefs {
     private static final String ATTACHMENTS = FIRST_MESSAGE + ".attachments";
     private static final String FIRST_ATTACHMENT = ATTACHMENTS + "[0]";
     private static final String SECOND_ATTACHMENT = ATTACHMENTS + "[1]";
+    private static final int PREVIEW_LENGTH = 256;
 
 
     private final MainStepdefs mainStepdefs;
@@ -102,7 +101,7 @@ public class GetMessagesMethodStepdefs {
         MailboxId mailboxId1 = mainStepdefs.getMailboxId(user, mailbox1);
         MailboxId mailboxId2 = mainStepdefs.getMailboxId(user, mailbox2);
 
-        mainStepdefs.jmapServer.getProbe(JmapGuiceProbe.class).setInMailboxes(id, userStepdefs.getConnectedUser(), mailboxId1, mailboxId2);
+        mainStepdefs.jmapServer.getProbe(JmapGuiceProbe.class).setInMailboxes(id, Username.of(user), mailboxId1, mailboxId2);
         messageIdStepdefs.addMessageId(messageName, id);
         mainStepdefs.awaitMethod.run();
     }
@@ -165,7 +164,7 @@ public class GetMessagesMethodStepdefs {
     public void appendMessageFromFileInlinedMultipart(String messageName, String mailbox) throws Exception {
         ZonedDateTime dateTime = ZonedDateTime.parse("2014-10-30T14:12:00Z");
         MessageId id = mainStepdefs.mailboxProbe.appendMessage(userStepdefs.getConnectedUser(),
-            MailboxPath.forUser(userStepdefs.getConnectedUser(), mailbox),
+            MailboxPath.forUser(Username.of(userStepdefs.getConnectedUser()), mailbox),
             ClassLoader.getSystemResourceAsStream("eml/inlinedMultipart.eml"),
             Date.from(dateTime.toInstant()), false, new Flags())
             .getMessageId();
@@ -177,7 +176,7 @@ public class GetMessagesMethodStepdefs {
         ZonedDateTime dateTime = ZonedDateTime.parse("2014-10-30T14:12:00Z");
         try {
             return mainStepdefs.mailboxProbe.appendMessage(userStepdefs.getConnectedUser(),
-                MailboxPath.forUser(userStepdefs.getConnectedUser(), mailbox),
+                MailboxPath.forUser(Username.of(userStepdefs.getConnectedUser()), mailbox),
                 new ByteArrayInputStream(message(contentType, subject, content, headers).getBytes(StandardCharsets.UTF_8)),
                 Date.from(dateTime.toInstant()), false, new Flags()).getMessageId();
         } finally {
@@ -198,8 +197,7 @@ public class GetMessagesMethodStepdefs {
 
     private Function<Set<Entry<String, String>>, String> entriesToString() {
         return entries -> entries.stream()
-            .map(this::entryToPair)
-            .map(this::joinKeyValue)
+            .map(entry -> entry.getKey() + ": " + entry.getValue())
             .collect(Collectors.joining("\r\n", "", "\r\n"));
     }
 
@@ -394,7 +392,7 @@ public class GetMessagesMethodStepdefs {
                 ClassLoaderUtils.getSystemResourceAsString(fileName));
         smtpMessageSender.close();
 
-        TestingConstants.calmlyAwait.until(() -> !retrieveIds(user, mailboxId).isEmpty());
+        calmlyAwait.until(() -> !retrieveIds(user, mailboxId).isEmpty());
         List<String> ids = retrieveIds(user, mailboxId);
         messageIdStepdefs.addMessageId(messageName, mainStepdefs.messageIdFactory.fromString(ids.get(0)));
     }
@@ -408,7 +406,7 @@ public class GetMessagesMethodStepdefs {
         ZonedDateTime dateTime = ZonedDateTime.parse("2014-10-30T14:12:00Z");
         boolean isRecent = flags.contains(Flags.Flag.RECENT);
         MessageId id = mainStepdefs.mailboxProbe.appendMessage(userStepdefs.getConnectedUser(),
-            MailboxPath.forUser(userStepdefs.getConnectedUser(), mailbox),
+            MailboxPath.forUser(Username.of(userStepdefs.getConnectedUser()), mailbox),
             new ByteArrayInputStream("Subject: test\r\n\r\ntestmail".getBytes()),
             Date.from(dateTime.toInstant()), isRecent, flags)
             .getMessageId();
@@ -420,7 +418,7 @@ public class GetMessagesMethodStepdefs {
         ZonedDateTime dateTime = ZonedDateTime.parse("2014-10-30T14:12:00Z");
 
         MessageId id = mainStepdefs.mailboxProbe.appendMessage(userStepdefs.getConnectedUser(),
-            MailboxPath.forUser(userStepdefs.getConnectedUser(), mailbox),
+            MailboxPath.forUser(Username.of(userStepdefs.getConnectedUser()), mailbox),
                 ClassLoader.getSystemResourceAsStream(emlFileName),
                 Date.from(dateTime.toInstant()), false, new Flags())
                     .getMessageId();
@@ -526,14 +524,6 @@ public class GetMessagesMethodStepdefs {
             .collect(Collectors.joining(",", "[", "]"));
 
         httpClient.post("[[\"getMessages\", {\"ids\": " + serializedIds + ", \"properties\": " + serializedProperties + "}, \"#0\"]]");
-    }
-
-    private Pair<String, String> entryToPair(Map.Entry<String, String> entry) {
-        return Pair.with(entry.getKey(), entry.getValue());
-    }
-
-    private String joinKeyValue(Pair<String, String> pair) {
-        return Joiner.on(": ").join(pair);
     }
 
     @Then("^an error \"([^\"]*)\" with type \"([^\"]*)\" is returned$")
@@ -658,7 +648,7 @@ public class GetMessagesMethodStepdefs {
     @Then("^the preview should not contain consecutive spaces or blank characters$")
     public void assertPreviewShouldBeNormalized() {
         String actual = httpClient.jsonPath.read(FIRST_MESSAGE + ".preview");
-        assertThat(actual).hasSize(MessagePreviewGenerator.MAX_PREVIEW_LENGTH)
+        assertThat(actual).hasSize(PREVIEW_LENGTH)
             .doesNotMatch("  ")
             .doesNotContain(StringUtils.CR)
             .doesNotContain(StringUtils.LF);

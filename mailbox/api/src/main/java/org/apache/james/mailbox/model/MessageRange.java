@@ -66,7 +66,7 @@ public class MessageRange implements Iterable<MessageUid> {
 
     /**
      * Constructs an inclusive ranges of messages. The parameters will be
-     * checked and {@link #from(long)} used where appropriate.
+     * checked and {@link #from(MessageUid)} used where appropriate.
      * 
      * @param from
      *            first message UID
@@ -205,7 +205,7 @@ public class MessageRange implements Iterable<MessageUid> {
         return new RangeIterator(getUidFrom(), getUidTo());
     }
     
-    private final class RangeIterator implements Iterator<MessageUid> {
+    private static final class RangeIterator implements Iterator<MessageUid> {
 
         private final long to;
         private long current;
@@ -249,11 +249,7 @@ public class MessageRange implements Iterable<MessageUid> {
             long to = getUidTo().asLong();
             long realTo = to;
             while (from <= realTo) {
-                if (from + maxItems - 1 < realTo) {
-                    to = from + maxItems - 1;
-                } else {
-                    to = realTo;
-                }
+                to = Math.min(from + maxItems - 1, realTo);
                 if (from == to) {
                     ranges.add(MessageUid.of(from).toRange());
                 } else {

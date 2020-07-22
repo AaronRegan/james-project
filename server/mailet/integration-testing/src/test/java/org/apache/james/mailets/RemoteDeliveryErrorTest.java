@@ -28,6 +28,7 @@ import static org.apache.james.mock.smtp.server.ConfigurationClient.BehaviorsPar
 import static org.apache.james.mock.smtp.server.ConfigurationClient.BehaviorsParamsBuilder.ConditionStep.inputContaining;
 import static org.apache.james.mock.smtp.server.ConfigurationClient.BehaviorsParamsBuilder.ResponseStep.doesNotAcceptAnyMail;
 import static org.apache.james.mock.smtp.server.ConfigurationClient.BehaviorsParamsBuilder.ResponseStep.serviceNotAvailable;
+import static org.apache.james.util.docker.Images.MOCK_SMTP_SERVER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.InetAddress;
@@ -53,8 +54,8 @@ import org.apache.james.util.Host;
 import org.apache.james.util.MimeMessageUtil;
 import org.apache.james.util.docker.DockerContainer;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -104,14 +105,14 @@ public class RemoteDeliveryErrorTest {
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
     @Rule
     public SMTPMessageSender messageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
     @ClassRule
-    public static DockerContainer mockSmtp = DockerContainer.fromName("linagora/mock-smtp-server")
+    public static DockerContainer mockSmtp = DockerContainer.fromName(MOCK_SMTP_SERVER)
         .withLogConsumer(outputFrame -> LOGGER.debug("MockSMTP 1: " + outputFrame.getUtf8String()));
     @ClassRule
-    public static DockerContainer mockSmtp2 = DockerContainer.fromName("linagora/mock-smtp-server")
+    public static DockerContainer mockSmtp2 = DockerContainer.fromName(MOCK_SMTP_SERVER)
         .withLogConsumer(outputFrame -> LOGGER.debug("MockSMTP 2: " + outputFrame.getUtf8String()));
 
     private TemporaryJamesServer jamesServer;
@@ -143,6 +144,7 @@ public class RemoteDeliveryErrorTest {
                 .putProcessor(directResolutionTransport())
                 .putProcessor(CommonProcessors.bounces()))
             .build(temporaryFolder.newFolder());
+        jamesServer.start();
 
         jamesServer.getProbe(DataProbeImpl.class)
             .fluent()
@@ -174,11 +176,11 @@ public class RemoteDeliveryErrorTest {
         messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
             .sendMessage(FROM, RECIPIENT);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .contains(BOUNCE_MESSAGE);
     }
 
@@ -195,11 +197,11 @@ public class RemoteDeliveryErrorTest {
         messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
             .sendMessage(FROM, RECIPIENT);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .contains(BOUNCE_MESSAGE);
     }
 
@@ -216,11 +218,11 @@ public class RemoteDeliveryErrorTest {
         messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
             .sendMessage(FROM, RECIPIENT);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .contains(BOUNCE_MESSAGE);
     }
 
@@ -237,11 +239,11 @@ public class RemoteDeliveryErrorTest {
         messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
             .sendMessage(FROM, RECIPIENT);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .contains(BOUNCE_MESSAGE);
     }
 
@@ -258,11 +260,11 @@ public class RemoteDeliveryErrorTest {
         messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
             .sendMessage(FROM, RECIPIENT);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .contains(BOUNCE_MESSAGE);
     }
 
@@ -279,11 +281,11 @@ public class RemoteDeliveryErrorTest {
         messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
             .sendMessage(FROM, RECIPIENT);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .contains(BOUNCE_MESSAGE);
     }
 

@@ -28,7 +28,6 @@ import java.util.Map;
 
 import javax.management.JMException;
 import javax.management.MBeanServer;
-import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
 import org.apache.james.core.MailAddress;
@@ -62,7 +61,7 @@ public class JMXStateMailetProcessorListener implements MailetProcessorListener,
     }
 
     @Override
-    public void afterMailet(Mailet m, String mailName, String state, long processTime, Exception e) {
+    public void afterMailet(Mailet m, String mailName, String state, long processTime, Throwable e) {
         MailetManagement mgmt = mailetMap.get(m);
         if (mgmt != null) {
             mgmt.update(processTime, e == null);
@@ -70,7 +69,7 @@ public class JMXStateMailetProcessorListener implements MailetProcessorListener,
     }
 
     @Override
-    public void afterMatcher(Matcher m, String mailName, Collection<MailAddress> rcpts, Collection<MailAddress> matches, long processTime, Exception e) {
+    public void afterMatcher(Matcher m, String mailName, Collection<MailAddress> rcpts, Collection<MailAddress> matches, long processTime, Throwable e) {
         MatcherManagement mgmt = matcherMap.get(m);
 
         if (mgmt != null) {
@@ -84,9 +83,6 @@ public class JMXStateMailetProcessorListener implements MailetProcessorListener,
 
     /**
      * Register all JMX MBeans
-     * 
-     * @throws JMException
-     * @throws MalformedObjectNameException
      */
     private void registerMBeans() throws JMException {
         String baseObjectName = "org.apache.james:type=component,component=mailetcontainer,name=processor,processor=" + name;
@@ -97,11 +93,6 @@ public class JMXStateMailetProcessorListener implements MailetProcessorListener,
 
     /**
      * Register the Mailets as JMX MBeans
-     * 
-     * @param parentMBeanName
-     * @param mailets
-     * @throws JMException
-     * @throws MalformedObjectNameException
      */
     private void registerMailets(String parentMBeanName, Iterator<Mailet> mailets) throws JMException {
         int i = 0;
@@ -118,12 +109,6 @@ public class JMXStateMailetProcessorListener implements MailetProcessorListener,
 
     /**
      * Register the {@link Matcher}'s as JMX MBeans
-     * 
-     * @param parentMBeanName
-     * @param matchers
-     * @param nestingLevel
-     * @throws JMException
-     * @throws MalformedObjectNameException
      */
     private void registerMatchers(String parentMBeanName, Iterator<Matcher> matchers, int nestingLevel) throws JMException {
         int i = 0;

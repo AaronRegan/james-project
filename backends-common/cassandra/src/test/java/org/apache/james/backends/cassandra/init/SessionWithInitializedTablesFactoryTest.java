@@ -20,20 +20,20 @@
 package org.apache.james.backends.cassandra.init;
 
 import static com.datastax.driver.core.DataType.text;
-import static org.apache.james.backends.cassandra.CassandraCluster.KEYSPACE;
 import static org.apache.james.backends.cassandra.versions.CassandraSchemaVersionManager.MAX_VERSION;
 import static org.apache.james.backends.cassandra.versions.CassandraSchemaVersionManager.MIN_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.function.Supplier;
 
+import org.apache.james.backends.cassandra.DockerCassandra;
 import org.apache.james.backends.cassandra.DockerCassandraExtension;
 import org.apache.james.backends.cassandra.components.CassandraModule;
 import org.apache.james.backends.cassandra.init.configuration.ClusterConfiguration;
+import org.apache.james.backends.cassandra.init.configuration.KeyspaceConfiguration;
 import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDAO;
 import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionManager;
 import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
-import org.apache.james.util.Host;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -84,60 +84,53 @@ class SessionWithInitializedTablesFactoryTest {
 
     @Test
     void createSessionShouldSetTheLatestSchemaVersionWhenCreatingTypesAndTables() {
-        assertThat(versionManager(testee.get()).computeVersion())
+        assertThat(versionManager(testee.get()).computeVersion().block())
                 .isEqualTo(MAX_VERSION);
     }
 
     @Test
     void createSessionShouldKeepTheSetSchemaVersionWhenTypesAndTablesHaveNotChanged() {
         Session session = testee.get();
-        assertThat(versionManager(session).computeVersion())
+        assertThat(versionManager(session).computeVersion().block())
                 .isEqualTo(MAX_VERSION);
 
         new CassandraTableManager(MODULE, session).clearAllTables();
         versionManagerDAO(session).updateVersion(MIN_VERSION);
-        assertThat(versionManager(session).computeVersion())
+        assertThat(versionManager(session).computeVersion().block())
                 .isEqualTo(MIN_VERSION);
 
-        assertThat(versionManager(testee.get()).computeVersion())
+        assertThat(versionManager(testee.get()).computeVersion().block())
                 .isEqualTo(MIN_VERSION);
     }
 
     @Test
     void createSessionShouldKeepTheSetSchemaVersionWhenTypesAndTablesHavePartiallyChanged() {
         Session session = testee.get();
-        assertThat(versionManager(session).computeVersion())
+        assertThat(versionManager(session).computeVersion().block())
                 .isEqualTo(MAX_VERSION);
 
         new CassandraTableManager(MODULE, session).clearAllTables();
         versionManagerDAO(session).updateVersion(MIN_VERSION);
-        assertThat(versionManager(session).computeVersion())
+        assertThat(versionManager(session).computeVersion().block())
                 .isEqualTo(MIN_VERSION);
         session.execute(SchemaBuilder.dropTable(TABLE_NAME));
         session.execute(SchemaBuilder.dropType(TYPE_NAME));
 
-        assertThat(versionManager(testee.get()).computeVersion())
+        assertThat(versionManager(testee.get()).computeVersion().block())
                 .isEqualTo(MIN_VERSION);
     }
 
     private static Supplier<Session> createSession(DockerCassandraExtension.DockerCassandra cassandraServer) {
-        Host host = cassandraServer.getHost();
-        Cluster cluster = ClusterBuilder.builder()
-                .host(host.getHostName())
-                .port(host.getPort())
-                .build();
+        ClusterConfiguration clusterConfiguration = DockerCassandra.configurationBuilder(cassandraServer.getHost())
+            .build();
+        Cluster cluster = ClusterFactory.create(clusterConfiguration);
+        KeyspaceConfiguration keyspaceConfiguration = DockerCassandra.mainKeyspaceConfiguration();
+        KeyspaceFactory.createKeyspace(keyspaceConfiguration, cluster);
         return () -> new SessionWithInitializedTablesFactory(
-                ClusterConfiguration.builder()
-                        .host(host)
-                        .keyspace(KEYSPACE)
-                        .replicationFactor(1)
-                        .build(),
-                ClusterWithKeyspaceCreatedFactory
-                        .config(cluster, KEYSPACE)
-                        .replicationFactor(1)
-                        .disableDurableWrites()
-                        .clusterWithInitializedKeyspace(),
-                MODULE).get();
+                keyspaceConfiguration,
+                cluster,
+                MODULE)
+            .get();
     }
 
     private static void cleanCassandra(Session session) {

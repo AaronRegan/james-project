@@ -32,7 +32,8 @@ import java.util.Set;
 
 import javax.inject.Inject;
 
-import org.apache.james.jmap.api.access.AccessToken;
+import org.apache.james.core.Username;
+import org.apache.james.jmap.AccessToken;
 
 import com.github.fge.lambdas.Throwing;
 import com.github.fge.lambdas.runnable.ThrowingRunnable;
@@ -123,9 +124,9 @@ public class UserStepdefs {
     public AccessToken authenticate(String username) {
         return tokenByUser.computeIfAbsent(username, (user) -> {
             String password = passwordByUser.get(user);
-            Preconditions.checkState(password != null, "unknown user " + user);
+            Preconditions.checkState(password != null, "unknown user %s", user);
 
-            return authenticateJamesUser(baseUri(mainStepdefs.jmapServer), user, password);
+            return authenticateJamesUser(baseUri(mainStepdefs.jmapServer), Username.of(user), password);
         });
     }
 

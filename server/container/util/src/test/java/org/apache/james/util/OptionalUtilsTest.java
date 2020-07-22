@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
-public class OptionalUtilsTest {
+class OptionalUtilsTest {
 
     @Test
     void ifEmptyShouldPreserveValueOfEmptyOptionals() {
@@ -61,171 +61,22 @@ public class OptionalUtilsTest {
     }
 
     @Test
-    void toStreamShouldConvertEmptyOptionalToEmptyStream() {
-        assertThat(OptionalUtils.toStream(Optional.empty()))
-            .isEmpty();
-    }
-
-    @Test
-    void toStreamShouldConvertFullOptionalToStream() {
-        long value = 18L;
-        assertThat(OptionalUtils.toStream(Optional.of(value)))
-            .containsExactly(value);
-    }
-
-    @Test
-    void orShouldReturnEmptyWhenNoParameter() {
-        assertThat(OptionalUtils.or())
-            .isEmpty();
-    }
-
-    @Test
-    void orShouldReturnEmptyWhenEmpty() {
-        assertThat(
-            OptionalUtils.or(
-                Optional.empty()))
-            .isEmpty();
-    }
-
-    @Test
-    void orShouldReturnValueWhenValue() {
-        assertThat(
-            OptionalUtils.or(
-                Optional.of(1)))
-            .contains(1);
-    }
-
-    @Test
-    void orShouldReturnEmptyWhenBothEmpty() {
-        assertThat(
-            OptionalUtils.or(
-                Optional.empty(),
-                Optional.empty()))
-            .isEmpty();
-    }
-
-    @Test
-    void orShouldReturnFirstValueWhenOnlyFirstValue() {
-        assertThat(
-            OptionalUtils.or(
-                Optional.of(18),
-                Optional.empty()))
-            .contains(18);
-    }
-
-    @Test
-    void orShouldReturnSecondValueWhenOnlySecondValue() {
-        assertThat(
-            OptionalUtils.or(
-                Optional.empty(),
-                Optional.of(18)))
-            .contains(18);
-    }
-
-    @Test
-    void orShouldReturnFirstValueWhenBothValues() {
-        assertThat(
-            OptionalUtils.or(
-                Optional.of(1),
-                Optional.of(2)))
-            .contains(1);
-    }
-
-    @Test
-    void orShouldReturnThirdValueWhenOnlyThirdValue() {
-        assertThat(
-            OptionalUtils.or(
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(1)))
-            .contains(1);
-    }
-
-    @Test
-    void orSuppliersShouldReturnEmptyWhenNoParameter() {
-        assertThat(OptionalUtils.or())
-            .isEmpty();
-    }
-
-    @Test
-    void orSuppliersShouldReturnEmptyWhenEmpty() {
-        assertThat(
-            OptionalUtils.orSuppliers(
-                Optional::empty))
-            .isEmpty();
-    }
-
-    @Test
-    void orSuppliersShouldReturnValueWhenValue() {
-        assertThat(
-            OptionalUtils.orSuppliers(
-                () -> Optional.of(1)))
-            .contains(1);
-    }
-
-    @Test
-    void orSuppliersShouldReturnEmptyWhenBothEmpty() {
-        assertThat(
-            OptionalUtils.orSuppliers(
-                () -> Optional.empty(),
-                () -> Optional.empty()))
-            .isEmpty();
-    }
-
-    @Test
-    void orSuppliersShouldReturnFirstValueWhenOnlyFirstValue() {
-        assertThat(
-            OptionalUtils.orSuppliers(
-                () -> Optional.of(18),
-                Optional::empty))
-            .contains(18);
-    }
-
-    @Test
-    void orSuppliersShouldReturnSecondValueWhenOnlySecondValue() {
-        assertThat(
-            OptionalUtils.orSuppliers(
-                Optional::empty,
-                () -> Optional.of(18)))
-            .contains(18);
-    }
-
-    @Test
-    void orSuppliersShouldReturnFirstValueWhenBothValues() {
-        assertThat(
-            OptionalUtils.orSuppliers(
-                () -> Optional.of(1),
-                () -> Optional.of(2)))
-            .contains(1);
-    }
-
-    @Test
-    void orSuppliersShouldReturnThirdValueWhenOnlyThirdValue() {
-        assertThat(
-            OptionalUtils.orSuppliers(
-                Optional::empty,
-                Optional::empty,
-                () -> Optional.of(1)))
-            .contains(1);
-    }
-
-    @Test
-    void containsDifferentShouldReturnTrueWhenNullStoreValue() throws Exception {
+    void containsDifferentShouldReturnTrueWhenNullStoreValue() {
         assertThat(OptionalUtils.containsDifferent(Optional.of("any"), null)).isTrue();
     }
 
     @Test
-    void containsDifferentShouldReturnFalseWhenEmpty() throws Exception {
+    void containsDifferentShouldReturnFalseWhenEmpty() {
         assertThat(OptionalUtils.containsDifferent(Optional.empty(), "any")).isFalse();
     }
 
     @Test
-    void containsDifferentShouldReturnFalseWhenSameValue() throws Exception {
+    void containsDifferentShouldReturnFalseWhenSameValue() {
         assertThat(OptionalUtils.containsDifferent(Optional.of("any"), "any")).isFalse();
     }
 
     @Test
-    void containsDifferentShouldReturnTrueWhenDifferentValue() throws Exception {
+    void containsDifferentShouldReturnTrueWhenDifferentValue() {
         assertThat(OptionalUtils.containsDifferent(Optional.of("any"), "other")).isTrue();
     }
 

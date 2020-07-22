@@ -19,16 +19,31 @@
 
 package org.apache.james.webadmin.routes;
 
+import static org.apache.james.webadmin.routes.MailboxesRoutes.RE_INDEX;
+import static org.apache.james.webadmin.routes.MailboxesRoutes.TASK_PARAMETER;
+
+import java.util.Optional;
+import java.util.Set;
+
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
+import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 
+import org.apache.james.core.Username;
+import org.apache.james.mailbox.exception.MailboxNameException;
+import org.apache.james.mailbox.indexer.ReIndexer;
+import org.apache.james.task.TaskManager;
 import org.apache.james.webadmin.Constants;
 import org.apache.james.webadmin.Routes;
 import org.apache.james.webadmin.service.UserMailboxesService;
+import org.apache.james.webadmin.tasks.TaskFromRequestRegistry;
+import org.apache.james.webadmin.tasks.TaskFromRequestRegistry.TaskRegistration;
+import org.apache.james.webadmin.tasks.TaskIdDto;
 import org.apache.james.webadmin.utils.ErrorResponder;
 import org.apache.james.webadmin.utils.ErrorResponder.ErrorType;
 import org.apache.james.webadmin.utils.JsonTransformer;
@@ -45,6 +60,8 @@ import io.swagger.annotations.ApiImplicitParams;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.ApiResponses;
+import spark.Request;
+import spark.Route;
 import spark.Service;
 
 @Api(tags = "User's Mailbox")
@@ -53,6 +70,18 @@ import spark.Service;
 public class UserMailboxesRoutes implements Routes {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(UserMailboxesRoutes.class);
+    public static final String USER_MAILBOXES_OPERATIONS_INJECTION_KEY = "userMailboxesOperations";
+
+    public static class UserReIndexingTaskRegistration extends TaskRegistration {
+        @Inject
+        public UserReIndexingTaskRegistration(ReIndexer reIndexer) {
+            super(RE_INDEX, request -> reIndexer.reIndex(getUsernameParam(request), ReindexingRunningOptionsParser.parse(request)));
+        }
+    }
+
+    private static Username getUsernameParam(Request request) {
+        return Username.of(request.params(USER_NAME));
+    }
 
     public static final String MAILBOX_NAME = ":mailboxName";
     public static final String MAILBOXES = "mailboxes";
@@ -63,12 +92,19 @@ public class UserMailboxesRoutes implements Routes {
 
     private final UserMailboxesService userMailboxesService;
     private final JsonTransformer jsonTransformer;
+    private final TaskManager taskManager;
+    private final Set<TaskRegistration> usersMailboxesTaskRegistration;
     private Service service;
 
     @Inject
-    public UserMailboxesRoutes(UserMailboxesService userMailboxesService, JsonTransformer jsonTransformer) {
+    UserMailboxesRoutes(UserMailboxesService userMailboxesService,
+                        JsonTransformer jsonTransformer,
+                        TaskManager taskManager,
+                        @Named(USER_MAILBOXES_OPERATIONS_INJECTION_KEY) Set<TaskRegistration> usersMailboxesTaskRegistration) {
         this.userMailboxesService = userMailboxesService;
         this.jsonTransformer = jsonTransformer;
+        this.taskManager = taskManager;
+        this.usersMailboxesTaskRegistration = usersMailboxesTaskRegistration;
     }
 
     @Override
@@ -89,6 +125,9 @@ public class UserMailboxesRoutes implements Routes {
         defineDeleteUserMailbox();
 
         defineDeleteUserMailboxes();
+
+        reIndexMailboxesRoute()
+            .ifPresent(route -> service.post(USER_MAILBOXES_BASE, route, jsonTransformer));
     }
 
     @GET
@@ -106,17 +145,42 @@ public class UserMailboxesRoutes implements Routes {
         service.get(USER_MAILBOXES_BASE, (request, response) -> {
             response.status(HttpStatus.OK_200);
             try {
-                return userMailboxesService.listMailboxes(request.params(USER_NAME));
+                return userMailboxesService.listMailboxes(getUsernameParam(request));
             } catch (IllegalStateException e) {
                 LOGGER.info("Invalid get on user mailboxes", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.NOT_FOUND_404)
-                    .type(ErrorType.INVALID_ARGUMENT)
+                    .type(ErrorType.NOT_FOUND)
                     .message("Invalid get on user mailboxes")
                     .cause(e)
                     .haltError();
             }
         }, jsonTransformer);
+    }
+
+    @POST
+    @ApiImplicitParams({
+        @ApiImplicitParam(required = true, dataType = "string", name = "username", paramType = "path"),
+        @ApiImplicitParam(
+            required = true,
+            name = "task",
+            paramType = "query parameter",
+            dataType = "String",
+            defaultValue = "none",
+            example = "?task=reIndex",
+            value = "Compulsory. Only supported value is `reIndex`")
+    })
+    @ApiOperation(value = "Perform an action on a user mailbox")
+    @ApiResponses(value = {
+        @ApiResponse(code = HttpStatus.CREATED_201, message = "Task is created", response = TaskIdDto.class),
+        @ApiResponse(code = HttpStatus.INTERNAL_SERVER_ERROR_500, message = "Internal server error - Something went bad on the server side."),
+        @ApiResponse(code = HttpStatus.BAD_REQUEST_400, message = "Bad request - details in the returned error message")
+    })
+    public Optional<Route> reIndexMailboxesRoute() {
+        return TaskFromRequestRegistry.builder()
+            .parameterName(TASK_PARAMETER)
+            .registrations(usersMailboxesTaskRegistration)
+            .buildAsRouteOptional(taskManager);
     }
 
     @DELETE
@@ -136,13 +200,13 @@ public class UserMailboxesRoutes implements Routes {
     public void defineDeleteUserMailbox() {
         service.delete(SPECIFIC_MAILBOX, (request, response) -> {
             try {
-                userMailboxesService.deleteMailbox(request.params(USER_NAME), new MailboxName(request.params(MAILBOX_NAME)));
+                userMailboxesService.deleteMailbox(getUsernameParam(request), new MailboxName(request.params(MAILBOX_NAME)));
                 return Responses.returnNoContent(response);
             } catch (IllegalStateException e) {
                 LOGGER.info("Invalid delete on user mailbox", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.NOT_FOUND_404)
-                    .type(ErrorType.INVALID_ARGUMENT)
+                    .type(ErrorType.NOT_FOUND)
                     .message("Invalid delete on user mailboxes")
                     .cause(e)
                     .haltError();
@@ -154,12 +218,12 @@ public class UserMailboxesRoutes implements Routes {
                     .message("Attempt to delete a mailbox with children")
                     .cause(e)
                     .haltError();
-            } catch (IllegalArgumentException e) {
-                LOGGER.info("Attempt to create an invalid mailbox");
+            } catch (IllegalArgumentException | MailboxNameException e) {
+                LOGGER.info("Attempt to delete an invalid mailbox", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.BAD_REQUEST_400)
                     .type(ErrorType.INVALID_ARGUMENT)
-                    .message("Attempt to create an invalid mailbox")
+                    .message("Attempt to delete an invalid mailbox")
                     .cause(e)
                     .haltError();
             }
@@ -180,13 +244,13 @@ public class UserMailboxesRoutes implements Routes {
     public void defineDeleteUserMailboxes() {
         service.delete(USER_MAILBOXES_BASE, (request, response) -> {
             try {
-                userMailboxesService.deleteMailboxes(request.params(USER_NAME));
+                userMailboxesService.deleteMailboxes(getUsernameParam(request));
                 return Responses.returnNoContent(response);
             } catch (IllegalStateException e) {
                 LOGGER.info("Invalid delete on user mailboxes", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.NOT_FOUND_404)
-                    .type(ErrorType.INVALID_ARGUMENT)
+                    .type(ErrorType.NOT_FOUND)
                     .message("Invalid delete on user mailboxes")
                     .cause(e)
                     .haltError();
@@ -211,29 +275,29 @@ public class UserMailboxesRoutes implements Routes {
     public void defineMailboxExists() {
         service.get(SPECIFIC_MAILBOX, (request, response) -> {
             try {
-                if (userMailboxesService.testMailboxExists(request.params(USER_NAME), new MailboxName(request.params(MAILBOX_NAME)))) {
+                if (userMailboxesService.testMailboxExists(getUsernameParam(request), new MailboxName(request.params(MAILBOX_NAME)))) {
                     return Responses.returnNoContent(response);
                 } else {
                     throw ErrorResponder.builder()
                         .statusCode(HttpStatus.NOT_FOUND_404)
-                        .type(ErrorType.INVALID_ARGUMENT)
-                        .message("Invalid get on user mailboxes")
+                        .type(ErrorType.NOT_FOUND)
+                        .message("Mailbox does not exist")
                         .haltError();
                 }
             } catch (IllegalStateException e) {
                 LOGGER.info("Invalid get on user mailbox", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.NOT_FOUND_404)
-                    .type(ErrorType.INVALID_ARGUMENT)
+                    .type(ErrorType.NOT_FOUND)
                     .message("Invalid get on user mailboxes")
                     .cause(e)
                     .haltError();
-            } catch (IllegalArgumentException e) {
-                LOGGER.info("Attempt to create an invalid mailbox");
+            } catch (IllegalArgumentException | MailboxNameException e) {
+                LOGGER.info("Attempt to test existence of an invalid mailbox", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.BAD_REQUEST_400)
                     .type(ErrorType.INVALID_ARGUMENT)
-                    .message("Attempt to create an invalid mailbox")
+                    .message("Attempt to test existence of an invalid mailbox")
                     .cause(e)
                     .haltError();
             }
@@ -257,18 +321,18 @@ public class UserMailboxesRoutes implements Routes {
     public void defineCreateUserMailbox() {
         service.put(SPECIFIC_MAILBOX, (request, response) -> {
             try {
-                userMailboxesService.createMailbox(request.params(USER_NAME), new MailboxName(request.params(MAILBOX_NAME)));
+                userMailboxesService.createMailbox(getUsernameParam(request), new MailboxName(request.params(MAILBOX_NAME)));
                 return Responses.returnNoContent(response);
             } catch (IllegalStateException e) {
                 LOGGER.info("Invalid put on user mailbox", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.NOT_FOUND_404)
-                    .type(ErrorType.INVALID_ARGUMENT)
+                    .type(ErrorType.NOT_FOUND)
                     .message("Invalid get on user mailboxes")
                     .cause(e)
                     .haltError();
-            } catch (IllegalArgumentException e) {
-                LOGGER.info("Attempt to create an invalid mailbox");
+            } catch (IllegalArgumentException | MailboxNameException e) {
+                LOGGER.info("Attempt to create an invalid mailbox", e);
                 throw ErrorResponder.builder()
                     .statusCode(HttpStatus.BAD_REQUEST_400)
                     .type(ErrorType.INVALID_ARGUMENT)

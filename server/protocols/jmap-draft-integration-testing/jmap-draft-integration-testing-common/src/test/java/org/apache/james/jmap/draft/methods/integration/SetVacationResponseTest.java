@@ -21,11 +21,11 @@ package org.apache.james.jmap.draft.methods.integration;
 
 import static io.restassured.RestAssured.given;
 import static org.apache.james.jmap.HttpJmapAuthentication.authenticateJamesUser;
+import static org.apache.james.jmap.JMAPTestingConstants.ARGUMENTS;
+import static org.apache.james.jmap.JMAPTestingConstants.DOMAIN;
+import static org.apache.james.jmap.JMAPTestingConstants.NAME;
+import static org.apache.james.jmap.JMAPTestingConstants.jmapRequestSpecBuilder;
 import static org.apache.james.jmap.JmapURIBuilder.baseUri;
-import static org.apache.james.jmap.TestingConstants.ARGUMENTS;
-import static org.apache.james.jmap.TestingConstants.DOMAIN;
-import static org.apache.james.jmap.TestingConstants.NAME;
-import static org.apache.james.jmap.TestingConstants.jmapRequestSpecBuilder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 
@@ -34,14 +34,15 @@ import java.time.ZonedDateTime;
 import java.util.Optional;
 
 import org.apache.james.GuiceJamesServer;
-import org.apache.james.jmap.api.access.AccessToken;
+import org.apache.james.core.Username;
+import org.apache.james.jmap.AccessToken;
 import org.apache.james.jmap.api.vacation.AccountId;
 import org.apache.james.jmap.api.vacation.Vacation;
 import org.apache.james.jmap.api.vacation.VacationPatch;
-import org.apache.james.jmap.categories.BasicFeature;
+import org.apache.james.jmap.draft.JmapGuiceProbe;
+import org.apache.james.junit.categories.BasicFeature;
 import org.apache.james.util.ValuePatch;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -70,14 +71,14 @@ public abstract class SetVacationResponseTest {
         jmapServer.start();
         jmapGuiceProbe = jmapServer.getProbe(JmapGuiceProbe.class);
         RestAssured.requestSpecification = jmapRequestSpecBuilder
-                .setPort(jmapGuiceProbe.getJmapPort())
+                .setPort(jmapGuiceProbe.getJmapPort().getValue())
                 .build();
 
         jmapServer.getProbe(DataProbeImpl.class)
             .fluent()
             .addDomain(DOMAIN)
             .addUser(USER, PASSWORD);
-        accessToken = authenticateJamesUser(baseUri(jmapServer), USER, PASSWORD);
+        accessToken = authenticateJamesUser(baseUri(jmapServer), Username.of(USER), PASSWORD);
     }
 
     @After
@@ -102,7 +103,7 @@ public abstract class SetVacationResponseTest {
             "]]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
         .when()
             .post("/jmap")
@@ -133,7 +134,7 @@ public abstract class SetVacationResponseTest {
         given()
             .accept(ContentType.JSON)
             .contentType(ContentType.JSON)
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
         .when()
             .post("/jmap")
@@ -160,7 +161,7 @@ public abstract class SetVacationResponseTest {
             "]]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
         .when()
             .post("/jmap")
@@ -193,7 +194,7 @@ public abstract class SetVacationResponseTest {
             "]]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
         .when()
             .post("/jmap")
@@ -233,7 +234,7 @@ public abstract class SetVacationResponseTest {
             "]]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
         .when()
             .post("/jmap")
@@ -273,7 +274,7 @@ public abstract class SetVacationResponseTest {
         given()
             .accept(ContentType.JSON)
             .contentType(ContentType.JSON)
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
             .when()
             .post("/jmap")
@@ -312,7 +313,7 @@ public abstract class SetVacationResponseTest {
             "]]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
             .when()
             .post("/jmap")
@@ -347,7 +348,7 @@ public abstract class SetVacationResponseTest {
             "]]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
             .when()
             .post("/jmap")
@@ -383,7 +384,7 @@ public abstract class SetVacationResponseTest {
             "]]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
         .when()
             .post("/jmap")
@@ -416,7 +417,7 @@ public abstract class SetVacationResponseTest {
         given()
             .accept(ContentType.JSON)
             .contentType(ContentType.JSON)
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(bodyRequest)
         .when()
             .post("/jmap")

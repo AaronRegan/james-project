@@ -19,7 +19,10 @@
 
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
+
+import com.google.common.base.MoreObjects;
 
 /**
  * SETACL Request.
@@ -29,8 +32,8 @@ public class SetACLRequest extends AbstractImapRequest {
     private final String mailboxName;
     private final String rights;
 
-    public SetACLRequest(String tag, ImapCommand command, String mailboxName, String identifier, String rights) {
-        super(tag, command);
+    public SetACLRequest(Tag tag, String mailboxName, String identifier, String rights) {
+        super(tag, ImapConstants.SETACL_COMMAND);
         this.mailboxName = mailboxName;
         this.identifier = identifier;
         this.rights = rights;
@@ -48,4 +51,12 @@ public class SetACLRequest extends AbstractImapRequest {
         return rights;
     }
 
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("identifier", identifier)
+            .add("mailboxName", mailboxName)
+            .add("rights", rights)
+            .toString();
+    }
 }

@@ -20,13 +20,11 @@
 
 package org.apache.james.webadmin.vault.routes;
 
-import java.util.function.Function;
-
 import javax.inject.Inject;
 import javax.mail.internet.AddressException;
 
 import org.apache.james.core.MailAddress;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.json.DTOModule;
 import org.apache.james.server.task.json.dto.TaskDTO;
 import org.apache.james.server.task.json.dto.TaskDTOModule;
@@ -38,8 +36,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class DeletedMessagesVaultExportTaskDTO implements TaskDTO {
 
-    public static final Function<Factory, TaskDTOModule<DeletedMessagesVaultExportTask, DeletedMessagesVaultExportTaskDTO>> MODULE = (factory) ->
-        DTOModule
+    public static TaskDTOModule<DeletedMessagesVaultExportTask, DeletedMessagesVaultExportTaskDTO> module(Factory factory) {
+        return DTOModule
             .forDomainObject(DeletedMessagesVaultExportTask.class)
             .convertToDTO(DeletedMessagesVaultExportTaskDTO.class)
             .toDomainObjectConverter(dto -> {
@@ -52,6 +50,7 @@ public class DeletedMessagesVaultExportTaskDTO implements TaskDTO {
             .toDTOConverter(factory::createDTO)
             .typeName(DeletedMessagesVaultExportTask.TYPE.asString())
             .withFactory(TaskDTOModule::new);
+    }
 
     public static class Factory {
 
@@ -65,7 +64,7 @@ public class DeletedMessagesVaultExportTaskDTO implements TaskDTO {
         }
 
         public DeletedMessagesVaultExportTask create(DeletedMessagesVaultExportTaskDTO dto) throws AddressException {
-            User userExportFrom = User.fromUsername(dto.userExportFrom);
+            Username userExportFrom = Username.of(dto.userExportFrom);
             Query exportQuery = queryTranslator.translate(dto.exportQuery);
             MailAddress exportTo = new MailAddress(dto.exportTo);
             return new DeletedMessagesVaultExportTask(exportService, userExportFrom, exportQuery, exportTo);

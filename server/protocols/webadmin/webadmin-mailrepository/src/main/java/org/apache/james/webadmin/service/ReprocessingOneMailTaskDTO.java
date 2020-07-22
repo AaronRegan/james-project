@@ -18,34 +18,36 @@
  ****************************************************************/
 package org.apache.james.webadmin.service;
 
+import java.time.Clock;
 import java.util.Optional;
-import java.util.function.Function;
 
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.server.task.json.dto.TaskDTO;
 import org.apache.james.server.task.json.dto.TaskDTOModule;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-class ReprocessingOneMailTaskDTO implements TaskDTO {
+public class ReprocessingOneMailTaskDTO implements TaskDTO {
 
-    public static final Function<ReprocessingService, TaskDTOModule<ReprocessingOneMailTask, ReprocessingOneMailTaskDTO>> MODULE = (reprocessingService) ->
-        DTOModule
+    public static TaskDTOModule<ReprocessingOneMailTask, ReprocessingOneMailTaskDTO> module(Clock clock, ReprocessingService reprocessingService) {
+        return DTOModule
             .forDomainObject(ReprocessingOneMailTask.class)
             .convertToDTO(ReprocessingOneMailTaskDTO.class)
-            .toDomainObjectConverter(dto -> dto.fromDTO(reprocessingService))
+            .toDomainObjectConverter(dto -> dto.fromDTO(reprocessingService, clock))
             .toDTOConverter(ReprocessingOneMailTaskDTO::toDTO)
             .typeName(ReprocessingOneMailTask.TYPE.asString())
             .withFactory(TaskDTOModule::new);
+    }
 
     public static ReprocessingOneMailTaskDTO toDTO(ReprocessingOneMailTask domainObject, String typeName) {
         try {
             return new ReprocessingOneMailTaskDTO(
                 typeName,
                 domainObject.getRepositoryPath().urlEncoded(),
-                domainObject.getTargetQueue(),
+                domainObject.getTargetQueue().asString(),
                 domainObject.getMailKey().asString(),
                 domainObject.getTargetProcessor()
             );
@@ -72,13 +74,14 @@ class ReprocessingOneMailTaskDTO implements TaskDTO {
         this.targetProcessor = targetProcessor;
     }
 
-    public ReprocessingOneMailTask fromDTO(ReprocessingService reprocessingService) {
+    public ReprocessingOneMailTask fromDTO(ReprocessingService reprocessingService, Clock clock) {
         return new ReprocessingOneMailTask(
             reprocessingService,
             getMailRepositoryPath(),
-            targetQueue,
+            MailQueueName.of(targetQueue),
             new MailKey(mailKey),
-            targetProcessor
+            targetProcessor,
+            clock
         );
     }
 

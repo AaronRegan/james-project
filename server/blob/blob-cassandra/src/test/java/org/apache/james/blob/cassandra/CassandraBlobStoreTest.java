@@ -19,6 +19,7 @@
 
 package org.apache.james.blob.cassandra;
 
+import static org.apache.james.blob.api.BlobStore.StoragePolicy.LOW_COST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.spy;
@@ -34,11 +35,12 @@ import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
+import org.apache.james.blob.api.BucketName;
 import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.api.MetricableBlobStore;
 import org.apache.james.blob.api.MetricableBlobStoreContract;
 import org.apache.james.blob.api.ObjectStoreException;
-import org.apache.james.util.ZeroedInputStream;
+import org.apache.james.util.io.ZeroedInputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -64,14 +66,15 @@ public class CassandraBlobStoreTest implements MetricableBlobStoreContract {
         HashBlobId.Factory blobIdFactory = new HashBlobId.Factory();
         CassandraBucketDAO bucketDAO = new CassandraBucketDAO(blobIdFactory, cassandra.getConf());
         defaultBucketDAO = spy(new CassandraDefaultBucketDAO(cassandra.getConf()));
+        CassandraConfiguration cassandraConfiguration = CassandraConfiguration.builder()
+            .blobPartSize(CHUNK_SIZE)
+            .build();
         testee = new MetricableBlobStore(
             metricsTestExtension.getMetricFactory(),
-            new CassandraBlobStore(defaultBucketDAO,
-                bucketDAO,
-                CassandraConfiguration.builder()
-                    .blobPartSize(CHUNK_SIZE)
-                    .build(),
-                blobIdFactory));
+            new CassandraBlobStore(
+                blobIdFactory,
+                BucketName.DEFAULT,
+                new CassandraDumbBlobStore(defaultBucketDAO, bucketDAO, cassandraConfiguration, BucketName.DEFAULT)));
     }
 
     @Override
@@ -87,9 +90,9 @@ public class CassandraBlobStoreTest implements MetricableBlobStoreContract {
     @Test
     void readBytesShouldReturnSplitSavedDataByChunk() {
         String longString = Strings.repeat("0123456789\n", MULTIPLE_CHUNK_SIZE);
-        BlobId blobId = testee.save(testee.getDefaultBucketName(), longString).block();
+        BlobId blobId = Mono.from(testee.save(testee.getDefaultBucketName(), longString, LOW_COST)).block();
 
-        byte[] bytes = testee.readBytes(testee.getDefaultBucketName(), blobId).block();
+        byte[] bytes = Mono.from(testee.readBytes(testee.getDefaultBucketName(), blobId)).block();
 
         assertThat(new String(bytes, StandardCharsets.UTF_8)).isEqualTo(longString);
     }
@@ -98,11 +101,11 @@ public class CassandraBlobStoreTest implements MetricableBlobStoreContract {
     void readBytesShouldNotReturnInvalidResultsWhenPartialDataPresent() {
         int repeatCount = MULTIPLE_CHUNK_SIZE * CHUNK_SIZE;
         String longString = Strings.repeat("0123456789\n", repeatCount);
-        BlobId blobId = testee.save(testee.getDefaultBucketName(), longString).block();
+        BlobId blobId = Mono.from(testee.save(testee.getDefaultBucketName(), longString, LOW_COST)).block();
 
         when(defaultBucketDAO.readPart(blobId, 1)).thenReturn(Mono.empty());
 
-        assertThatThrownBy(() -> testee.readBytes(testee.getDefaultBucketName(), blobId).block())
+        assertThatThrownBy(() -> Mono.from(testee.readBytes(testee.getDefaultBucketName(), blobId)).block())
             .isInstanceOf(ObjectStoreException.class)
             .hasMessageContaining("Missing blob part for blobId");
     }
@@ -111,7 +114,7 @@ public class CassandraBlobStoreTest implements MetricableBlobStoreContract {
     void readShouldNotReturnInvalidResultsWhenPartialDataPresent() {
         int repeatCount = MULTIPLE_CHUNK_SIZE * CHUNK_SIZE;
         String longString = Strings.repeat("0123456789\n", repeatCount);
-        BlobId blobId = testee.save(testee.getDefaultBucketName(), longString).block();
+        BlobId blobId = Mono.from(testee.save(testee.getDefaultBucketName(), longString, LOW_COST)).block();
 
         when(defaultBucketDAO.readPart(blobId, 1)).thenReturn(Mono.empty());
 
@@ -131,7 +134,7 @@ public class CassandraBlobStoreTest implements MetricableBlobStoreContract {
     void blobStoreShouldSupport100MBBlob() throws IOException {
         ZeroedInputStream data = new ZeroedInputStream(100_000_000);
         HashingInputStream writeHash = new HashingInputStream(Hashing.sha256(), data);
-        BlobId blobId = testee.save(testee.getDefaultBucketName(), writeHash).block();
+        BlobId blobId = Mono.from(testee.save(testee.getDefaultBucketName(), writeHash, LOW_COST)).block();
 
         InputStream bytes = testee.read(testee.getDefaultBucketName(), blobId);
         HashingInputStream readHash = new HashingInputStream(Hashing.sha256(), bytes);

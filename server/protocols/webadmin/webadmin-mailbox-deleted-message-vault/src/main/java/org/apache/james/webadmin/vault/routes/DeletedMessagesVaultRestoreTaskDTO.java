@@ -20,11 +20,9 @@
 
 package org.apache.james.webadmin.vault.routes;
 
-import java.util.function.Function;
-
 import javax.inject.Inject;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.json.DTOModule;
 import org.apache.james.server.task.json.dto.TaskDTO;
 import org.apache.james.server.task.json.dto.TaskDTOModule;
@@ -48,9 +46,9 @@ public class DeletedMessagesVaultRestoreTaskDTO implements TaskDTO {
         }
 
         public DeletedMessagesVaultRestoreTask create(DeletedMessagesVaultRestoreTaskDTO dto) {
-            User userToRestore = User.fromUsername(dto.userToRestore);
+            Username usernameToRestore = Username.of(dto.userToRestore);
             Query query = queryTranslator.translate(dto.query);
-            return new DeletedMessagesVaultRestoreTask(restoreService, userToRestore, query);
+            return new DeletedMessagesVaultRestoreTask(restoreService, usernameToRestore, query);
         }
 
         public DeletedMessagesVaultRestoreTaskDTO createDTO(DeletedMessagesVaultRestoreTask task, String type) {
@@ -58,15 +56,15 @@ public class DeletedMessagesVaultRestoreTaskDTO implements TaskDTO {
         }
     }
 
-    public static final Function<DeletedMessagesVaultRestoreTaskDTO.Factory, TaskDTOModule<DeletedMessagesVaultRestoreTask, DeletedMessagesVaultRestoreTaskDTO>> MODULE = (factory) ->
-        DTOModule
+    public static TaskDTOModule<DeletedMessagesVaultRestoreTask, DeletedMessagesVaultRestoreTaskDTO> module(DeletedMessagesVaultRestoreTaskDTO.Factory factory) {
+        return DTOModule
             .forDomainObject(DeletedMessagesVaultRestoreTask.class)
             .convertToDTO(DeletedMessagesVaultRestoreTaskDTO.class)
             .toDomainObjectConverter(factory::create)
             .toDTOConverter(factory::createDTO)
             .typeName(DeletedMessagesVaultRestoreTask.TYPE.asString())
             .withFactory(TaskDTOModule::new);
-
+    }
 
     private final String type;
     private final String userToRestore;

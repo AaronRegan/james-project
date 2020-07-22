@@ -41,9 +41,11 @@ import org.eclipse.jetty.http.HttpStatus;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.reactivestreams.Publisher;
 
 import io.restassured.RestAssured;
 import net.javacrumbs.jsonunit.core.Option;
+import reactor.core.publisher.Mono;
 
 public class HealthCheckRoutesTest {
 
@@ -65,8 +67,8 @@ public class HealthCheckRoutesTest {
             }
 
             @Override
-            public Result check() {
-                return result;
+            public Publisher<Result> check() {
+                return Mono.just(result);
             }
         };
     }
@@ -162,7 +164,7 @@ public class HealthCheckRoutesTest {
         String retrieveBody = when()
                 .get()
             .then()
-                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
                 .extract()
                 .body().asString();
 
@@ -194,7 +196,7 @@ public class HealthCheckRoutesTest {
         String retrieveBody = when()
                 .get()
             .then()
-                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
                 .extract()
                 .body().asString();
 
@@ -226,7 +228,7 @@ public class HealthCheckRoutesTest {
         String retrieveBody = when()
                 .get()
             .then()
-                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .statusCode(HttpStatus.OK_200)
                 .extract()
                 .body().asString();
 
@@ -258,7 +260,7 @@ public class HealthCheckRoutesTest {
         String retrieveBody = when()
                 .get()
             .then()
-                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .statusCode(HttpStatus.OK_200)
                 .extract()
                 .body().asString();
 
@@ -289,7 +291,7 @@ public class HealthCheckRoutesTest {
         String retrieveBody = when()
                 .get()
             .then()
-                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
                 .extract()
                 .body().asString();
 
@@ -338,7 +340,7 @@ public class HealthCheckRoutesTest {
         .when()
             .get("/checks/{componentName}")
         .then()
-            .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+            .statusCode(HttpStatus.OK_200)
             .body("componentName", equalTo(NAME_1))
             .body("escapedComponentName", equalTo(NAME_1))
             .body("status", equalTo(ResultStatus.DEGRADED.getValue()))
@@ -354,7 +356,7 @@ public class HealthCheckRoutesTest {
         .when()
             .get("/checks/{componentName}")
         .then()
-            .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+            .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
             .body("componentName", equalTo(NAME_1))
             .body("escapedComponentName", equalTo(NAME_1))
             .body("status", equalTo(ResultStatus.UNHEALTHY.getValue()))

@@ -23,25 +23,29 @@ import static org.apache.james.CassandraJamesServerMain.ALL_BUT_JMX_CASSANDRA_MO
 
 import org.apache.james.data.LdapUsersRepositoryModule;
 import org.apache.james.modules.server.JMXServerModule;
-import org.apache.james.server.core.configuration.Configuration;
 
 import com.google.inject.Module;
 import com.google.inject.util.Modules;
 
-public class CassandraLdapJamesServerMain {
-
-    public static final Module MODULES = Modules.override(ALL_BUT_JMX_CASSANDRA_MODULE)
+public class CassandraLdapJamesServerMain implements JamesServerMain {
+    private static final Module MODULES = Modules.override(ALL_BUT_JMX_CASSANDRA_MODULE)
         .with(new LdapUsersRepositoryModule());
 
     public static void main(String[] args) throws Exception {
-        Configuration configuration = Configuration.builder()
+        CassandraJamesServerConfiguration configuration = CassandraJamesServerConfiguration.builder()
             .useWorkingDirectoryEnvProperty()
             .build();
 
-        GuiceJamesServer server = GuiceJamesServer.forConfiguration(configuration)
-            .combineWith(MODULES, new JMXServerModule());
+        LOGGER.info("Loading configuration {}", configuration.toString());
+        GuiceJamesServer server = createServer(configuration)
+            .combineWith(new JMXServerModule());
 
-        server.start();
+        JamesServerMain.main(server);
     }
 
+    static GuiceJamesServer createServer(CassandraJamesServerConfiguration configuration) {
+        return GuiceJamesServer.forConfiguration(configuration)
+            .combineWith(MODULES)
+            .combineWith(SearchModuleChooser.chooseModules(configuration.searchConfiguration()));
+    }
 }

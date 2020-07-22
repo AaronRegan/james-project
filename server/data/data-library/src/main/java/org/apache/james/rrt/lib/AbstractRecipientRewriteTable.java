@@ -18,6 +18,7 @@
  ****************************************************************/
 package org.apache.james.rrt.lib;
 
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -32,32 +33,34 @@ import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.james.core.Domain;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.domainlist.api.DomainList;
 import org.apache.james.domainlist.api.DomainListException;
 import org.apache.james.lifecycle.api.Configurable;
 import org.apache.james.rrt.api.InvalidRegexException;
 import org.apache.james.rrt.api.MappingAlreadyExistsException;
 import org.apache.james.rrt.api.RecipientRewriteTable;
+import org.apache.james.rrt.api.RecipientRewriteTableConfiguration;
 import org.apache.james.rrt.api.RecipientRewriteTableException;
 import org.apache.james.rrt.api.SameSourceAndDestinationException;
 import org.apache.james.rrt.api.SourceDomainIsNotInDomainListException;
 import org.apache.james.rrt.lib.Mapping.Type;
-import org.apache.james.util.OptionalUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.fge.lambdas.Throwing;
+import com.google.common.base.Preconditions;
 
 public abstract class AbstractRecipientRewriteTable implements RecipientRewriteTable, Configurable {
     private static final Logger LOGGER = LoggerFactory.getLogger(AbstractRecipientRewriteTable.class);
 
-    // The maximum mappings which will process before throwing exception
-    private int mappingLimit = 10;
-
-    private boolean recursive = true;
-
+    private RecipientRewriteTableConfiguration configuration;
     private DomainList domainList;
+
+    public void setConfiguration(RecipientRewriteTableConfiguration configuration) {
+        Preconditions.checkState(this.configuration == null, "A configuration cannot be set twice");
+        this.configuration = configuration;
+    }
 
     @Inject
     public void setDomainList(DomainList domainList) {
@@ -66,46 +69,26 @@ public abstract class AbstractRecipientRewriteTable implements RecipientRewriteT
 
     @Override
     public void configure(HierarchicalConfiguration<ImmutableNode> config) throws ConfigurationException {
-        setRecursiveMapping(config.getBoolean("recursiveMapping", true));
-        try {
-            setMappingLimit(config.getInt("mappingLimit", 10));
-        } catch (IllegalArgumentException e) {
-            throw new ConfigurationException(e.getMessage());
-        }
+        setConfiguration(RecipientRewriteTableConfiguration.fromConfiguration(config));
         doConfigure(config);
     }
 
-    /**
-     * Override to handle config
-     */
-    protected void doConfigure(HierarchicalConfiguration<ImmutableNode> conf) throws ConfigurationException {
-    }
+    protected void doConfigure(HierarchicalConfiguration<ImmutableNode> arg0) throws ConfigurationException {
 
-    public void setRecursiveMapping(boolean recursive) {
-        this.recursive = recursive;
-    }
-
-    /**
-     * Set the mappingLimit
-     * 
-     * @param mappingLimit
-     *            the mappingLimit
-     * @throws IllegalArgumentException
-     *             get thrown if mappingLimit smaller then 1 is used
-     */
-    public void setMappingLimit(int mappingLimit) throws IllegalArgumentException {
-        if (mappingLimit < 1) {
-            throw new IllegalArgumentException("The minimum mappingLimit is 1");
-        }
-        this.mappingLimit = mappingLimit;
     }
 
     @Override
-    public Mappings getResolvedMappings(String user, Domain domain) throws ErrorMappingException, RecipientRewriteTableException {
-        return getMappings(User.fromLocalPartWithDomain(user, domain), mappingLimit);
+    public RecipientRewriteTableConfiguration getConfiguration() {
+        return configuration;
     }
 
-    private Mappings getMappings(User user, int mappingLimit) throws ErrorMappingException, RecipientRewriteTableException {
+    @Override
+    public Mappings getResolvedMappings(String user, Domain domain, EnumSet<Type> mappingTypes) throws ErrorMappingException, RecipientRewriteTableException {
+        Preconditions.checkState(this.configuration != null, "RecipientRewriteTable is not configured");
+        return getMappings(Username.fromLocalPartWithDomain(user, domain), configuration.getMappingLimit(), mappingTypes);
+    }
+
+    private Mappings getMappings(Username username, int mappingLimit, EnumSet<Type> mappingTypes) throws ErrorMappingException, RecipientRewriteTableException {
 
         // We have to much mappings throw ErrorMappingException to avoid
         // infinity loop
@@ -113,49 +96,51 @@ public abstract class AbstractRecipientRewriteTable implements RecipientRewriteT
             throw new TooManyMappingException("554 Too many mappings to process");
         }
 
-        Mappings targetMappings = mapAddress(user.getLocalPart(), user.getDomainPart().get());
-
+        Domain domain = username.getDomainPart().get();
+        String localPart = username.getLocalPart();
+        Stream<Mapping> targetMappings = mapAddress(localPart, domain).asStream()
+                .filter(mapping -> mappingTypes.contains(mapping.getType()));
 
         try {
             return MappingsImpl.fromMappings(
-                targetMappings.asStream()
-                    .flatMap(Throwing.function((Mapping target) -> convertAndRecurseMapping(user, target, mappingLimit)).sneakyThrow()));
+                targetMappings
+                    .flatMap(Throwing.function((Mapping target) -> convertAndRecurseMapping(username, target, mappingLimit, mappingTypes)).sneakyThrow()));
         } catch (SkipMappingProcessingException e) {
             return MappingsImpl.empty();
         }
     }
 
-    private Stream<Mapping> convertAndRecurseMapping(User originalUser, Mapping associatedMapping, int remainingLoops) throws ErrorMappingException, RecipientRewriteTableException, SkipMappingProcessingException, AddressException {
+    private Stream<Mapping> convertAndRecurseMapping(Username originalUsername, Mapping associatedMapping, int remainingLoops, EnumSet<Type> mappingTypes) throws ErrorMappingException, SkipMappingProcessingException, AddressException {
 
-        Function<User, Stream<Mapping>> convertAndRecurseMapping =
+        Function<Username, Stream<Mapping>> convertAndRecurseMapping =
             Throwing
-                .function((User rewrittenUser) -> convertAndRecurseMapping(associatedMapping, originalUser, rewrittenUser, remainingLoops))
+                .function((Username rewrittenUser) -> convertAndRecurseMapping(associatedMapping, originalUsername, rewrittenUser, remainingLoops, mappingTypes))
                 .sneakyThrow();
 
-        return associatedMapping.rewriteUser(originalUser)
-            .map(rewrittenUser -> rewrittenUser.withDefaultDomainFromUser(originalUser))
+        return associatedMapping.rewriteUser(originalUsername)
+            .map(rewrittenUser -> rewrittenUser.withDefaultDomainFromUser(originalUsername))
             .map(convertAndRecurseMapping)
             .orElse(Stream.empty());
     }
 
-    private Stream<Mapping> convertAndRecurseMapping(Mapping mapping, User originalUser, User rewrittenUser, int remainingLoops) throws ErrorMappingException, RecipientRewriteTableException {
-        LOGGER.debug("Valid virtual user mapping {} to {}", originalUser.asString(), rewrittenUser.asString());
+    private Stream<Mapping> convertAndRecurseMapping(Mapping mapping, Username originalUsername, Username rewrittenUsername, int remainingLoops, EnumSet<Type> mappingTypes) throws ErrorMappingException, RecipientRewriteTableException {
+        LOGGER.debug("Valid virtual user mapping {} to {}", originalUsername.asString(), rewrittenUsername.asString());
 
-        Stream<Mapping> nonRecursiveResult = Stream.of(toMapping(rewrittenUser, mapping.getType()));
-        if (!recursive) {
+        Stream<Mapping> nonRecursiveResult = Stream.of(toMapping(rewrittenUsername, mapping.getType()));
+        if (!configuration.isRecursive()) {
             return nonRecursiveResult;
         }
 
         // Check if the returned mapping is the same as the input. If so we need to handle identity to avoid loops.
-        if (originalUser.equals(rewrittenUser)) {
+        if (originalUsername.equals(rewrittenUsername)) {
             return mapping.handleIdentity(nonRecursiveResult);
         } else {
-            return recurseMapping(nonRecursiveResult, rewrittenUser, remainingLoops);
+            return recurseMapping(nonRecursiveResult, rewrittenUsername, remainingLoops, mappingTypes);
         }
     }
 
-    private Stream<Mapping> recurseMapping(Stream<Mapping> nonRecursiveResult, User targetUser, int remainingLoops) throws ErrorMappingException, RecipientRewriteTableException {
-        Mappings childMappings = getMappings(targetUser, remainingLoops - 1);
+    private Stream<Mapping> recurseMapping(Stream<Mapping> nonRecursiveResult, Username targetUsername, int remainingLoops, EnumSet<Type> mappingTypes) throws ErrorMappingException, RecipientRewriteTableException {
+        Mappings childMappings = getMappings(targetUsername, remainingLoops - 1, mappingTypes);
 
         if (childMappings.isEmpty()) {
             return nonRecursiveResult;
@@ -164,17 +149,18 @@ public abstract class AbstractRecipientRewriteTable implements RecipientRewriteT
         }
     }
 
-    private Mapping toMapping(User rewrittenUser, Type type) {
+    private Mapping toMapping(Username rewrittenUsername, Type type) {
         switch (type) {
             case Forward:
             case Group:
             case Alias:
-                return Mapping.of(type, rewrittenUser.asString());
+                return Mapping.of(type, rewrittenUsername.asString());
             case Regex:
             case Domain:
+            case DomainAlias:
             case Error:
             case Address:
-                return Mapping.address(rewrittenUser.asString());
+                return Mapping.address(rewrittenUsername.asString());
         }
         throw new IllegalArgumentException("unhandled enum type");
     }
@@ -256,7 +242,7 @@ public abstract class AbstractRecipientRewriteTable implements RecipientRewriteT
     }
 
     @Override
-    public void addAliasDomainMapping(MappingSource source, Domain realDomain) throws RecipientRewriteTableException {
+    public void addDomainMapping(MappingSource source, Domain realDomain) throws RecipientRewriteTableException {
         checkDomainMappingSourceIsManaged(source);
 
         LOGGER.info("Add domain mapping: {} => {}", source.asDomain().map(Domain::asString).orElse("null"), realDomain);
@@ -264,9 +250,23 @@ public abstract class AbstractRecipientRewriteTable implements RecipientRewriteT
     }
 
     @Override
-    public void removeAliasDomainMapping(MappingSource source, Domain realDomain) throws RecipientRewriteTableException {
+    public void removeDomainMapping(MappingSource source, Domain realDomain) throws RecipientRewriteTableException {
         LOGGER.info("Remove domain mapping: {} => {}", source.asDomain().map(Domain::asString).orElse("null"), realDomain);
         removeMapping(source, Mapping.domain(realDomain));
+    }
+
+    @Override
+    public void addDomainAliasMapping(MappingSource source, Domain realDomain) throws RecipientRewriteTableException {
+        checkDomainMappingSourceIsManaged(source);
+
+        LOGGER.info("Add domain alias mapping: {} => {}", source.asDomain().map(Domain::asString).orElse("null"), realDomain);
+        addMapping(source, Mapping.domainAlias(realDomain));
+    }
+
+    @Override
+    public void removeDomainAliasMapping(MappingSource source, Domain realDomain) throws RecipientRewriteTableException {
+        LOGGER.info("Remove domain alias mapping: {} => {}", source.asDomain().map(Domain::asString).orElse("null"), realDomain);
+        removeMapping(source, Mapping.domainAlias(realDomain));
     }
 
     @Override
@@ -351,9 +351,8 @@ public abstract class AbstractRecipientRewriteTable implements RecipientRewriteT
     protected abstract Mappings mapAddress(String user, Domain domain) throws RecipientRewriteTableException;
 
     private void checkDomainMappingSourceIsManaged(MappingSource source) throws RecipientRewriteTableException {
-        Optional<Domain> notManagedSourceDomain = OptionalUtils.toStream(source.availableDomain())
-            .filter(Throwing.<Domain>predicate(domain -> !isManagedByDomainList(domain)).sneakyThrow())
-            .findFirst();
+        Optional<Domain> notManagedSourceDomain = source.availableDomain()
+            .filter(Throwing.<Domain>predicate(domain -> !isManagedByDomainList(domain)).sneakyThrow());
 
         if (notManagedSourceDomain.isPresent()) {
             throw new SourceDomainIsNotInDomainListException("Source domain '" + notManagedSourceDomain.get().asString() + "' is not managed by the domainList");

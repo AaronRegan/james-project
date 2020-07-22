@@ -51,9 +51,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
+import org.apache.james.mailbox.backup.ZipAssert;
 import org.apache.james.mailbox.backup.zip.MessageIdExtraField;
 import org.apache.james.mailbox.backup.zip.SizeExtraField;
-import org.apache.james.mailbox.backup.ZipAssert;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -182,8 +182,8 @@ class DeletedMessageZipperTest {
         @Test
         void zipShouldStopLoadingResourcesWhenGettingException() throws Exception {
             doThrow(new IOException("mocked exception")).when(zipper).createEntry(any(), any());
+            // lambdas are final and thus can't be spied
             DeletedMessageContentLoader contentLoader = spy(new DeletedMessageContentLoader() {
-                // lambdas are final and thus can't be spied
                 @Override
                 public Optional<InputStream> load(DeletedMessage deletedMessage) {
                     return Optional.of(new ByteArrayInputStream(CONTENT));

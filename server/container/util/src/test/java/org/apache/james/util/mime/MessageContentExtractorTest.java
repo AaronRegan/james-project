@@ -41,7 +41,9 @@ import org.apache.james.util.mime.MessageContentExtractor.MessageContent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-public class MessageContentExtractorTest {
+import nl.jqno.equalsverifier.EqualsVerifier;
+
+class MessageContentExtractorTest {
     private static final String BINARY_CONTENT = "binary";
     private static final String TEXT_CONTENT = "text content";
     private static final String HTML_CONTENT = "<b>html</b> content";
@@ -88,6 +90,11 @@ public class MessageContentExtractorTest {
         inlineImage = BodyPartBuilder.create()
                 .setBody(new byte[0], "image/png")
                 .setContentDisposition("inline");
+    }
+
+    @Test
+    void shouldRespectBeanContract() {
+        EqualsVerifier.forClass(MessageContent.class).verify();
     }
 
     @Test

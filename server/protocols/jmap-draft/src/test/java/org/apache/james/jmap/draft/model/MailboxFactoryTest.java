@@ -18,20 +18,27 @@
  ****************************************************************/
 package org.apache.james.jmap.draft.model;
 
+import static org.apache.james.mailbox.manager.ManagerTestProvisionner.OTHER_USER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import java.util.Optional;
 
+import org.apache.james.core.Username;
 import org.apache.james.jmap.draft.model.mailbox.Mailbox;
 import org.apache.james.jmap.draft.model.mailbox.MailboxNamespace;
+import org.apache.james.jmap.draft.model.mailbox.Rights;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.inmemory.InMemoryId;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
 import org.apache.james.mailbox.manager.ManagerTestProvisionner;
 import org.apache.james.mailbox.model.MailboxACL;
+import org.apache.james.mailbox.model.MailboxCounters;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxMetaData;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.search.MailboxQuery;
 import org.apache.james.mailbox.quota.QuotaManager;
 import org.apache.james.mailbox.quota.QuotaRootResolver;
 import org.apache.james.mailbox.store.StoreMailboxManager;
@@ -41,6 +48,7 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 public class MailboxFactoryTest {
     public static final char DELIMITER = '.';
@@ -51,8 +59,8 @@ public class MailboxFactoryTest {
     private StoreMailboxManager mailboxManager;
     private MailboxSession mailboxSession;
     private MailboxSession otherMailboxSession;
-    private String user;
-    private String otherUser;
+    private Username user;
+    private Username otherUser;
     private MailboxFactory sut;
 
     @Before
@@ -62,7 +70,7 @@ public class MailboxFactoryTest {
         QuotaManager quotaManager = mailboxManager.getQuotaComponents().getQuotaManager();
 
         user = ManagerTestProvisionner.USER;
-        otherUser = ManagerTestProvisionner.OTHER_USER;
+        otherUser = OTHER_USER;
         mailboxSession = mailboxManager.login(user, ManagerTestProvisionner.USER_PASS);
         otherMailboxSession = mailboxManager.login(otherUser, ManagerTestProvisionner.OTHER_USER_PASS);
         sut = new MailboxFactory(mailboxManager, quotaManager, quotaRootResolver);
@@ -132,11 +140,11 @@ public class MailboxFactoryTest {
 
     @Test
     public void getParentIdFromMailboxPathShouldReturnParentIdWhenChildMailbox() throws Exception {
-        MailboxPath parentMailboxPath = MailboxPath.forUser(user, "inbox");
+        MailboxPath parentMailboxPath = MailboxPath.inbox(user);
         mailboxManager.createMailbox(parentMailboxPath, mailboxSession);
         MailboxId parentId = mailboxManager.getMailbox(parentMailboxPath, mailboxSession).getId();
 
-        MailboxPath mailboxPath = MailboxPath.forUser(user, "inbox.mailbox");
+        MailboxPath mailboxPath = parentMailboxPath.child("mailbox", '.');
         mailboxManager.createMailbox(mailboxPath, mailboxSession);
 
         Optional<MailboxId> id = sut.getParentIdFromMailboxPath(mailboxPath, Optional.empty(), mailboxSession);
@@ -177,7 +185,7 @@ public class MailboxFactoryTest {
 
     @Test
     public void getNamespaceShouldReturnPersonalNamespaceWhenUserMailboxPathAndUserMailboxSessionAreTheSame() throws Exception {
-        MailboxPath inbox = MailboxPath.forUser(user, "inbox");
+        MailboxPath inbox = MailboxPath.inbox(user);
         Optional<MailboxId> mailboxId = mailboxManager.createMailbox(inbox, mailboxSession);
 
         Mailbox retrievedMailbox = sut.builder()
@@ -191,8 +199,37 @@ public class MailboxFactoryTest {
     }
 
     @Test
+    public void buildShouldRelyOnPreloadedMailboxes() throws Exception {
+        MailboxPath inbox = MailboxPath.inbox(user);
+        Optional<MailboxId> inboxId = mailboxManager.createMailbox(inbox, mailboxSession);
+        Optional<MailboxId> otherId = mailboxManager.createMailbox(inbox.child("child", '.'), mailboxSession);
+
+        InMemoryId preLoadedId = InMemoryId.of(45);
+        Mailbox retrievedMailbox = sut.builder()
+            .id(otherId.get())
+            .session(mailboxSession)
+            .usingPreloadedMailboxesMetadata(Optional.of(ImmutableList.of(new MailboxMetaData(
+                inbox,
+                preLoadedId,
+                DELIMITER,
+                MailboxMetaData.Children.NO_INFERIORS,
+                MailboxMetaData.Selectability.NONE,
+                MailboxACL.EMPTY,
+                MailboxCounters.builder()
+                    .mailboxId(preLoadedId)
+                    .count(0)
+                    .unseen(0)
+                    .build()))))
+            .build()
+            .get();
+
+        assertThat(retrievedMailbox.getParentId())
+            .contains(preLoadedId);
+    }
+
+    @Test
     public void getNamespaceShouldReturnDelegatedNamespaceWhenUserMailboxPathAndUserMailboxSessionAreNotTheSame() throws Exception {
-        MailboxPath inbox = MailboxPath.forUser(user, "inbox");
+        MailboxPath inbox = MailboxPath.inbox(user);
         Optional<MailboxId> mailboxId = mailboxManager.createMailbox(inbox, mailboxSession);
         mailboxManager.applyRightsCommand(inbox,
             MailboxACL.command()
@@ -232,7 +269,7 @@ public class MailboxFactoryTest {
 
     @Test
     public void delegatedUserShouldHaveMayAddItemsWhenAllowedToInsert() throws Exception {
-        MailboxPath inbox = MailboxPath.forUser(user, "inbox");
+        MailboxPath inbox = MailboxPath.inbox(user);
         Optional<MailboxId> mailboxId = mailboxManager.createMailbox(inbox, mailboxSession);
         mailboxManager.applyRightsCommand(inbox,
             MailboxACL.command()
@@ -257,7 +294,7 @@ public class MailboxFactoryTest {
 
     @Test
     public void delegatedUserShouldHaveMayReadItemsWhenAllowedToRead() throws Exception {
-        MailboxPath inbox = MailboxPath.forUser(user, "inbox");
+        MailboxPath inbox = MailboxPath.inbox(user);
         Optional<MailboxId> mailboxId = mailboxManager.createMailbox(inbox, mailboxSession);
         mailboxManager.applyRightsCommand(inbox,
             MailboxACL.command()
@@ -282,7 +319,7 @@ public class MailboxFactoryTest {
 
     @Test
     public void delegatedUserShouldHaveMayRemoveItemsWhenAllowedToRemoveItems() throws Exception {
-        MailboxPath inbox = MailboxPath.forUser(user, "inbox");
+        MailboxPath inbox = MailboxPath.inbox(user);
         Optional<MailboxId> mailboxId = mailboxManager.createMailbox(inbox, mailboxSession);
         mailboxManager.applyRightsCommand(inbox,
             MailboxACL.command()
@@ -303,5 +340,55 @@ public class MailboxFactoryTest {
         softly.assertThat(retrievedMailbox.isMayReadItems()).isFalse();
         softly.assertThat(retrievedMailbox.isMayRemoveItems()).isTrue();
         softly.assertThat(retrievedMailbox.isMayRename()).isFalse();
+    }
+
+    @Test
+    public void mailboxFromMetaDataShouldReturnPresentStoredValue() throws Exception {
+        String name = "myBox";
+        MailboxPath mailboxPath = MailboxPath.forUser(user, name);
+        mailboxManager.createMailbox(mailboxPath, mailboxSession);
+        mailboxManager.setRights(mailboxPath, MailboxACL.EMPTY.apply(MailboxACL.command()
+                .forUser(OTHER_USER)
+                .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read)
+                .asAddition()),
+            mailboxSession);
+        MailboxMetaData metaData = mailboxManager.search(MailboxQuery.privateMailboxesBuilder(mailboxSession).build(), mailboxSession)
+            .toStream()
+            .filter(metadata -> metadata.getPath().equals(mailboxPath))
+            .findFirst()
+            .get();
+
+        Optional<Mailbox> mailbox = sut.builder()
+            .mailboxMetadata(metaData)
+            .session(mailboxSession)
+            .build();
+
+        softly.assertThat(mailbox).isPresent();
+        softly.assertThat(mailbox).map(Mailbox::getId).contains(metaData.getId());
+        softly.assertThat(mailbox).map(Mailbox::getName).contains(name);
+        softly.assertThat(mailbox).map(Mailbox::getTotalMessages).contains(Number.ZERO);
+        softly.assertThat(mailbox).map(Mailbox::getUnreadMessages).contains(Number.ZERO);
+        softly.assertThat(mailbox).map(Mailbox::getSharedWith).contains(new Rights(ImmutableMap.of(
+            OTHER_USER, ImmutableList.of(Rights.Right.Lookup, Rights.Right.Read))));
+    }
+
+    @Test
+    public void buildShouldThrowWhenBothMetadataAndId() {
+        assertThatThrownBy(() ->
+            sut.builder()
+                .session(mailboxSession)
+                .id(mock(MailboxId.class))
+                .mailboxMetadata(mock(MailboxMetaData.class))
+                .build())
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    public void buildShouldThrowWhenNoId() {
+        assertThatThrownBy(() ->
+            sut.builder()
+                .session(mailboxSession)
+                .build())
+            .isInstanceOf(IllegalStateException.class);
     }
 }

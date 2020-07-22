@@ -21,63 +21,62 @@ package org.apache.james.mailbox.store.mail.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.acl.ACLDiff;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxACL.EntryKey;
-import org.apache.james.mailbox.model.MailboxACL.NameType;
 import org.apache.james.mailbox.model.MailboxACL.Rfc4314Rights;
 import org.apache.james.mailbox.model.MailboxACL.Right;
-import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.mailbox.store.mail.MailboxMapper;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableMap;
 
 public abstract class MailboxMapperACLTest {
-    private static final long UID_VALIDITY = 42;
-    public static final boolean POSITIVE = true;
-    public static final boolean NEGATIVE = !POSITIVE;
+    private static final UidValidity UID_VALIDITY = UidValidity.of(42);
+    private static final boolean POSITIVE = true;
+    private static final boolean NEGATIVE = !POSITIVE;
+    private static final Username USER = Username.of("user");
+    private static final Username USER_1 = Username.of("user1");
+    private static final Username USER_2 = Username.of("user2");
 
     private Mailbox benwaInboxMailbox;
-
-    @Rule
-    public ExpectedException expected = ExpectedException.none();
 
     private MailboxMapper mailboxMapper;
 
     protected abstract MailboxMapper createMailboxMapper();
 
-    protected abstract MailboxId generateId();
-
-    public void setUp() throws Exception {
+    @BeforeEach
+    void setUp() {
         mailboxMapper = createMailboxMapper();
-        MailboxPath benwaInboxPath = MailboxPath.forUser("benwa", "INBOX");
-        benwaInboxMailbox = createMailbox(benwaInboxPath);
-        mailboxMapper.save(benwaInboxMailbox);
+        MailboxPath benwaInboxPath = MailboxPath.forUser(Username.of("benwa"), "INBOX");
+        benwaInboxMailbox = mailboxMapper.create(benwaInboxPath, UID_VALIDITY).block();
     }
 
     @Test
-    public void storedAclShouldBeEmptyByDefault() throws MailboxException {
+    void storedAclShouldBeEmptyByDefault() {
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .isEmpty();
     }
 
     @Test
-    public void updateAclShouldSaveAclWhenReplace() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void updateAclShouldSaveAclWhenReplace() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
@@ -85,16 +84,17 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void updateAclShouldOverwriteStoredAclWhenReplace() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void updateAclShouldOverwriteStoredAclWhenReplace() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights newRights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
 
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement());
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(newRights).asReplacement());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement()).block();
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(newRights).asReplacement()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
@@ -102,16 +102,17 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void updateAclShouldTreatNegativeAndPositiveRightSeparately() throws MailboxException {
-        EntryKey key1 = new EntryKey("user", NameType.user, NEGATIVE);
-        EntryKey key2 = new EntryKey("user", NameType.user, POSITIVE);
+    void updateAclShouldTreatNegativeAndPositiveRightSeparately() {
+        EntryKey key1 = EntryKey.createUserEntryKey(USER, NEGATIVE);
+        EntryKey key2 = EntryKey.createUserEntryKey(USER, POSITIVE);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights newRights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key1).rights(rights).asReplacement());
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key2).rights(newRights).asReplacement());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key1).rights(rights).asReplacement()).block();
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key2).rights(newRights).asReplacement()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(2)
@@ -120,16 +121,17 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void updateAclShouldTreatNameTypesRightSeparately() throws MailboxException {
-        EntryKey key1 = new EntryKey("user", NameType.user, NEGATIVE);
-        EntryKey key2 = new EntryKey("user", NameType.group, NEGATIVE);
+    void updateAclShouldTreatNameTypesRightSeparately() {
+        EntryKey key1 = EntryKey.createUserEntryKey(USER);
+        EntryKey key2 = EntryKey.createGroupEntryKey(USER.asString());
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights newRights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key1).rights(rights).asReplacement());
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key2).rights(newRights).asReplacement());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key1).rights(rights).asReplacement()).block();
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key2).rights(newRights).asReplacement()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(2)
@@ -138,31 +140,33 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void updateAclShouldCleanAclEntryWhenEmptyReplace() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void updateAclShouldCleanAclEntryWhenEmptyReplace() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights newRights = new Rfc4314Rights();
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement());
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(newRights).asReplacement());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement()).block();
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(newRights).asReplacement()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .isEmpty();
     }
 
     @Test
-    public void updateAclShouldCombineStoredAclWhenAdd() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void updateAclShouldCombineStoredAclWhenAdd() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights newRights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
         Rfc4314Rights bothRights = new Rfc4314Rights(Right.Administer, Right.WriteSeenFlag, Right.PerformExpunge, Right.Write, Right.CreateMailbox, Right.DeleteMessages);
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement());
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(newRights).asAddition());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement()).block();
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(newRights).asAddition()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
@@ -170,16 +174,17 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void removeAclShouldRemoveSomeStoredAclWhenAdd() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void removeAclShouldRemoveSomeStoredAclWhenAdd() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights removedRights = new Rfc4314Rights(Right.WriteSeenFlag, Right.PerformExpunge);
         Rfc4314Rights finalRights = new Rfc4314Rights(Right.Administer, Right.Write);
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement());
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(removedRights).asRemoval());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement()).block();
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(removedRights).asRemoval()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
@@ -187,16 +192,17 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void removeAclShouldNotFailWhenRemovingNonExistingRight() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void removeAclShouldNotFailWhenRemovingNonExistingRight() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights removedRights = new Rfc4314Rights(Right.WriteSeenFlag, Right.PerformExpunge, Right.Lookup);
         Rfc4314Rights finalRights = new Rfc4314Rights(Right.Administer, Right.Write);
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement());
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(removedRights).asRemoval());
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement()).block();
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(removedRights).asRemoval()).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
@@ -204,15 +210,16 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void resetAclShouldReplaceStoredAcl() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void resetAclShouldReplaceStoredAcl() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge, Right.Write, Right.WriteSeenFlag);
         Rfc4314Rights newRights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
-        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement());
-        mailboxMapper.setACL(benwaInboxMailbox, new MailboxACL(ImmutableMap.of(key, newRights)));
+        mailboxMapper.updateACL(benwaInboxMailbox, MailboxACL.command().key(key).rights(rights).asReplacement()).block();
+        mailboxMapper.setACL(benwaInboxMailbox, new MailboxACL(ImmutableMap.of(key, newRights))).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
@@ -220,191 +227,189 @@ public abstract class MailboxMapperACLTest {
     }
     
     @Test
-    public void resetAclShouldInitializeStoredAcl() throws MailboxException {
-        EntryKey key = new EntryKey("user", NameType.user, NEGATIVE);
+    void resetAclShouldInitializeStoredAcl() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
         mailboxMapper.setACL(benwaInboxMailbox,
-            new MailboxACL(ImmutableMap.of(key, rights)));
+            new MailboxACL(ImmutableMap.of(key, rights))).block();
 
         assertThat(
             mailboxMapper.findMailboxById(benwaInboxMailbox.getMailboxId())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
             .containsEntry(key, rights);
     }
 
-    private Mailbox createMailbox(MailboxPath mailboxPath) {
-        Mailbox mailbox = new Mailbox(mailboxPath, UID_VALIDITY);
-        mailbox.setMailboxId(generateId());
-        return mailbox;
+    @Test
+    void findMailboxesShouldReturnEmptyWhenNone() {
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Administer).collectList().block())
+            .isEmpty();
     }
 
     @Test
-    public void findMailboxesShouldReturnEmptyWhenNone() throws MailboxException {
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Administer)).isEmpty();
-    }
-
-    @Test
-    public void findMailboxesShouldReturnEmptyWhenRightDoesntMatch() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void findMailboxesShouldReturnEmptyWhenRightDoesntMatch() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer);
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .rights(rights)
-                .asReplacement());
+                .asReplacement()).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Read)).isEmpty();
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Read).collectList().block())
+            .isEmpty();
     }
 
     @Test
-    public void updateACLShouldInsertUsersRights() throws MailboxException {
+    void updateACLShouldInsertUsersRights() {
         Rfc4314Rights rights = new Rfc4314Rights(Right.Administer, Right.PerformExpunge);
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
-                .key(EntryKey.createUserEntryKey("user"))
+                .key(EntryKey.createUserEntryKey(USER))
                 .rights(rights)
-                .asAddition());
+                .asAddition()).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Administer))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Administer).collectList().block())
             .containsOnly(benwaInboxMailbox);
     }
 
     @Test
-    public void updateACLShouldOverwriteUsersRights() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void updateACLShouldOverwriteUsersRights() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights initialRights = new Rfc4314Rights(Right.Administer);
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .rights(initialRights)
-                .asReplacement());
+                .asReplacement()).block();
         Rfc4314Rights newRights = new Rfc4314Rights(Right.Read);
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .rights(newRights)
-                .asReplacement());
+                .asReplacement()).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Read))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Read).collectList().block())
             .containsOnly(benwaInboxMailbox);
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Administer))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Administer).collectList().block())
             .isEmpty();
     }
 
     @Test
-    public void findMailboxesShouldNotReportDeletedACLViaReplace() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void findMailboxesShouldNotReportDeletedACLViaReplace() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights initialRights = new Rfc4314Rights(Right.Administer);
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .mode(MailboxACL.EditMode.REPLACE)
                 .rights(initialRights)
-                .build());
+                .build()).block();
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .mode(MailboxACL.EditMode.REPLACE)
                 .rights(new Rfc4314Rights())
-                .build());
+                .build()).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Administer))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Administer).collectList().block())
             .isEmpty();
     }
 
     @Test
-    public void findMailboxesShouldNotReportDeletedACLViaRemove() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void findMailboxesShouldNotReportDeletedACLViaRemove() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights initialRights = new Rfc4314Rights(Right.Administer);
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .rights(initialRights)
-                .asReplacement());
+                .asReplacement()).block();
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .rights(initialRights)
-                .asRemoval());
+                .asRemoval()).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Administer))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Administer).collectList().block())
             .isEmpty();
     }
 
     @Test
-    public void findMailboxesShouldNotReportDeletedMailboxes() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void findMailboxesShouldNotReportDeletedMailboxes() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights initialRights = new Rfc4314Rights(Right.Administer);
         mailboxMapper.updateACL(benwaInboxMailbox,
             MailboxACL.command()
                 .key(key)
                 .rights(initialRights)
-                .asReplacement());
-        mailboxMapper.delete(benwaInboxMailbox);
+                .asReplacement()).block();
+        mailboxMapper.delete(benwaInboxMailbox).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user", Right.Administer))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER, Right.Administer).collectList().block())
             .isEmpty();
     }
 
     @Test
-    public void setACLShouldStoreMultipleUsersRights() throws MailboxException {
-        EntryKey user1 = EntryKey.createUserEntryKey("user1");
-        EntryKey user2 = EntryKey.createUserEntryKey("user2");
+    void setACLShouldStoreMultipleUsersRights() {
+        EntryKey user1 = EntryKey.createUserEntryKey(USER_1);
+        EntryKey user2 = EntryKey.createUserEntryKey(USER_2);
 
         mailboxMapper.setACL(benwaInboxMailbox, new MailboxACL(
             new MailboxACL.Entry(user1, new Rfc4314Rights(Right.Administer)),
-            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read))));
+            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read)))).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user1", Right.Administer))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER_1, Right.Administer).collectList().block())
             .containsOnly(benwaInboxMailbox);
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user2", Right.Read))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER_2, Right.Read).collectList().block())
             .containsOnly(benwaInboxMailbox);
     }
 
     @Test
-    public void findMailboxesShouldNotReportRightsRemovedViaSetAcl() throws MailboxException {
-        EntryKey user1 = EntryKey.createUserEntryKey("user1");
-        EntryKey user2 = EntryKey.createUserEntryKey("user2");
+    void findMailboxesShouldNotReportRightsRemovedViaSetAcl() {
+        EntryKey user1 = EntryKey.createUserEntryKey(USER_1);
+        EntryKey user2 = EntryKey.createUserEntryKey(USER_2);
 
         mailboxMapper.setACL(benwaInboxMailbox, new MailboxACL(
             new MailboxACL.Entry(user1, new Rfc4314Rights(Right.Administer)),
-            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read))));
+            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read)))).block();
 
         mailboxMapper.setACL(benwaInboxMailbox, new MailboxACL(
-            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read))));
+            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read)))).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user1", Right.Administer))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER_1, Right.Administer).collectList().block())
             .isEmpty();
     }
 
     @Test
-    public void findMailboxesShouldReportRightsUpdatedViaSetAcl() throws MailboxException {
-        EntryKey user1 = EntryKey.createUserEntryKey("user1");
-        EntryKey user2 = EntryKey.createUserEntryKey("user2");
+    void findMailboxesShouldReportRightsUpdatedViaSetAcl() {
+        EntryKey user1 = EntryKey.createUserEntryKey(USER_1);
+        EntryKey user2 = EntryKey.createUserEntryKey(USER_2);
 
         mailboxMapper.setACL(benwaInboxMailbox, new MailboxACL(
             new MailboxACL.Entry(user1, new Rfc4314Rights(Right.Administer)),
-            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read))));
+            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Read)))).block();
 
         mailboxMapper.setACL(benwaInboxMailbox, new MailboxACL(
-            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Write))));
+            new MailboxACL.Entry(user2, new Rfc4314Rights(Right.Write)))).block();
 
-        assertThat(mailboxMapper.findNonPersonalMailboxes("user2", Right.Write))
+        assertThat(mailboxMapper.findNonPersonalMailboxes(USER_2, Right.Write).collectList().block())
             .containsOnly(benwaInboxMailbox);
     }
 
     @Test
-    public void findMailboxByPathShouldReturnMailboxWithACL() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void findMailboxByPathShouldReturnMailboxWithACL() {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
         mailboxMapper.setACL(benwaInboxMailbox,
-            new MailboxACL(ImmutableMap.of(key, rights)));
+            new MailboxACL(ImmutableMap.of(key, rights))).block();
 
         assertThat(
             mailboxMapper.findMailboxByPath(benwaInboxMailbox.generateAssociatedPath())
+                .block()
                 .getACL()
                 .getEntries())
             .hasSize(1)
@@ -412,8 +417,8 @@ public abstract class MailboxMapperACLTest {
     }
 
     @Test
-    public void setACLShouldReturnACLDiff() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void setACLShouldReturnACLDiff() throws MailboxException {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
 
         ACLDiff expectAclDiff = ACLDiff.computeDiff(MailboxACL.EMPTY, MailboxACL.EMPTY.apply(
@@ -423,12 +428,12 @@ public abstract class MailboxMapperACLTest {
                 .asAddition()));
 
         assertThat(mailboxMapper.setACL(benwaInboxMailbox,
-            new MailboxACL(ImmutableMap.of(key, rights)))).isEqualTo(expectAclDiff);
+            new MailboxACL(ImmutableMap.of(key, rights))).block()).isEqualTo(expectAclDiff);
     }
 
     @Test
-    public void updateACLShouldReturnACLDiff() throws MailboxException {
-        EntryKey key = EntryKey.createUserEntryKey("user");
+    void updateACLShouldReturnACLDiff() throws MailboxException {
+        EntryKey key = EntryKey.createUserEntryKey(USER);
         Rfc4314Rights rights = new Rfc4314Rights(Right.WriteSeenFlag, Right.CreateMailbox, Right.Administer, Right.PerformExpunge, Right.DeleteMessages);
 
         MailboxACL.ACLCommand aclCommand = MailboxACL.command()
@@ -438,6 +443,6 @@ public abstract class MailboxMapperACLTest {
 
         ACLDiff expectAclDiff = ACLDiff.computeDiff(MailboxACL.EMPTY, MailboxACL.EMPTY.apply(aclCommand));
 
-        assertThat(mailboxMapper.updateACL(benwaInboxMailbox, aclCommand)).isEqualTo(expectAclDiff);
+        assertThat(mailboxMapper.updateACL(benwaInboxMailbox, aclCommand).block()).isEqualTo(expectAclDiff);
     }
 }

@@ -20,23 +20,21 @@
 package org.apache.james.mailbox.cassandra.mail;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.util.List;
 import java.util.UUID;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.modules.CassandraDeletedMessageModule;
 import org.apache.james.mailbox.model.MessageRange;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-@ExtendWith(CassandraRestartExtension.class)
 class CassandraDeletedMessageDAOTest {
     private static final CassandraId MAILBOX_ID = CassandraId.of(UUID.fromString("110e8400-e29b-11d4-a716-446655440000"));
     private static final MessageUid UID_1 = MessageUid.of(1);
@@ -76,6 +74,25 @@ class CassandraDeletedMessageDAOTest {
                 .block();
 
         assertThat(result).containsExactly(UID_1, UID_2);
+    }
+
+    @Test
+    void retrieveDeletedMessageShouldNotReturnDeletedEntries() {
+        testee.addDeleted(MAILBOX_ID, UID_1).block();
+        testee.addDeleted(MAILBOX_ID, UID_2).block();
+
+        testee.removeAll(MAILBOX_ID).block();
+
+        List<MessageUid> result = testee.retrieveDeletedMessage(MAILBOX_ID, MessageRange.all())
+            .collectList()
+            .block();
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void removeAllShouldNotThrowWhenEmpty() {
+        assertThatCode(() -> testee.removeAll(MAILBOX_ID).block()).doesNotThrowAnyException();
     }
 
     @Test

@@ -48,8 +48,8 @@ import org.apache.james.util.docker.DockerContainer;
 import org.apache.james.util.docker.Images;
 import org.apache.james.util.docker.RateLimiters;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.apache.mailet.base.test.FakeMail;
 import org.junit.After;
 import org.junit.Before;
@@ -438,7 +438,7 @@ public class ICSAttachmentWorkflowTest {
     public AmqpRule amqpRule = new AmqpRule(rabbitMqContainer, EXCHANGE_NAME, ROUTING_KEY);
 
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
     @Rule
     public SMTPMessageSender messageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
 
@@ -451,7 +451,7 @@ public class ICSAttachmentWorkflowTest {
 
     @Before
     public void setup() throws Exception {
-        MailetContainer.Builder mailetContainer = TemporaryJamesServer.DEFAULT_MAILET_CONTAINER_CONFIGURATION
+        MailetContainer.Builder mailetContainer = TemporaryJamesServer.defaultMailetContainerConfiguration()
             .putProcessor(ProcessorConfiguration.transport()
                 .addMailet(MailetConfiguration.builder()
                     .matcher(All.class)
@@ -493,6 +493,7 @@ public class ICSAttachmentWorkflowTest {
             .withBase(MemoryJamesServerMain.SMTP_AND_IMAP_MODULE)
             .withMailetContainer(mailetContainer)
             .build(temporaryFolder.newFolder());
+        jamesServer.start();
 
         DataProbe dataProbe = jamesServer.getProbe(DataProbeImpl.class);
         dataProbe.addDomain(DEFAULT_DOMAIN);
@@ -566,9 +567,9 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
         assertThat(amqpRule.readContent()).isEmpty();
@@ -583,9 +584,9 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
         Optional<String> content = amqpRule.readContent();
@@ -616,12 +617,12 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
-        String receivedHeaders = imapMessageReader.readFirstMessageHeaders();
+        String receivedHeaders = testIMAPClient.readFirstMessageHeaders();
         assertThat(receivedHeaders).doesNotContain("X-MEETING-UID");
         assertThat(receivedHeaders).doesNotContain("X-MEETING-METHOD");
         assertThat(receivedHeaders).doesNotContain("X-MEETING-RECURRENCE-ID");
@@ -638,12 +639,12 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
-        String receivedHeaders = imapMessageReader.readFirstMessageHeaders();
+        String receivedHeaders = testIMAPClient.readFirstMessageHeaders();
         assertThat(receivedHeaders).contains("X-MEETING-UID: " + ICS_UID);
         assertThat(receivedHeaders).contains("X-MEETING-METHOD: " + ICS_METHOD);
         assertThat(receivedHeaders).contains("X-MEETING-SEQUENCE: " + ICS_SEQUENCE);
@@ -659,12 +660,12 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
-        String receivedHeaders = imapMessageReader.readFirstMessageHeaders();
+        String receivedHeaders = testIMAPClient.readFirstMessageHeaders();
         assertThat(receivedHeaders).contains("X-MEETING-UID: " + ICS_BASE64_UID);
         assertThat(receivedHeaders).contains("X-MEETING-METHOD: " + ICS_METHOD);
         assertThat(receivedHeaders).contains("X-MEETING-SEQUENCE: " + ICS_SEQUENCE);
@@ -680,9 +681,9 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
         Optional<String> content = amqpRule.readContent();
@@ -706,9 +707,9 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
         Optional<String> content = amqpRule.readContent();
@@ -733,12 +734,12 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
-        String receivedHeaders = imapMessageReader.readFirstMessageHeaders();
+        String receivedHeaders = testIMAPClient.readFirstMessageHeaders();
         assertThat(receivedHeaders).contains("X-MEETING-UID: " + ICS_UID);
         assertThat(receivedHeaders).contains("X-MEETING-METHOD: " + ICS_METHOD);
         assertThat(receivedHeaders).contains("X-MEETING-SEQUENCE: " + ICS_SEQUENCE);
@@ -754,9 +755,9 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
 
         Optional<String> content1 = amqpRule.readContent();
@@ -793,11 +794,11 @@ public class ICSAttachmentWorkflowTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .containsSubsequence("Content-Type: multipart/mixed", "Content-Disposition: attachment");
     }
 }

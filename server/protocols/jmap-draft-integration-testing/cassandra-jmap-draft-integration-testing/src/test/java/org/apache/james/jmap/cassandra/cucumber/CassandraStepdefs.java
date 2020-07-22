@@ -19,18 +19,18 @@
 
 package org.apache.james.jmap.cassandra.cucumber;
 
-import static org.apache.james.CassandraJamesServerMain.ALL_BUT_JMX_CASSANDRA_MODULE;
-
 import java.util.Arrays;
 
 import javax.inject.Inject;
 
 import org.apache.activemq.store.PersistenceAdapter;
 import org.apache.activemq.store.memory.MemoryPersistenceAdapter;
+import org.apache.james.CassandraJamesServerConfiguration;
+import org.apache.james.CassandraJamesServerMain;
 import org.apache.james.CleanupTasksPerformer;
 import org.apache.james.DockerCassandraRule;
 import org.apache.james.DockerElasticSearchRule;
-import org.apache.james.GuiceJamesServer;
+import org.apache.james.SearchConfiguration;
 import org.apache.james.jmap.draft.methods.integration.cucumber.ImapStepdefs;
 import org.apache.james.jmap.draft.methods.integration.cucumber.MainStepdefs;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
@@ -39,7 +39,6 @@ import org.apache.james.mailbox.store.extractor.DefaultTextExtractor;
 import org.apache.james.modules.TestDockerESMetricReporterModule;
 import org.apache.james.modules.TestJMAPServerModule;
 import org.apache.james.server.CassandraTruncateTableTask;
-import org.apache.james.server.core.configuration.Configuration;
 import org.junit.rules.TemporaryFolder;
 
 import com.github.fge.lambdas.runnable.ThrowingRunnable;
@@ -71,14 +70,14 @@ public class CassandraStepdefs {
         elasticSearch.start();
 
         mainStepdefs.messageIdFactory = new CassandraMessageId.Factory();
-        Configuration configuration = Configuration.builder()
+        CassandraJamesServerConfiguration configuration = CassandraJamesServerConfiguration.builder()
             .workingDirectory(temporaryFolder.newFolder())
             .configurationFromClasspath()
+            .searchConfiguration(SearchConfiguration.elasticSearch())
             .build();
 
-        mainStepdefs.jmapServer = GuiceJamesServer.forConfiguration(configuration)
-            .combineWith(ALL_BUT_JMX_CASSANDRA_MODULE)
-            .overrideWith(new TestJMAPServerModule(10))
+        mainStepdefs.jmapServer = CassandraJamesServerMain.createServer(configuration)
+            .overrideWith(new TestJMAPServerModule())
             .overrideWith(new TestDockerESMetricReporterModule(elasticSearch.getDockerEs().getHttpHost()))
             .overrideWith(elasticSearch.getModule())
             .overrideWith(cassandraServer.getModule())

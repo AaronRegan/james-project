@@ -18,16 +18,19 @@
  ****************************************************************/
 package org.apache.james.mailbox.maildir;
 
+import java.util.Optional;
+
 import org.apache.james.junit.TemporaryFolderExtension;
 import org.apache.james.mailbox.MailboxManagerTest;
+import org.apache.james.mailbox.SubscriptionManager;
 import org.apache.james.mailbox.events.EventBus;
 import org.apache.james.mailbox.store.StoreMailboxManager;
+import org.apache.james.mailbox.store.StoreSubscriptionManager;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class FullUserMaildirMailboxManagerTest extends MailboxManagerTest<StoreMailboxManager> {
+class FullUserMaildirMailboxManagerTest extends MailboxManagerTest<StoreMailboxManager> {
 
     @Disabled("Maildir is using DefaultMessageId which doesn't support full feature of a messageId, which is an essential" +
         " element of the Vault")
@@ -35,19 +38,24 @@ public class FullUserMaildirMailboxManagerTest extends MailboxManagerTest<StoreM
     class HookTests {
     }
 
-    @Nested
-    class BasicFeaturesTests extends MailboxManagerTest<StoreMailboxManager>.BasicFeaturesTests {
-        @Disabled("MAILBOX-389 Mailbox rename fails with Maildir")
-        @Test
-        protected void renameMailboxShouldChangeTheMailboxPathOfAMailbox() {
-        }
-    }
-
     @RegisterExtension
     TemporaryFolderExtension temporaryFolder = new TemporaryFolderExtension();
-    
+    Optional<StoreMailboxManager> mailboxManager = Optional.empty();
+
     @Override
     protected StoreMailboxManager provideMailboxManager() {
+        if (!mailboxManager.isPresent()) {
+            mailboxManager = Optional.of(createMailboxManager());
+        }
+        return mailboxManager.get();
+    }
+
+    @Override
+    protected SubscriptionManager provideSubscriptionManager() {
+        return new StoreSubscriptionManager(provideMailboxManager().getMapperFactory());
+    }
+
+    private StoreMailboxManager createMailboxManager() {
         try {
             return MaildirMailboxManagerProvider.createMailboxManager("/%fulluser", temporaryFolder.getTemporaryFolder().getTempDir());
         } catch (Exception e) {

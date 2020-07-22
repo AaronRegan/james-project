@@ -18,16 +18,20 @@
  ****************************************************************/
 package org.apache.james.mailbox.maildir;
 
+import java.util.Optional;
+
 import org.apache.james.junit.TemporaryFolderExtension;
 import org.apache.james.mailbox.MailboxManagerTest;
+import org.apache.james.mailbox.SubscriptionManager;
 import org.apache.james.mailbox.events.EventBus;
 import org.apache.james.mailbox.store.StoreMailboxManager;
+import org.apache.james.mailbox.store.StoreSubscriptionManager;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class DomainUserMaildirMailboxManagerTest extends MailboxManagerTest<StoreMailboxManager> {
+class DomainUserMaildirMailboxManagerTest extends MailboxManagerTest<StoreMailboxManager> {
 
     @Disabled("Maildir is using DefaultMessageId which doesn't support full feature of a messageId, which is an essential" +
         " element of the Vault")
@@ -41,15 +45,71 @@ public class DomainUserMaildirMailboxManagerTest extends MailboxManagerTest<Stor
         @Test
         protected void renameMailboxShouldChangeTheMailboxPathOfAMailbox() {
         }
+
+        @Disabled("MAILBOX-389 Mailbox rename fails with Maildir")
+        @Test
+        protected void renameMailboxByIdShouldChangeTheMailboxPathOfAMailbox() {
+        }
+
+        @Disabled("MAILBOX-389 Mailbox rename fails with Maildir")
+        @Test
+        protected void renameMailboxShouldChangeTheMailboxPathOfTheChildMailbox() {
+        }
+
+        @Disabled("MAILBOX-393 mailboxId support for mailDir is partial")
+        @Test
+        protected void user1ShouldBeAbleToDeleteSubmailboxByid() {
+        }
+
+        @Disabled("MAILBOX-393 mailboxId support for mailDir is partial")
+        @Test
+        protected void user1ShouldBeAbleToDeleteInboxById() {
+        }
+
+        @Disabled("JAMES-2993 mailboxId support for Maildir is partial")
+        @Test
+        protected void getMailboxByIdShouldReturnMailboxWhenBelongingToUser() {
+        }
+    }
+
+    @Nested
+    class MailboxNameLimitTests extends MailboxManagerTest<StoreMailboxManager>.MailboxNameLimitTests {
+        @Disabled("MAILBOX-389 Mailbox rename fails with Maildir")
+        @Test
+        protected void renamingMailboxByIdShouldNotThrowWhenNameWithoutEmptyHierarchicalLevel() {
+        }
+
+        @Disabled("MAILBOX-389 Mailbox rename fails with Maildir")
+        @Test
+        protected void renamingMailboxByIdShouldNotFailWhenLimitNameLength() {
+        }
+
+        @Disabled("MAILBOX-389 Mailbox rename fails with Maildir")
+        @Test
+        protected void renamingMailboxByIdShouldNotThrowWhenNameWithASingleToBeNormalizedTrailingDelimiter() {
+        }
     }
 
     @RegisterExtension
     TemporaryFolderExtension temporaryFolder = new TemporaryFolderExtension();
-    
+    Optional<StoreMailboxManager> mailboxManager = Optional.empty();
+
     @Override
     protected StoreMailboxManager provideMailboxManager() {
+        if (!mailboxManager.isPresent()) {
+            mailboxManager = Optional.of(createMailboxManager());
+        }
+        return mailboxManager.get();
+    }
+
+    @Override
+    protected SubscriptionManager provideSubscriptionManager() {
+        return new StoreSubscriptionManager(provideMailboxManager().getMapperFactory());
+    }
+
+    private StoreMailboxManager createMailboxManager() {
         try {
-            return MaildirMailboxManagerProvider.createMailboxManager("/%domain/%user", temporaryFolder.getTemporaryFolder().getTempDir());
+            return MaildirMailboxManagerProvider.createMailboxManager("/%fulluser", temporaryFolder.getTemporaryFolder().getTempDir());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

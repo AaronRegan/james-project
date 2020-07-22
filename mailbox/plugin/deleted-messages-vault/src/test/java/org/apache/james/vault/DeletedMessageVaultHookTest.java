@@ -31,9 +31,10 @@ import java.util.List;
 
 import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.memory.MemoryBlobStore;
+import org.apache.james.blob.memory.MemoryDumbBlobStore;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.MaybeSender;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageIdManager;
@@ -41,14 +42,14 @@ import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
 import org.apache.james.mailbox.model.ComposedMessageId;
-import org.apache.james.mailbox.model.FetchGroupImpl;
+import org.apache.james.mailbox.model.FetchGroup;
 import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.SearchQuery;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.mime4j.dom.Message;
 import org.apache.james.vault.blob.BlobStoreDeletedMessageVault;
 import org.apache.james.vault.blob.BucketNameGenerator;
@@ -67,12 +68,12 @@ class DeletedMessageVaultHookTest {
     private static final String ALICE_ADDRESS = "alice@james.com";
     private static final String BOB_ADDRESS = "bob@james.com";
     private static final String TEST_ADDRESS = "test@james.com";
-    private static final User ALICE = User.fromUsername(ALICE_ADDRESS);
-    private static final User BOB = User.fromUsername(BOB_ADDRESS);
+    private static final Username ALICE = Username.of(ALICE_ADDRESS);
+    private static final Username BOB = Username.of(BOB_ADDRESS);
     private static final String MESSAGE_BODY = "testmail";
 
-    private static final MailboxPath MAILBOX_ALICE_ONE = MailboxPath.forUser(ALICE_ADDRESS, "ALICE_ONE");
-    private static final MailboxPath MAILBOX_BOB_ONE = MailboxPath.forUser(BOB_ADDRESS, "BOB_ONE");
+    private static final MailboxPath MAILBOX_ALICE_ONE = MailboxPath.forUser(ALICE, "ALICE_ONE");
+    private static final MailboxPath MAILBOX_BOB_ONE = MailboxPath.forUser(BOB, "BOB_ONE");
 
     private MailboxManager mailboxManager;
     private MessageIdManager messageIdManager;
@@ -83,11 +84,11 @@ class DeletedMessageVaultHookTest {
     private MailboxSession bobSession;
     private SearchQuery searchQuery;
 
-    private DeletedMessage buildDeletedMessage(List<MailboxId> mailboxIds, MessageId messageId, User user, long messageSize) throws Exception {
+    private DeletedMessage buildDeletedMessage(List<MailboxId> mailboxIds, MessageId messageId, Username username, long messageSize) throws Exception {
         return DeletedMessage.builder()
             .messageId(messageId)
             .originMailboxes(mailboxIds)
-            .user(user)
+            .user(username)
             .deliveryDate(DELIVERY_DATE)
             .deletionDate(DELETION_DATE)
             .sender(MaybeSender.getMailSender(ALICE_ADDRESS))
@@ -101,14 +102,15 @@ class DeletedMessageVaultHookTest {
     private ComposedMessageId appendMessage(MessageManager messageManager) throws Exception {
         return messageManager.appendMessage(MessageManager.AppendCommand.builder()
                 .withInternalDate(INTERNAL_DATE)
-                .build(mailContent), aliceSession);
+                .build(mailContent), aliceSession)
+            .getId();
     }
 
     @BeforeEach
     void setUp() throws Exception {
         clock = Clock.fixed(DELETION_DATE.toInstant(), ZoneOffset.UTC);
-        messageVault = new BlobStoreDeletedMessageVault(new NoopMetricFactory(), new MemoryDeletedMessageMetadataVault(),
-            new MemoryBlobStore(new HashBlobId.Factory()), new BucketNameGenerator(clock), clock,
+        messageVault = new BlobStoreDeletedMessageVault(new RecordingMetricFactory(), new MemoryDeletedMessageMetadataVault(),
+            new MemoryBlobStore(new HashBlobId.Factory(), new MemoryDumbBlobStore()), new BucketNameGenerator(clock), clock,
             RetentionConfiguration.DEFAULT);
 
         DeletedMessageConverter deletedMessageConverter = new DeletedMessageConverter();
@@ -135,11 +137,10 @@ class DeletedMessageVaultHookTest {
             .setDate(INTERNAL_DATE)
             .build();
 
-        searchQuery = new SearchQuery();
-        searchQuery.andCriteria(SearchQuery.internalDateOn(INTERNAL_DATE, SearchQuery.DateResolution.Second));
+        searchQuery = SearchQuery.of(SearchQuery.internalDateOn(INTERNAL_DATE, SearchQuery.DateResolution.Second));
 
-        aliceSession = mailboxManager.createSystemSession(ALICE_ADDRESS);
-        bobSession = mailboxManager.createSystemSession(BOB_ADDRESS);
+        aliceSession = mailboxManager.createSystemSession(ALICE);
+        bobSession = mailboxManager.createSystemSession(BOB);
     }
 
     @Test
@@ -164,7 +165,7 @@ class DeletedMessageVaultHookTest {
 
         mailboxManager.setRights(MAILBOX_ALICE_ONE,
             MailboxACL.EMPTY.apply(MailboxACL.command()
-                .forUser(BOB_ADDRESS)
+                .forUser(BOB)
                 .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.DeleteMessages, MailboxACL.Right.PerformExpunge)
                 .asAddition()),
             aliceSession);
@@ -188,7 +189,7 @@ class DeletedMessageVaultHookTest {
 
         mailboxManager.setRights(MAILBOX_ALICE_ONE,
             MailboxACL.EMPTY.apply(MailboxACL.command()
-                .forUser(BOB_ADDRESS)
+                .forUser(BOB)
                 .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.DeleteMessages, MailboxACL.Right.PerformExpunge)
                 .asAddition()),
             aliceSession);
@@ -213,7 +214,7 @@ class DeletedMessageVaultHookTest {
 
         mailboxManager.setRights(MAILBOX_ALICE_ONE,
             MailboxACL.EMPTY.apply(MailboxACL.command()
-                .forUser(BOB_ADDRESS)
+                .forUser(BOB)
                 .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.DeleteMessages, MailboxACL.Right.PerformExpunge)
                 .asAddition()),
             aliceSession);
@@ -239,7 +240,7 @@ class DeletedMessageVaultHookTest {
 
         mailboxManager.setRights(MAILBOX_ALICE_ONE,
             MailboxACL.EMPTY.apply(MailboxACL.command()
-                .forUser(BOB_ADDRESS)
+                .forUser(BOB)
                 .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.DeleteMessages, MailboxACL.Right.PerformExpunge)
                 .asAddition()),
             aliceSession);
@@ -263,7 +264,7 @@ class DeletedMessageVaultHookTest {
 
         mailboxManager.setRights(MAILBOX_ALICE_ONE,
             MailboxACL.EMPTY.apply(MailboxACL.command()
-                .forUser(BOB_ADDRESS)
+                .forUser(BOB)
                 .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.DeleteMessages, MailboxACL.Right.PerformExpunge)
                 .asAddition()),
             aliceSession);
@@ -289,7 +290,7 @@ class DeletedMessageVaultHookTest {
 
         mailboxManager.setRights(MAILBOX_ALICE_ONE,
             MailboxACL.EMPTY.apply(MailboxACL.command()
-                .forUser(BOB_ADDRESS)
+                .forUser(BOB)
                 .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.DeleteMessages, MailboxACL.Right.PerformExpunge)
                 .asAddition()),
             aliceSession);
@@ -303,7 +304,7 @@ class DeletedMessageVaultHookTest {
     }
 
     private long messageSize(MessageManager messageManager, ComposedMessageId composedMessageId) throws MailboxException {
-        return messageManager.getMessages(MessageRange.one(composedMessageId.getUid()), FetchGroupImpl.MINIMAL, aliceSession)
+        return messageManager.getMessages(MessageRange.one(composedMessageId.getUid()), FetchGroup.MINIMAL, aliceSession)
             .next()
             .getSize();
     }

@@ -19,8 +19,7 @@
 
 package org.apache.james.dlp.eventsourcing.cassandra;
 
-import org.apache.james.backends.cassandra.CassandraCluster;
-import org.apache.james.backends.cassandra.DockerCassandraExtension;
+import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.dlp.api.DLPConfigurationStore;
 import org.apache.james.dlp.eventsourcing.EventSourcingDLPConfigurationStore;
 import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStore;
@@ -35,51 +34,44 @@ import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
 
-import com.google.common.collect.ImmutableSet;
-
 public class CassandraEventSourcingDLPConfigurationStoreExtension implements BeforeAllCallback, AfterAllCallback, AfterEachCallback, ParameterResolver {
 
-    private final DockerCassandraExtension dockerCassandraExtension;
-    private CassandraCluster cassandra;
+    private final CassandraClusterExtension cassandraExtension;
 
     public CassandraEventSourcingDLPConfigurationStoreExtension() {
-        dockerCassandraExtension = new DockerCassandraExtension();
+        cassandraExtension = new CassandraClusterExtension(CassandraEventStoreModule.MODULE());
     }
 
     @Override
     public void beforeAll(ExtensionContext context) throws Exception {
-        dockerCassandraExtension.beforeAll(context);
-        cassandra = CassandraCluster.create(
-            CassandraEventStoreModule.MODULE,
-            dockerCassandraExtension.getDockerCassandra().getHost());
+        cassandraExtension.beforeAll(context);
     }
 
     @Override
     public void afterEach(ExtensionContext context) {
-        cassandra.clearTables();
+        cassandraExtension.afterEach(context);
     }
 
     @Override
     public void afterAll(ExtensionContext context) throws Exception {
-        cassandra.closeCluster();
-        dockerCassandraExtension.afterAll(context);
+        cassandraExtension.afterAll(context);
     }
 
     @Override
     public boolean supportsParameter(ParameterContext parameterContext, ExtensionContext extensionContext) throws ParameterResolutionException {
-        return (parameterContext.getParameter().getType() == DLPConfigurationStore.class);
+        return parameterContext.getParameter().getType() == DLPConfigurationStore.class;
     }
 
     @Override
     public Object resolveParameter(ParameterContext parameterContext, ExtensionContext extensionContext) throws ParameterResolutionException {
-        JsonEventSerializer jsonEventSerializer = new JsonEventSerializer(
-            ImmutableSet.of(
-                DLPConfigurationModules.DLP_CONFIGURATION_STORE,
-                DLPConfigurationModules.DLP_CONFIGURATION_CLEAR));
+        JsonEventSerializer jsonEventSerializer = JsonEventSerializer
+            .forModules(DLPConfigurationModules.DLP_CONFIGURATION_STORE, DLPConfigurationModules.DLP_CONFIGURATION_CLEAR)
+            .withoutNestedType();
 
         EventStoreDao eventStoreDao = new EventStoreDao(
-            cassandra.getConf(),
-            jsonEventSerializer);
+            cassandraExtension.getCassandraCluster().getConf(),
+            jsonEventSerializer,
+            cassandraExtension.getCassandraConsistenciesConfiguration());
 
         return new EventSourcingDLPConfigurationStore(new CassandraEventStore(eventStoreDao));
     }

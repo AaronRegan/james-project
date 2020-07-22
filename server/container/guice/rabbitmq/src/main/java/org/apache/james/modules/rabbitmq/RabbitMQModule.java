@@ -25,15 +25,21 @@ import javax.inject.Singleton;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
-import org.apache.james.backend.rabbitmq.RabbitMQChannelPool;
-import org.apache.james.backend.rabbitmq.RabbitMQConfiguration;
-import org.apache.james.backend.rabbitmq.RabbitMQHealthCheck;
-import org.apache.james.backend.rabbitmq.SimpleChannelPool;
 import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.backends.rabbitmq.RabbitMQConfiguration;
+import org.apache.james.backends.rabbitmq.RabbitMQHealthCheck;
+import org.apache.james.backends.rabbitmq.ReactorRabbitMQChannelPool;
+import org.apache.james.backends.rabbitmq.ReceiverProvider;
+import org.apache.james.backends.rabbitmq.SimpleConnectionPool;
 import org.apache.james.core.healthcheck.HealthCheck;
+import org.apache.james.eventsourcing.Event;
+import org.apache.james.eventsourcing.eventstore.cassandra.dto.EventDTO;
 import org.apache.james.eventsourcing.eventstore.cassandra.dto.EventDTOModule;
 import org.apache.james.queue.api.MailQueueFactory;
+import org.apache.james.queue.api.ManageableMailQueue;
+import org.apache.james.queue.rabbitmq.RabbitMQMailQueue;
 import org.apache.james.queue.rabbitmq.RabbitMQMailQueueFactory;
+import org.apache.james.queue.rabbitmq.view.RabbitMQMailQueueConfiguration;
 import org.apache.james.queue.rabbitmq.view.api.MailQueueView;
 import org.apache.james.queue.rabbitmq.view.cassandra.BrowseStartDAO;
 import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueBrowser;
@@ -56,6 +62,10 @@ import com.google.inject.Scopes;
 import com.google.inject.TypeLiteral;
 import com.google.inject.multibindings.Multibinder;
 
+import reactor.rabbitmq.RabbitFlux;
+import reactor.rabbitmq.ReceiverOptions;
+import reactor.rabbitmq.Sender;
+
 public class RabbitMQModule extends AbstractModule {
 
     public static final String RABBITMQ_CONFIGURATION_NAME = "rabbitmq";
@@ -71,14 +81,11 @@ public class RabbitMQModule extends AbstractModule {
         bind(CassandraMailQueueMailDelete.class).in(Scopes.SINGLETON);
         bind(CassandraMailQueueMailStore.class).in(Scopes.SINGLETON);
 
-        bind(SimpleChannelPool.class).in(Scopes.SINGLETON);
-        bind(RabbitMQChannelPool.class).to(SimpleChannelPool.class);
-
         Multibinder<CassandraModule> cassandraModuleBinder = Multibinder.newSetBinder(binder(), CassandraModule.class);
         cassandraModuleBinder.addBinding().toInstance(CassandraMailQueueViewModule.MODULE);
 
         bind(EventsourcingConfigurationManagement.class).in(Scopes.SINGLETON);
-        Multibinder<EventDTOModule<?, ?>> eventDTOModuleBinder = Multibinder.newSetBinder(binder(), new TypeLiteral<EventDTOModule<?, ?>>() {});
+        Multibinder<EventDTOModule<? extends Event, ? extends EventDTO>> eventDTOModuleBinder = Multibinder.newSetBinder(binder(), new TypeLiteral<EventDTOModule<? extends Event, ? extends EventDTO>>() {});
         eventDTOModuleBinder.addBinding().toInstance(CassandraMailQueueViewConfigurationModule.MAIL_QUEUE_VIEW_CONFIGURATION);
 
         Multibinder.newSetBinder(binder(), HealthCheck.class).addBinding().to(RabbitMQHealthCheck.class);
@@ -86,13 +93,25 @@ public class RabbitMQModule extends AbstractModule {
 
     @Provides
     @Singleton
-    public MailQueueView.Factory bindMailQueueViewFactory(CassandraMailQueueView.Factory cassandraMailQueueViewFactory) {
+    public MailQueueView.Factory provideMailQueueViewFactory(CassandraMailQueueView.Factory cassandraMailQueueViewFactory) {
         return cassandraMailQueueViewFactory;
     }
 
     @Provides
     @Singleton
-    public MailQueueFactory<?> bindRabbitMQQueueFactory(RabbitMQMailQueueFactory queueFactory) {
+    public MailQueueFactory<RabbitMQMailQueue> provideRabbitMQMailQueueFactoryProxy(RabbitMQMailQueueFactory queueFactory) {
+        return queueFactory;
+    }
+
+    @Provides
+    @Singleton
+    public MailQueueFactory<? extends ManageableMailQueue> provideRabbitMQManageableMailQueueFactory(MailQueueFactory<RabbitMQMailQueue> queueFactory) {
+        return queueFactory;
+    }
+
+    @Provides
+    @Singleton
+    public MailQueueFactory<?> provideRabbitMQMailQueueFactory(MailQueueFactory<RabbitMQMailQueue> queueFactory) {
         return queueFactory;
     }
 
@@ -118,5 +137,31 @@ public class RabbitMQModule extends AbstractModule {
     @Singleton
     private CassandraMailQueueViewConfiguration getMailQueueViewConfiguration(@Named(RABBITMQ_CONFIGURATION_NAME) Configuration configuration) {
         return CassandraMailQueueViewConfiguration.from(configuration);
+    }
+
+    @Provides
+    @Singleton
+    private RabbitMQMailQueueConfiguration getMailQueueSizeConfiguration(@Named(RABBITMQ_CONFIGURATION_NAME) Configuration configuration) {
+        return RabbitMQMailQueueConfiguration.from(configuration);
+    }
+
+    @Provides
+    @Singleton
+    ReactorRabbitMQChannelPool provideReactorRabbitMQChannelPool(SimpleConnectionPool simpleConnectionPool) {
+        ReactorRabbitMQChannelPool channelPool = new ReactorRabbitMQChannelPool(simpleConnectionPool);
+        channelPool.start();
+        return channelPool;
+    }
+
+    @Provides
+    @Singleton
+    public Sender provideRabbitMQSender(ReactorRabbitMQChannelPool channelPool) {
+        return channelPool.getSender();
+    }
+
+    @Provides
+    @Singleton
+    public ReceiverProvider provideRabbitMQReceiver(SimpleConnectionPool simpleConnectionPool) {
+        return () -> RabbitFlux.createReceiver(new ReceiverOptions().connectionMono(simpleConnectionPool.getResilientConnection()));
     }
 }

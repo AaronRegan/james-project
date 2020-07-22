@@ -18,6 +18,8 @@
  ****************************************************************/
 package org.apache.mailbox.tools.indexer;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 
 import javax.inject.Inject;
@@ -26,13 +28,9 @@ import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.task.TaskType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class MessageIdReIndexingTask implements Task {
-    private static final Logger LOGGER = LoggerFactory.getLogger(MessageIdReIndexingTask.class);
-
-    public static final TaskType TYPE = TaskType.of("MessageIdReIndexingTask");
+    public static final TaskType TYPE = TaskType.of("messageId-reindexing");
 
     public static class Factory {
         private ReIndexerPerformer reIndexerPerformer;
@@ -40,6 +38,7 @@ public class MessageIdReIndexingTask implements Task {
 
         @Inject
         public Factory(ReIndexerPerformer reIndexerPerformer, MessageId.Factory messageIdFactory) {
+            this.reIndexerPerformer = reIndexerPerformer;
             this.messageIdFactory = messageIdFactory;
         }
 
@@ -51,30 +50,35 @@ public class MessageIdReIndexingTask implements Task {
 
     public static final class AdditionalInformation implements TaskExecutionDetails.AdditionalInformation {
         private final MessageId messageId;
+        private final Instant timestamp;
 
-        AdditionalInformation(MessageId messageId) {
+        AdditionalInformation(MessageId messageId, Instant timestamp) {
             this.messageId = messageId;
+            this.timestamp = timestamp;
         }
 
         public String getMessageId() {
             return messageId.serialize();
+        }
+
+        @Override
+        public Instant timestamp() {
+            return timestamp;
         }
     }
 
 
     private ReIndexerPerformer reIndexerPerformer;
     private final MessageId messageId;
-    private final AdditionalInformation additionalInformation;
 
     MessageIdReIndexingTask(ReIndexerPerformer reIndexerPerformer, MessageId messageId) {
         this.reIndexerPerformer = reIndexerPerformer;
         this.messageId = messageId;
-        this.additionalInformation = new AdditionalInformation(messageId);
     }
 
     @Override
     public Result run() {
-        return reIndexerPerformer.handleMessageIdReindexing(messageId);
+        return reIndexerPerformer.reIndexMessageId(messageId).block();
     }
 
     @Override
@@ -88,6 +92,6 @@ public class MessageIdReIndexingTask implements Task {
 
     @Override
     public Optional<TaskExecutionDetails.AdditionalInformation> details() {
-        return Optional.of(additionalInformation);
+        return Optional.of(new AdditionalInformation(messageId, Clock.systemUTC().instant()));
     }
 }

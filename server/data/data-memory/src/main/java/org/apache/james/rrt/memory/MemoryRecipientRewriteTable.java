@@ -28,13 +28,12 @@ import java.util.stream.Stream;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.core.Domain;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.rrt.lib.AbstractRecipientRewriteTable;
 import org.apache.james.rrt.lib.Mapping;
 import org.apache.james.rrt.lib.MappingSource;
 import org.apache.james.rrt.lib.Mappings;
 import org.apache.james.rrt.lib.MappingsImpl;
-import org.apache.james.util.OptionalUtils;
 
 import com.github.steveash.guavate.Guavate;
 import com.google.common.base.Objects;
@@ -101,9 +100,8 @@ public class MemoryRecipientRewriteTable extends AbstractRecipientRewriteTable {
 
     @Override
     protected Mappings mapAddress(String user, Domain domain) {
-        return OptionalUtils.orSuppliers(
-            () -> retrieveMappings(MappingSource.fromUser(User.fromLocalPartWithDomain(user, domain))),
-            () -> retrieveMappings(MappingSource.fromDomain(domain)))
+        return retrieveMappings(MappingSource.fromUser(Username.fromLocalPartWithDomain(user, domain)))
+            .or(() -> retrieveMappings(MappingSource.fromDomain(domain)))
             .orElse(MappingsImpl.empty());
     }
 

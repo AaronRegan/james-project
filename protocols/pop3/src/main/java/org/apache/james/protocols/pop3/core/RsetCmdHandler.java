@@ -24,8 +24,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.protocols.api.ProtocolSession.State;
 import org.apache.james.protocols.api.Request;
 import org.apache.james.protocols.api.Response;
@@ -44,16 +42,6 @@ import com.google.common.collect.ImmutableSet;
 public class RsetCmdHandler implements CommandHandler<POP3Session> {
     private static final Collection<String> COMMANDS = ImmutableSet.of("RSET");
     private static final Logger LOGGER = LoggerFactory.getLogger(RsetCmdHandler.class);
-
-    @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
-    }
 
     /**
      * Handler method called upon receipt of a RSET command. Calls stat() to
@@ -81,7 +69,7 @@ public class RsetCmdHandler implements CommandHandler<POP3Session> {
             List<MessageMetaData> messages = session.getUserMailbox().getMessages();
 
             session.setAttachment(POP3Session.UID_LIST, messages, State.Transaction);
-            session.setAttachment(POP3Session.DELETED_UID_LIST, new ArrayList<String>(), State.Transaction);
+            session.setAttachment(POP3Session.DELETED_UID_LIST, new ArrayList<>(), State.Transaction);
         } catch (IOException e) {
             // In the event of an exception being thrown there may or may not be
             // anything in userMailbox

@@ -19,6 +19,7 @@
 
 package org.apache.james.blob.objectstorage;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -33,7 +34,7 @@ import org.jclouds.http.HttpResponseException;
 
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import reactor.retry.Retry;
+import reactor.util.retry.Retry;
 
 public class StreamCompatibleBlobPutter implements BlobPutter {
 
@@ -50,33 +51,32 @@ public class StreamCompatibleBlobPutter implements BlobPutter {
     }
 
     @Override
-    public void putDirectly(ObjectStorageBucketName bucketName, Blob blob) {
-        Mono.fromRunnable(() -> blobStore.putBlob(bucketName.asString(), blob))
+    public Mono<Void> putDirectly(ObjectStorageBucketName bucketName, Blob blob) {
+        return Mono.fromRunnable(() -> blobStore.putBlob(bucketName.asString(), blob))
             .publishOn(Schedulers.elastic())
-            .retryWhen(Retry.onlyIf(retryContext -> needToCreateBucket(retryContext.exception(), bucketName))
-                .exponentialBackoff(FIRST_BACK_OFF, FOREVER)
-                .withBackoffScheduler(Schedulers.elastic())
-                .retryMax(MAX_RETRIES)
-                .doOnRetry(retryContext -> blobStore.createContainerInLocation(DEFAULT_LOCATION, bucketName.asString())))
-            .retryWhen(Retry.onlyIf(RetryContext -> isPutMethod(RetryContext.exception()))
-                .withBackoffScheduler(Schedulers.elastic())
-                .exponentialBackoff(FIRST_BACK_OFF, FOREVER)
-                .retryMax(RETRY_ONE_LAST_TIME_ON_CONCURRENT_SAVING))
-            .block();
+            .retryWhen(Retry
+                .backoff(MAX_RETRIES, FIRST_BACK_OFF)
+                .filter(throwable -> needToCreateBucket(throwable, bucketName))
+                .doBeforeRetry(retryContext -> blobStore.createContainerInLocation(DEFAULT_LOCATION, bucketName.asString())))
+            .retryWhen(Retry
+                    .backoff(RETRY_ONE_LAST_TIME_ON_CONCURRENT_SAVING, FIRST_BACK_OFF)
+                    .filter(this::isPutMethod)
+                    .scheduler(Schedulers.elastic()))
+            .then();
     }
 
     @Override
-    public BlobId putAndComputeId(ObjectStorageBucketName bucketName, Blob initialBlob, Supplier<BlobId> blobIdSupplier) {
-        putDirectly(bucketName, initialBlob);
-        BlobId finalId = blobIdSupplier.get();
-        updateBlobId(bucketName, initialBlob.getMetadata().getName(), finalId.asString());
-        return finalId;
+    public Mono<BlobId> putAndComputeId(ObjectStorageBucketName bucketName, Blob initialBlob, Supplier<BlobId> blobIdSupplier) {
+        return putDirectly(bucketName, initialBlob)
+            .then(Mono.fromCallable(blobIdSupplier::get))
+            .map(blobId -> updateBlobId(bucketName, initialBlob.getMetadata().getName(), blobId));
     }
 
-    private void updateBlobId(ObjectStorageBucketName bucketName, String from, String to) {
+    private BlobId updateBlobId(ObjectStorageBucketName bucketName, String from, BlobId to) {
         String bucketNameAsString = bucketName.asString();
-        blobStore.copyBlob(bucketNameAsString, from, bucketNameAsString, to, CopyOptions.NONE);
+        blobStore.copyBlob(bucketNameAsString, from, bucketNameAsString, to.asString(), CopyOptions.NONE);
         blobStore.removeBlob(bucketNameAsString, from);
+        return to;
     }
 
     private boolean needToCreateBucket(Throwable throwable, ObjectStorageBucketName bucketName) {
@@ -111,5 +111,10 @@ public class StreamCompatibleBlobPutter implements BlobPutter {
         }
 
         return Optional.empty();
+    }
+
+    @Override
+    public void close() throws IOException {
+        // No resource to clean up
     }
 }

@@ -40,10 +40,13 @@
         <verifyIdentity>{{verifyIdentity}}</verifyIdentity>
         <maxmessagesize>{{maxmessagesize}}</maxmessagesize>
         <addressBracketsEnforcement>{{bracketEnforcement}}</addressBracketsEnforcement>
-        <smtpGreeting>JAMES Linagora's SMTP awesome Server</smtpGreeting>
+        <smtpGreeting>Apache JAMES awesome SMTP Server</smtpGreeting>
         <handlerchain>
             <handler class="org.apache.james.smtpserver.fastfail.ValidRcptHandler"/>
             <handler class="org.apache.james.smtpserver.CoreCmdHandlerLoader"/>
+            {{#hooks}}
+            <handler class="{{hookFqcn}}"/>
+            {{/hooks}}
         </handlerchain>
     </smtpserver>
     <smtpserver enabled="true">
@@ -70,10 +73,13 @@
         <verifyIdentity>false</verifyIdentity>
         <maxmessagesize>{{maxmessagesize}}</maxmessagesize>
         <addressBracketsEnforcement>{{bracketEnforcement}}</addressBracketsEnforcement>
-        <smtpGreeting>JAMES Linagora's SMTP awesome Server</smtpGreeting>
+        <smtpGreeting>Apache JAMES awesome SMTP Server</smtpGreeting>
         <handlerchain>
             <handler class="org.apache.james.smtpserver.fastfail.ValidRcptHandler"/>
             <handler class="org.apache.james.smtpserver.CoreCmdHandlerLoader"/>
+            {{#hooks}}
+            <handler class="{{hookFqcn}}"/>
+            {{/hooks}}
         </handlerchain>
     </smtpserver>
 </smtpservers>

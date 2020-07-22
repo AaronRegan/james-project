@@ -130,6 +130,7 @@
                         <item name="Mail Repository Stores" href="/server/config-mailrepositorystore.html" />
                         <item name="Mailbox" href="/server/config-mailbox.html" />
                         <item name="Mailet Container" href="/server/config-mailetcontainer.html" />
+                        <item name="Periodical Health Checks" href="/server/config-healthcheck.html" />
                         <item name="POP3" href="/server/config-pop3.html" />
                         <item name="Quota" href="/server/config-quota.html" />
                         <item name="RabbitMQ" href="/server/config-rabbitmq.html" />
@@ -146,6 +147,7 @@
                         <item name="Command line" href="/server/manage-cli.html" />
                         <item name="Metrics" href="/server/metrics.html" />
                         <item name="WebAdmin" href="/server/manage-webadmin.html" />
+                        <item name="Distributed James" href="/server/manage-guice-distributed-james.html" />
                     </item>
                     <item name="6. Monitor" href="/server/monitor.html" collapse="true" >
                         <item name="Folders" href="/server/monitor-folders.html" />
@@ -226,7 +228,6 @@
                 </item>
                 <item name="Issue Tracker" href="https://issues.apache.org/jira/browse/MPT" />
                 <item name='Main Library' href='/mpt/main'/>
-                <item name='AntLib' href='/mpt/antlib'/>
                 <item name='Application' href='/mpt/app'/>
                 <item name="Download releases" href="http://james.apache.org/download.cgi#Apache_MPT" />
             </item>

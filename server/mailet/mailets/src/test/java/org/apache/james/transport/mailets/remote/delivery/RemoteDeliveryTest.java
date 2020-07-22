@@ -34,7 +34,7 @@ import org.apache.james.core.MailAddress;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.domainlist.lib.DomainListConfiguration;
 import org.apache.james.domainlist.memory.MemoryDomainList;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.queue.api.MailPrioritySupport;
 import org.apache.james.queue.api.MailQueueFactory;
 import org.apache.james.queue.api.ManageableMailQueue;
@@ -99,13 +99,13 @@ public class RemoteDeliveryTest {
 
     @Before
     public void setUp() throws ConfigurationException {
-        MailQueueFactory<ManageableMailQueue> queueFactory = new MemoryMailQueueFactory(new RawMailQueueItemDecoratorFactory());
-        mailQueue = queueFactory.createQueue(RemoteDeliveryConfiguration.OUTGOING);
+        MailQueueFactory<? extends ManageableMailQueue> queueFactory = new MemoryMailQueueFactory(new RawMailQueueItemDecoratorFactory());
+        mailQueue = queueFactory.createQueue(RemoteDeliveryConfiguration.DEFAULT_OUTGOING_QUEUE_NAME);
         DNSService dnsService = mock(DNSService.class);
         MemoryDomainList domainList = new MemoryDomainList(dnsService);
         domainList.configure(DomainListConfiguration.builder().defaultDomain(JAMES_APACHE_ORG_DOMAIN));
         remoteDelivery = new RemoteDelivery(dnsService, domainList,
-            queueFactory, new NoopMetricFactory(), RemoteDelivery.ThreadState.DO_NOT_START_THREADS);
+            queueFactory, new RecordingMetricFactory(), RemoteDelivery.ThreadState.DO_NOT_START_THREADS);
     }
 
     @Test

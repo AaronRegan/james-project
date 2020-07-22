@@ -20,10 +20,11 @@
 package org.apache.james.imap.decode.parser;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -33,10 +34,11 @@ import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.UidRange;
 import org.apache.james.imap.api.message.request.DayMonthYear;
 import org.apache.james.imap.api.message.request.SearchKey;
+import org.apache.james.imap.api.message.response.StatusResponseFactory;
+import org.apache.james.imap.decode.DecodingException;
 import org.apache.james.imap.decode.ImapRequestLineReader;
 import org.apache.james.imap.decode.ImapRequestStreamLineReader;
 import org.apache.james.mailbox.MessageUid;
-import org.apache.james.protocols.imap.DecodingException;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -68,7 +70,7 @@ public class SearchCommandParserAndParenthesesTest {
     public static Input sequence() {
         IdRange[] range = { new IdRange(100, Long.MAX_VALUE), new IdRange(110),
                 new IdRange(200, 201), new IdRange(400, Long.MAX_VALUE) };
-        SearchKey key = SearchKey.buildSequenceSet(IdRange.mergeRanges(Arrays.asList(range)).toArray(new IdRange[0]));
+        SearchKey key = SearchKey.buildSequenceSet(IdRange.mergeRanges(Arrays.asList(range)).toArray(IdRange[]::new));
         return new Input("*:100,110,200:201,400:*", key);
     }
 
@@ -79,7 +81,7 @@ public class SearchCommandParserAndParenthesesTest {
                 new UidRange(MessageUid.of(200), MessageUid.of(201)), 
                 new UidRange(MessageUid.of(400), MessageUid.MAX_VALUE) 
                 };
-        SearchKey key = SearchKey.buildUidSet(UidRange.mergeRanges(Arrays.asList(range)).toArray(new UidRange[0]));
+        SearchKey key = SearchKey.buildUidSet(UidRange.mergeRanges(Arrays.asList(range)).toArray(UidRange[]::new));
         return new Input("UID *:100,110,200:201,400:*", key);
     }
 
@@ -151,7 +153,7 @@ public class SearchCommandParserAndParenthesesTest {
 
     @Before
     public void setUp() throws Exception {
-        parser = new SearchCommandParser();
+        parser = new SearchCommandParser(mock(StatusResponseFactory.class));
         command = ImapCommand.anyStateCommand("Command");
     }
 
@@ -182,11 +184,11 @@ public class SearchCommandParserAndParenthesesTest {
         check(and(top, false));
     }
 
-    private void check(Input in) throws UnsupportedEncodingException,
-            DecodingException {
+    private void check(Input in) throws
+        DecodingException {
         String input = in.input + "\r\n";
         ImapRequestLineReader reader = new ImapRequestStreamLineReader(
-                new ByteArrayInputStream(input.getBytes("US-ASCII")),
+                new ByteArrayInputStream(input.getBytes(StandardCharsets.US_ASCII)),
                 new ByteArrayOutputStream());
 
         final SearchKey result = parser.decode(null, reader);

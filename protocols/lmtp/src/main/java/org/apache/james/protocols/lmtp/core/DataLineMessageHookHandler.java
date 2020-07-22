@@ -27,7 +27,7 @@ import org.apache.james.protocols.api.Response;
 import org.apache.james.protocols.api.handler.WiringException;
 import org.apache.james.protocols.lmtp.LMTPMultiResponse;
 import org.apache.james.protocols.lmtp.hook.DeliverToRecipientHook;
-import org.apache.james.protocols.smtp.MailEnvelopeImpl;
+import org.apache.james.protocols.smtp.MailEnvelope;
 import org.apache.james.protocols.smtp.SMTPResponse;
 import org.apache.james.protocols.smtp.SMTPRetCode;
 import org.apache.james.protocols.smtp.SMTPSession;
@@ -36,8 +36,6 @@ import org.apache.james.protocols.smtp.dsn.DSNStatus;
 
 /**
  * {@link DataLineMessageHookHandler} which will use the wired {@link DeliverToRecipientHook}'s to deliver the message to all the valid recipients.
- * 
- *
  */
 public class DataLineMessageHookHandler extends org.apache.james.protocols.smtp.core.DataLineMessageHookHandler {
 
@@ -45,7 +43,7 @@ public class DataLineMessageHookHandler extends org.apache.james.protocols.smtp.
 
     
     @Override
-    protected Response processExtensions(SMTPSession session, MailEnvelopeImpl mail) {
+    protected Response processExtensions(SMTPSession session, MailEnvelope mail) {
         LMTPMultiResponse mResponse = null;
 
         for (MailAddress recipient : mail.getRecipients()) {

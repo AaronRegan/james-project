@@ -19,6 +19,8 @@
 
 package org.apache.james.vault.blob;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -33,19 +35,22 @@ import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.task.TaskType;
 
 import com.github.steveash.guavate.Guavate;
+import com.google.common.collect.ImmutableSet;
+
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
 public class BlobStoreVaultGarbageCollectionTask implements Task {
 
     public static class AdditionalInformation implements TaskExecutionDetails.AdditionalInformation {
-
         private final ZonedDateTime beginningOfRetentionPeriod;
-        private final Collection<BucketName> deletedBuckets;
+        private final ImmutableSet<BucketName> deletedBuckets;
+        private final Instant timestamp;
 
-        AdditionalInformation(ZonedDateTime beginningOfRetentionPeriod, Collection<BucketName> deletedBuckets) {
+        AdditionalInformation(ZonedDateTime beginningOfRetentionPeriod, ImmutableSet<BucketName> deletedBuckets, Instant timestamp) {
             this.beginningOfRetentionPeriod = beginningOfRetentionPeriod;
             this.deletedBuckets = deletedBuckets;
+            this.timestamp = timestamp;
         }
 
         public ZonedDateTime getBeginningOfRetentionPeriod() {
@@ -57,9 +62,14 @@ public class BlobStoreVaultGarbageCollectionTask implements Task {
                 .map(BucketName::asString)
                 .collect(Guavate.toImmutableList());
         }
+
+        @Override
+        public Instant timestamp() {
+            return timestamp;
+        }
     }
 
-    static final TaskType TYPE = TaskType.of("deletedMessages/blobStoreBasedGarbageCollection");
+    static final TaskType TYPE = TaskType.of("deleted-messages-blob-store-based-garbage-collection");
 
     private final Flux<BucketName> retentionOperation;
     private final ZonedDateTime beginningOfRetentionPeriod;
@@ -102,14 +112,6 @@ public class BlobStoreVaultGarbageCollectionTask implements Task {
 
     @Override
     public Optional<TaskExecutionDetails.AdditionalInformation> details() {
-        return Optional.of(new AdditionalInformation(beginningOfRetentionPeriod, deletedBuckets));
-    }
-
-    ZonedDateTime getBeginningOfRetentionPeriod() {
-        return beginningOfRetentionPeriod;
-    }
-
-    Flux<BucketName> getRetentionOperation() {
-        return retentionOperation;
+        return Optional.of(new AdditionalInformation(beginningOfRetentionPeriod, ImmutableSet.copyOf(deletedBuckets), Clock.systemUTC().instant()));
     }
 }

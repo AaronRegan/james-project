@@ -31,21 +31,23 @@ import java.util.function.Function;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import org.apache.james.backend.rabbitmq.RabbitMQExtension;
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.backends.cassandra.components.CassandraModule;
 import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.rabbitmq.RabbitMQExtension;
 import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.cassandra.CassandraBlobModule;
 import org.apache.james.blob.cassandra.CassandraBlobStore;
 import org.apache.james.blob.mail.MimeMessageStore;
 import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStoreModule;
 import org.apache.james.metrics.api.NoopGaugeRegistry;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.queue.api.MailQueue;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.queue.api.ManageableMailQueue;
 import org.apache.james.queue.api.RawMailQueueItemDecoratorFactory;
+import org.apache.james.queue.rabbitmq.view.RabbitMQMailQueueConfiguration;
 import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueView;
 import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueViewModule;
 import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueViewTestFactory;
@@ -70,7 +72,7 @@ class RabbitMQMailQueueConfigurationChangeTest {
         .updateBrowseStartPace(UPDATE_BROWSE_START_PACE)
         .sliceWindow(ONE_HOUR_SLICE_WINDOW)
         .build();
-    private static final String SPOOL = "spool";
+    private static final MailQueueName SPOOL = MailQueueName.of("spool");
     private static final Instant IN_SLICE_1 = Instant.parse("2007-12-03T10:15:30.00Z");
     private static final Instant IN_SLICE_2 = IN_SLICE_1.plus(1, HOURS);
     private static final Instant IN_SLICE_3 = IN_SLICE_1.plus(2, HOURS);
@@ -80,22 +82,20 @@ class RabbitMQMailQueueConfigurationChangeTest {
         CassandraSchemaVersionModule.MODULE,
         CassandraBlobModule.MODULE,
         CassandraMailQueueViewModule.MODULE,
-        CassandraEventStoreModule.MODULE));
+        CassandraEventStoreModule.MODULE()));
 
     @RegisterExtension
     static RabbitMQExtension rabbitMQExtension = RabbitMQExtension.singletonRabbitMQ();
 
     private UpdatableTickingClock clock;
     private RabbitMQMailQueueManagement mqManagementApi;
-    private RabbitClient rabbitClient;
     private MimeMessageStore.Factory mimeMessageStoreFactory;
 
     @BeforeEach
     void setup(CassandraCluster cassandra) throws Exception {
-        CassandraBlobStore blobsDAO = new CassandraBlobStore(cassandra.getConf());
+        CassandraBlobStore blobsDAO = CassandraBlobStore.forTesting(cassandra.getConf());
         mimeMessageStoreFactory = MimeMessageStore.factory(blobsDAO);
         clock = new UpdatableTickingClock(IN_SLICE_1);
-        rabbitClient = new RabbitClient(rabbitMQExtension.getRabbitChannelPool());
         mqManagementApi = new RabbitMQMailQueueManagement(rabbitMQExtension.managementAPI());
     }
 
@@ -107,19 +107,28 @@ class RabbitMQMailQueueConfigurationChangeTest {
     private RabbitMQMailQueue getRabbitMQMailQueue(CassandraCluster cassandra, CassandraMailQueueViewConfiguration mailQueueViewConfiguration) throws Exception {
         CassandraMailQueueView.Factory mailQueueViewFactory = CassandraMailQueueViewTestFactory.factory(clock,
             cassandra.getConf(),
+            cassandraCluster.getCassandraConsistenciesConfiguration(),
             mailQueueViewConfiguration,
             mimeMessageStoreFactory);
 
+
+        RabbitMQMailQueueConfiguration mailQueueSizeConfiguration = RabbitMQMailQueueConfiguration.builder()
+            .sizeMetricsEnabled(true)
+            .build();
+
+
         RabbitMQMailQueueFactory.PrivateFactory privateFactory = new RabbitMQMailQueueFactory.PrivateFactory(
-            new NoopMetricFactory(),
+            new RecordingMetricFactory(),
             new NoopGaugeRegistry(),
-            rabbitClient,
+            rabbitMQExtension.getSender(),
+            rabbitMQExtension.getReceiverProvider(),
             mimeMessageStoreFactory,
             BLOB_ID_FACTORY,
             mailQueueViewFactory,
             clock,
-            new RawMailQueueItemDecoratorFactory());
-        RabbitMQMailQueueFactory mailQueueFactory = new RabbitMQMailQueueFactory(rabbitClient, mqManagementApi, privateFactory);
+            new RawMailQueueItemDecoratorFactory(),
+            mailQueueSizeConfiguration);
+        RabbitMQMailQueueFactory mailQueueFactory = new RabbitMQMailQueueFactory(rabbitMQExtension.getSender(), mqManagementApi, privateFactory);
         return mailQueueFactory.createQueue(SPOOL);
     }
 

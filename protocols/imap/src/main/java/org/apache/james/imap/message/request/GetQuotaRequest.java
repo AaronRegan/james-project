@@ -19,7 +19,10 @@
 
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
+
+import com.google.common.base.MoreObjects;
 
 /**
  * GETQUOTA Request
@@ -27,8 +30,8 @@ import org.apache.james.imap.api.ImapCommand;
 public class GetQuotaRequest extends AbstractImapRequest {
     private final String quotaRoot;
 
-    public GetQuotaRequest(String tag, ImapCommand command, String quotaRoot) {
-        super(tag, command);
+    public GetQuotaRequest(Tag tag, String quotaRoot) {
+        super(tag, ImapConstants.GETQUOTA_COMMAND);
         this.quotaRoot = quotaRoot;
     }
 
@@ -36,4 +39,10 @@ public class GetQuotaRequest extends AbstractImapRequest {
         return quotaRoot;
     }
 
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("quotaRoot", quotaRoot)
+            .toString();
+    }
 }

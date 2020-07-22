@@ -18,6 +18,8 @@
  ****************************************************************/
 package org.apache.james.webadmin.service;
 
+import java.time.Instant;
+
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
@@ -26,32 +28,40 @@ import org.apache.james.server.task.json.dto.AdditionalInformationDTOModule;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class ClearMailRepositoryTaskAdditionalInformationDTO implements AdditionalInformationDTO {
-
-    static final AdditionalInformationDTOModule<ClearMailRepositoryTask.AdditionalInformation, ClearMailRepositoryTaskAdditionalInformationDTO> SERIALIZATION_MODULE =
-        DTOModule.forDomainObject(ClearMailRepositoryTask.AdditionalInformation.class)
+    public static AdditionalInformationDTOModule<ClearMailRepositoryTask.AdditionalInformation, ClearMailRepositoryTaskAdditionalInformationDTO> module() {
+        return DTOModule.forDomainObject(ClearMailRepositoryTask.AdditionalInformation.class)
             .convertToDTO(ClearMailRepositoryTaskAdditionalInformationDTO.class)
             .toDomainObjectConverter(dto -> new ClearMailRepositoryTask.AdditionalInformation(
                 MailRepositoryPath.from(dto.mailRepositoryPath),
                 dto.initialCount,
-                dto.remainingCount
-            ))
+                dto.remainingCount,
+                dto.timestamp))
             .toDTOConverter((details, type) -> new ClearMailRepositoryTaskAdditionalInformationDTO(
+                type,
                 details.getRepositoryPath(),
                 details.getInitialCount(),
-                details.getRemainingCount()))
+                details.getRemainingCount(),
+                details.timestamp()))
             .typeName(ClearMailRepositoryTask.TYPE.asString())
             .withFactory(AdditionalInformationDTOModule::new);
+    }
 
     private final String mailRepositoryPath;
+    private final String type;
     private final long initialCount;
     private final long remainingCount;
+    private final Instant timestamp;
 
-    public ClearMailRepositoryTaskAdditionalInformationDTO(@JsonProperty("mailRepositoryPath") String mailRepositoryPath,
+    public ClearMailRepositoryTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                           @JsonProperty("mailRepositoryPath") String mailRepositoryPath,
                                                            @JsonProperty("initialCount") long initialCount,
-                                                           @JsonProperty("remainingCount") long remainingCount) {
+                                                           @JsonProperty("remainingCount") long remainingCount,
+                                                           @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.mailRepositoryPath = mailRepositoryPath;
         this.initialCount = initialCount;
         this.remainingCount = remainingCount;
+        this.timestamp = timestamp;
     }
 
     public String getMailRepositoryPath() {
@@ -66,4 +76,12 @@ public class ClearMailRepositoryTaskAdditionalInformationDTO implements Addition
         return remainingCount;
     }
 
+    public Instant getTimestamp() {
+        return timestamp;
+    }
+
+    @Override
+    public String getType() {
+        return type;
+    }
 }

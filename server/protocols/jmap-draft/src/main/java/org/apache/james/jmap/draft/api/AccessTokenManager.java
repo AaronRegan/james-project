@@ -19,17 +19,19 @@
 
 package org.apache.james.jmap.draft.api;
 
+import org.apache.james.core.Username;
 import org.apache.james.jmap.api.access.AccessToken;
 import org.apache.james.jmap.api.access.exceptions.InvalidAccessToken;
+import org.reactivestreams.Publisher;
 
 public interface AccessTokenManager {
 
-    AccessToken grantAccessToken(String username);
+    Publisher<AccessToken> grantAccessToken(Username username);
 
-    String getUsernameFromToken(AccessToken token) throws InvalidAccessToken;
-    
-    boolean isValid(AccessToken token);
-    
-    void revoke(AccessToken token);
+    Publisher<Username> getUsernameFromToken(AccessToken token) throws InvalidAccessToken;
+
+    Publisher<Boolean> isValid(AccessToken token);
+
+    Publisher<Void> revoke(AccessToken token);
 
 }

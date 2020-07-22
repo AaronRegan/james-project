@@ -49,6 +49,7 @@ import org.apache.commons.configuration2.BaseHierarchicalConfiguration;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.builder.MimeMessageBuilder;
 import org.apache.james.core.builder.MimeMessageBuilder.BodyPartBuilder;
+import org.apache.james.json.DTOConverter;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepository;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
@@ -56,15 +57,16 @@ import org.apache.james.mailrepository.api.MailRepositoryUrl;
 import org.apache.james.mailrepository.api.Protocol;
 import org.apache.james.mailrepository.memory.MailRepositoryStoreConfiguration;
 import org.apache.james.mailrepository.memory.MemoryMailRepository;
-import org.apache.james.mailrepository.memory.MemoryMailRepositoryProvider;
 import org.apache.james.mailrepository.memory.MemoryMailRepositoryStore;
 import org.apache.james.mailrepository.memory.MemoryMailRepositoryUrlStore;
+import org.apache.james.mailrepository.memory.SimpleMailRepositoryLoader;
 import org.apache.james.queue.api.MailQueueFactory;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.queue.api.ManageableMailQueue;
 import org.apache.james.queue.api.RawMailQueueItemDecoratorFactory;
 import org.apache.james.queue.memory.MemoryMailQueueFactory;
+import org.apache.james.task.Hostname;
 import org.apache.james.task.MemoryTaskManager;
-import org.apache.james.task.eventsourcing.Hostname;
 import org.apache.james.util.ClassLoaderUtils;
 import org.apache.james.webadmin.Constants;
 import org.apache.james.webadmin.WebAdminServer;
@@ -72,8 +74,11 @@ import org.apache.james.webadmin.WebAdminUtils;
 import org.apache.james.webadmin.service.ClearMailRepositoryTask;
 import org.apache.james.webadmin.service.MailRepositoryStoreService;
 import org.apache.james.webadmin.service.ReprocessingAllMailsTask;
+import org.apache.james.webadmin.service.ReprocessingAllMailsTaskAdditionalInformationDTO;
 import org.apache.james.webadmin.service.ReprocessingOneMailTask;
+import org.apache.james.webadmin.service.ReprocessingOneMailTaskAdditionalInformationDTO;
 import org.apache.james.webadmin.service.ReprocessingService;
+import org.apache.james.webadmin.service.WebAdminClearMailRepositoryTaskAdditionalInformationDTO;
 import org.apache.james.webadmin.utils.ErrorResponder;
 import org.apache.james.webadmin.utils.JsonTransformer;
 import org.apache.mailet.Attribute;
@@ -86,7 +91,6 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Sets;
 
 import io.restassured.RestAssured;
 import io.restassured.builder.RequestSpecBuilder;
@@ -100,7 +104,7 @@ public class MailRepositoriesRoutesTest {
     private static final MailRepositoryPath PATH_MY_REPO = MailRepositoryPath.from("myRepo");
     private static final String PATH_ESCAPED_MY_REPO = "myRepo";
     private static final String MY_REPO_MAILS = "myRepo/mails";
-    private static final String CUSTOM_QUEUE = "customQueue";
+    private static final MailQueueName CUSTOM_QUEUE = MailQueueName.of("customQueue");
     private static final String NAME_1 = "name1";
     private static final String NAME_2 = "name2";
     private WebAdminServer webAdminServer;
@@ -114,7 +118,7 @@ public class MailRepositoriesRoutesTest {
 
         MemoryTaskManager taskManager = new MemoryTaskManager(new Hostname("foo"));
         JsonTransformer jsonTransformer = new JsonTransformer();
-        MailQueueFactory<ManageableMailQueue> queueFactory = new MemoryMailQueueFactory(new RawMailQueueItemDecoratorFactory());
+        MailQueueFactory<? extends ManageableMailQueue> queueFactory = new MemoryMailQueueFactory(new RawMailQueueItemDecoratorFactory());
         spoolQueue = queueFactory.createQueue(MailQueueFactory.SPOOL);
         customQueue = queueFactory.createQueue(CUSTOM_QUEUE);
 
@@ -125,7 +129,10 @@ public class MailRepositoriesRoutesTest {
         webAdminServer = WebAdminUtils.createWebAdminServer(
                 new MailRepositoriesRoutes(repositoryStoreService,
                     jsonTransformer, reprocessingService, taskManager),
-            new TasksRoutes(taskManager, jsonTransformer))
+            new TasksRoutes(taskManager, jsonTransformer,
+                DTOConverter.of(ReprocessingOneMailTaskAdditionalInformationDTO.module(),
+                    ReprocessingAllMailsTaskAdditionalInformationDTO.module(),
+                    WebAdminClearMailRepositoryTaskAdditionalInformationDTO.module())))
             .start();
 
         RestAssured.requestSpecification = WebAdminUtils.buildRequestSpecification(webAdminServer)
@@ -175,6 +182,22 @@ public class MailRepositoriesRoutesTest {
 
         assertThat(mailRepositoryStore.getByPath(PATH_MY_REPO))
             .hasSize(1);
+    }
+
+    @Test
+    public void putMailRepositoryShouldReturnInvalidArgumentWhenProtocolIsUnsupported() {
+        given()
+            .params("protocol", "unsupported")
+        .when()
+            .put(PATH_ESCAPED_MY_REPO)
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("'unsupported' is an unsupported protocol"));
+
+        assertThat(mailRepositoryStore.get(URL_MY_REPO))
+            .isEmpty();
     }
 
     @Test
@@ -1060,7 +1083,8 @@ public class MailRepositoriesRoutesTest {
             .statusCode(HttpStatus.BAD_REQUEST_400)
             .body("statusCode", is(400))
             .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
-            .body("message", is("action query parameter is mandatory. The only supported value is `reprocess`"));
+            .body("message", is("Invalid arguments supplied in the user request"))
+            .body("details", is("Invalid value supplied for query parameter 'action': invalid. Supported values are [reprocess]"));
     }
 
     @Test
@@ -1071,7 +1095,8 @@ public class MailRepositoriesRoutesTest {
             .statusCode(HttpStatus.BAD_REQUEST_400)
             .body("statusCode", is(400))
             .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
-            .body("message", is("action query parameter is mandatory. The only supported value is `reprocess`"));
+            .body("message", is("Invalid arguments supplied in the user request"))
+            .body("details", is("'action' query parameter is compulsory. Supported values are [reprocess]"));
     }
 
     @Test
@@ -1102,7 +1127,7 @@ public class MailRepositoriesRoutesTest {
             .body("additionalInformation.initialCount", is(2))
             .body("additionalInformation.remainingCount", is(0))
             .body("additionalInformation.targetProcessor", isEmptyOrNullString())
-            .body("additionalInformation.targetQueue", is(MailQueueFactory.SPOOL))
+            .body("additionalInformation.targetQueue", is(MailQueueFactory.SPOOL.asString()))
             .body("startedDate", is(notNullValue()))
             .body("submitDate", is(notNullValue()))
             .body("completedDate", is(notNullValue()));
@@ -1123,7 +1148,7 @@ public class MailRepositoriesRoutesTest {
         String transport = "transport";
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .param("processor", transport)
             .patch(PATH_ESCAPED_MY_REPO + "/mails")
             .jsonPath()
@@ -1141,7 +1166,7 @@ public class MailRepositoriesRoutesTest {
             .body("additionalInformation.initialCount", is(2))
             .body("additionalInformation.remainingCount", is(0))
             .body("additionalInformation.targetProcessor", is(transport))
-            .body("additionalInformation.targetQueue", is(CUSTOM_QUEUE))
+            .body("additionalInformation.targetQueue", is(CUSTOM_QUEUE.asString()))
             .body("startedDate", is(notNullValue()))
             .body("submitDate", is(notNullValue()))
             .body("completedDate", is(notNullValue()));
@@ -1163,7 +1188,7 @@ public class MailRepositoriesRoutesTest {
         String transport = "transport";
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .param("processor", transport)
             .patch(PATH_ESCAPED_MY_REPO + "/mails")
             .jsonPath()
@@ -1192,7 +1217,7 @@ public class MailRepositoriesRoutesTest {
         String transport = "transport";
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .param("processor", transport)
             .patch(PATH_ESCAPED_MY_REPO + "/mails")
             .jsonPath()
@@ -1223,7 +1248,7 @@ public class MailRepositoriesRoutesTest {
         String transport = "transport";
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .param("processor", transport)
             .patch(PATH_ESCAPED_MY_REPO + "/mails")
             .jsonPath()
@@ -1370,7 +1395,7 @@ public class MailRepositoriesRoutesTest {
 
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .patch(PATH_ESCAPED_MY_REPO + "/mails")
             .jsonPath()
             .get("taskId");
@@ -1418,7 +1443,8 @@ public class MailRepositoriesRoutesTest {
             .statusCode(HttpStatus.BAD_REQUEST_400)
             .body("statusCode", is(400))
             .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
-            .body("message", is("action query parameter is mandatory. The only supported value is `reprocess`"));
+            .body("message", is("Invalid arguments supplied in the user request"))
+            .body("details", is("Invalid value supplied for query parameter 'action': invalid. Supported values are [reprocess]"));
     }
 
     @Test
@@ -1434,7 +1460,8 @@ public class MailRepositoriesRoutesTest {
             .statusCode(HttpStatus.BAD_REQUEST_400)
             .body("statusCode", is(400))
             .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
-            .body("message", is("action query parameter is mandatory. The only supported value is `reprocess`"));
+            .body("message", is("Invalid arguments supplied in the user request"))
+            .body("details", is("'action' query parameter is compulsory. Supported values are [reprocess]"));
     }
 
     @Test
@@ -1466,7 +1493,7 @@ public class MailRepositoriesRoutesTest {
             .body("additionalInformation.repositoryPath", is(PATH_MY_REPO.asString()))
             .body("additionalInformation.mailKey", is(NAME_1))
             .body("additionalInformation.targetProcessor", isEmptyOrNullString())
-            .body("additionalInformation.targetQueue", is(MailQueueFactory.SPOOL))
+            .body("additionalInformation.targetQueue", is(MailQueueFactory.SPOOL.asString()))
             .body("startedDate", is(notNullValue()))
             .body("submitDate", is(notNullValue()))
             .body("completedDate", is(notNullValue()));
@@ -1487,7 +1514,7 @@ public class MailRepositoriesRoutesTest {
         String transport = "transport";
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .param("processor", transport)
             .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
             .jsonPath()
@@ -1504,7 +1531,7 @@ public class MailRepositoriesRoutesTest {
             .body("additionalInformation.repositoryPath", is(PATH_MY_REPO.asString()))
             .body("additionalInformation.mailKey", is(NAME_1))
             .body("additionalInformation.targetProcessor", is(transport))
-            .body("additionalInformation.targetQueue", is(CUSTOM_QUEUE))
+            .body("additionalInformation.targetQueue", is(CUSTOM_QUEUE.asString()))
             .body("startedDate", is(notNullValue()))
             .body("submitDate", is(notNullValue()))
             .body("completedDate", is(notNullValue()));
@@ -1526,7 +1553,7 @@ public class MailRepositoriesRoutesTest {
         String transport = "transport";
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .param("processor", transport)
             .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
             .jsonPath()
@@ -1555,7 +1582,7 @@ public class MailRepositoriesRoutesTest {
         String transport = "transport";
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .param("processor", transport)
             .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
             .jsonPath()
@@ -1673,7 +1700,7 @@ public class MailRepositoriesRoutesTest {
 
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
             .jsonPath()
             .get("taskId");
@@ -1701,7 +1728,7 @@ public class MailRepositoriesRoutesTest {
 
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .patch(PATH_ESCAPED_MY_REPO + "/mails/" + "unknown")
             .jsonPath()
             .get("taskId");
@@ -1727,7 +1754,7 @@ public class MailRepositoriesRoutesTest {
 
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .patch(PATH_ESCAPED_MY_REPO + "/mails/" + "unknown")
             .jsonPath()
             .get("taskId");
@@ -1752,7 +1779,7 @@ public class MailRepositoriesRoutesTest {
 
         String taskId = with()
             .param("action", "reprocess")
-            .param("queue", CUSTOM_QUEUE)
+            .param("queue", CUSTOM_QUEUE.asString())
             .patch(PATH_ESCAPED_MY_REPO + "/mails/" + "unknown")
             .jsonPath()
             .get("taskId");
@@ -1776,7 +1803,7 @@ public class MailRepositoriesRoutesTest {
                 ImmutableList.of(new Protocol("other")),
                 MemoryMailRepository.class.getName(),
                 new BaseHierarchicalConfiguration()));
-        mailRepositoryStore = new MemoryMailRepositoryStore(urlStore, Sets.newHashSet(new MemoryMailRepositoryProvider()), configuration);
+        mailRepositoryStore = new MemoryMailRepositoryStore(urlStore, new SimpleMailRepositoryLoader(), configuration);
 
         mailRepositoryStore.init();
     }

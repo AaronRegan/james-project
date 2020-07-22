@@ -28,14 +28,16 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.update;
 import static org.apache.james.mailbox.cassandra.table.CassandraMessageUidTable.MAILBOX_ID;
 import static org.apache.james.mailbox.cassandra.table.CassandraMessageUidTable.NEXT_UID;
 import static org.apache.james.mailbox.cassandra.table.CassandraMessageUidTable.TABLE_NAME;
+import static org.apache.james.util.ReactorUtils.publishIfPresent;
 
+import java.time.Duration;
 import java.util.Optional;
 
 import javax.inject.Inject;
 
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
+import org.apache.james.backends.cassandra.init.configuration.CassandraConsistenciesConfiguration;
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
-import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.exception.MailboxException;
@@ -46,7 +48,10 @@ import org.apache.james.mailbox.store.mail.UidProvider;
 import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
+
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+import reactor.util.retry.Retry;
 
 public class CassandraUidProvider implements UidProvider {
     private static final String CONDITION = "Condition";
@@ -56,10 +61,13 @@ public class CassandraUidProvider implements UidProvider {
     private final PreparedStatement insertStatement;
     private final PreparedStatement updateStatement;
     private final PreparedStatement selectStatement;
+    private final ConsistencyLevel consistencyLevel;
 
     @Inject
-    public CassandraUidProvider(Session session, CassandraConfiguration cassandraConfiguration) {
+    public CassandraUidProvider(Session session, CassandraConfiguration cassandraConfiguration,
+                                CassandraConsistenciesConfiguration consistenciesConfiguration) {
         this.executor = new CassandraAsyncExecutor(session);
+        this.consistencyLevel = consistenciesConfiguration.getLightweightTransaction();
         this.maxUidRetries = cassandraConfiguration.getUidMaxRetry();
         this.selectStatement = prepareSelect(session);
         this.updateStatement = prepareUpdate(session);
@@ -87,12 +95,12 @@ public class CassandraUidProvider implements UidProvider {
     }
 
     @Override
-    public MessageUid nextUid(MailboxSession mailboxSession, Mailbox mailbox) throws MailboxException {
-        return nextUid(mailboxSession, mailbox.getMailboxId());
+    public MessageUid nextUid(Mailbox mailbox) throws MailboxException {
+        return nextUid(mailbox.getMailboxId());
     }
 
     @Override
-    public MessageUid nextUid(MailboxSession session, MailboxId mailboxId) throws MailboxException {
+    public MessageUid nextUid(MailboxId mailboxId) throws MailboxException {
         CassandraId cassandraId = (CassandraId) mailboxId;
         return nextUid(cassandraId)
             .blockOptional()
@@ -103,49 +111,52 @@ public class CassandraUidProvider implements UidProvider {
         Mono<MessageUid> updateUid = findHighestUid(cassandraId)
             .flatMap(messageUid -> tryUpdateUid(cassandraId, messageUid));
 
+        Duration firstBackoff = Duration.ofMillis(10);
         return updateUid
             .switchIfEmpty(tryInsert(cassandraId))
             .switchIfEmpty(updateUid)
             .single()
-            .retry(maxUidRetries);
+            .retryWhen(Retry.backoff(maxUidRetries, firstBackoff).scheduler(Schedulers.elastic()));
     }
 
     @Override
-    public Optional<MessageUid> lastUid(MailboxSession mailboxSession, Mailbox mailbox) throws MailboxException {
+    public Optional<MessageUid> lastUid(Mailbox mailbox) {
         return findHighestUid((CassandraId) mailbox.getMailboxId())
                 .blockOptional();
     }
 
     private Mono<MessageUid> findHighestUid(CassandraId mailboxId) {
-        return Mono.defer(() -> executor.executeSingleRow(
+        return executor.executeSingleRow(
             selectStatement.bind()
                 .setUUID(MAILBOX_ID, mailboxId.asUuid())
-                .setConsistencyLevel(ConsistencyLevel.SERIAL))
-            .map(row -> MessageUid.of(row.getLong(NEXT_UID))));
+                .setConsistencyLevel(consistencyLevel))
+            .map(row -> MessageUid.of(row.getLong(NEXT_UID)));
     }
 
     private Mono<MessageUid> tryUpdateUid(CassandraId mailboxId, MessageUid uid) {
         MessageUid nextUid = uid.next();
-        return Mono.defer(() -> executor.executeReturnApplied(
+        return executor.executeReturnApplied(
                 updateStatement.bind()
                         .setUUID(MAILBOX_ID, mailboxId.asUuid())
                         .setLong(CONDITION, uid.asLong())
                         .setLong(NEXT_UID, nextUid.asLong()))
-                .flatMap(success -> successToUid(nextUid, success)));
+                .map(success -> successToUid(nextUid, success))
+                .handle(publishIfPresent());
     }
 
     private Mono<MessageUid> tryInsert(CassandraId mailboxId) {
-        return Mono.defer(() -> executor.executeReturnApplied(
+        return executor.executeReturnApplied(
             insertStatement.bind()
                 .setUUID(MAILBOX_ID, mailboxId.asUuid()))
-            .flatMap(success -> successToUid(MessageUid.MIN_VALUE, success)));
+            .map(success -> successToUid(MessageUid.MIN_VALUE, success))
+            .handle(publishIfPresent());
     }
 
-    private Mono<MessageUid> successToUid(MessageUid uid, Boolean success) {
+    private Optional<MessageUid> successToUid(MessageUid uid, Boolean success) {
         if (success) {
-            return Mono.just(uid);
+            return Optional.of(uid);
         }
-        return Mono.empty();
+        return Optional.empty();
     }
 
 }

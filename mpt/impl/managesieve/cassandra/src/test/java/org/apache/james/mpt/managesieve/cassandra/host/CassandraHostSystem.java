@@ -21,6 +21,8 @@ package org.apache.james.mpt.managesieve.cassandra.host;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.domainlist.api.DomainList;
+import org.apache.james.domainlist.cassandra.CassandraDomainListModule;
 import org.apache.james.mpt.host.JamesManageSieveHostSystem;
 import org.apache.james.sieve.cassandra.CassandraActiveScriptDAO;
 import org.apache.james.sieve.cassandra.CassandraSieveDAO;
@@ -29,11 +31,13 @@ import org.apache.james.sieve.cassandra.CassandraSieveRepository;
 import org.apache.james.sieve.cassandra.CassandraSieveRepositoryModule;
 import org.apache.james.sieverepository.api.SieveRepository;
 import org.apache.james.user.api.UsersRepository;
-import org.apache.james.user.cassandra.CassandraUsersRepository;
+import org.apache.james.user.cassandra.CassandraUsersDAO;
 import org.apache.james.user.cassandra.CassandraUsersRepositoryModule;
+import org.apache.james.user.lib.UsersRepositoryImpl;
 import org.apache.james.util.Host;
 
 public class CassandraHostSystem extends JamesManageSieveHostSystem {
+    private static final DomainList NO_DOMAIN_LIST = null;
     private final Host cassandraHost;
     private CassandraCluster cassandra;
 
@@ -44,6 +48,7 @@ public class CassandraHostSystem extends JamesManageSieveHostSystem {
     @Override
     public void beforeTest() throws Exception {
         CassandraModule modules = CassandraModule.aggregateModules(
+            CassandraDomainListModule.MODULE,
             CassandraSieveRepositoryModule.MODULE,
             CassandraUsersRepositoryModule.MODULE);
         cassandra = CassandraCluster.create(modules, cassandraHost);
@@ -60,9 +65,10 @@ public class CassandraHostSystem extends JamesManageSieveHostSystem {
 
     @Override
     protected UsersRepository createUsersRepository() {
-        CassandraUsersRepository cassandraUsersRepository = new CassandraUsersRepository(cassandra.getConf());
-        cassandraUsersRepository.setEnableVirtualHosting(false);
-        return cassandraUsersRepository;
+        CassandraUsersDAO usersDAO = new CassandraUsersDAO(cassandra.getConf());
+        UsersRepositoryImpl usersRepository = new UsersRepositoryImpl(NO_DOMAIN_LIST, usersDAO);
+        usersRepository.setEnableVirtualHosting(false);
+        return usersRepository;
     }
 
     @Override

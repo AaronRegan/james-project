@@ -20,22 +20,31 @@
 package org.apache.james.backends.cassandra;
 
 import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
+import org.apache.james.backends.cassandra.init.configuration.CassandraConsistenciesConfiguration;
+import org.apache.james.backends.cassandra.init.configuration.ClusterConfiguration;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
 
-public class CassandraClusterExtension implements BeforeAllCallback, AfterAllCallback, AfterEachCallback, ParameterResolver {
+public class CassandraClusterExtension implements BeforeAllCallback, BeforeEachCallback, AfterAllCallback, AfterEachCallback, ParameterResolver {
     private final DockerCassandraExtension cassandraExtension;
     private final CassandraModule cassandraModule;
+    private final CassandraConfiguration cassandraConfiguration;
+    private final CassandraConsistenciesConfiguration consistencyLevelsConfiguration;
     private CassandraCluster cassandraCluster;
 
     public CassandraClusterExtension(CassandraModule cassandraModule) {
         this.cassandraModule = cassandraModule;
         this.cassandraExtension = new DockerCassandraExtension();
+        this.cassandraConfiguration = CassandraConfiguration.builder().build();
+        this.consistencyLevelsConfiguration = CassandraConsistenciesConfiguration
+            .fromConfiguration(this.cassandraConfiguration);
     }
 
     @Override
@@ -43,13 +52,38 @@ public class CassandraClusterExtension implements BeforeAllCallback, AfterAllCal
         Class<?> testClass = extensionContext.getRequiredTestClass();
         if (testClass.getEnclosingClass() == null) {
             cassandraExtension.beforeAll(extensionContext);
-            cassandraCluster = CassandraCluster.create(cassandraModule, cassandraExtension.getDockerCassandra().getHost());
+            start();
         }
+    }
+
+    public ClusterConfiguration.Builder clusterConfiguration() {
+        return cassandraExtension.clusterConfiguration();
+    }
+
+    public void pause() {
+        cassandraExtension.getDockerCassandra().getContainer().pause();
+    }
+
+    public void unpause() {
+        cassandraExtension.getDockerCassandra().getContainer().unpause();
+    }
+
+    private void start() {
+        cassandraCluster = CassandraCluster.create(cassandraModule, cassandraExtension.getDockerCassandra().getHost());
+    }
+
+    @Override
+    public void beforeEach(ExtensionContext extensionContext) throws Exception {
+        DockerCassandraSingleton.incrementTestsPlayed();
+        DockerCassandraSingleton.restartAfterMaxTestsPlayed(
+            cassandraCluster::close,
+            this::start);
     }
 
     @Override
     public void afterEach(ExtensionContext extensionContext) {
         cassandraCluster.clearTables();
+        cassandraCluster.getConf().resetInstrumentation();
     }
 
     @Override
@@ -63,15 +97,27 @@ public class CassandraClusterExtension implements BeforeAllCallback, AfterAllCal
 
     @Override
     public boolean supportsParameter(ParameterContext parameterContext, ExtensionContext extensionContext) throws ParameterResolutionException {
-        return (parameterContext.getParameter().getType() == CassandraCluster.class);
+        Class<?> paramType = parameterContext.getParameter().getType();
+        return paramType.isAssignableFrom(CassandraCluster.class)
+            || paramType.isAssignableFrom(DockerCassandra.class);
     }
 
     @Override
     public Object resolveParameter(ParameterContext parameterContext, ExtensionContext extensionContext) throws ParameterResolutionException {
-        return cassandraCluster;
+        Class<?> paramType = parameterContext.getParameter().getType();
+        if (paramType.isAssignableFrom(CassandraCluster.class)) {
+            return cassandraCluster;
+        } else if (paramType.isAssignableFrom(DockerCassandra.class)) {
+            return DockerCassandraSingleton.singleton;
+        }
+        throw new IllegalArgumentException("Unsupported parameter type " + paramType.getName());
     }
 
     public CassandraCluster getCassandraCluster() {
         return cassandraCluster;
+    }
+
+    public CassandraConsistenciesConfiguration getCassandraConsistenciesConfiguration() {
+        return consistencyLevelsConfiguration;
     }
 }

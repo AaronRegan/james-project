@@ -23,11 +23,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.backends.cassandra.components.CassandraModule;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
 import org.apache.james.backends.cassandra.utils.CassandraUtils;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDAO;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionManager;
 import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.mail.CassandraACLMapper;
 import org.apache.james.mailbox.cassandra.mail.CassandraIdAndPath;
@@ -40,19 +42,16 @@ import org.apache.james.mailbox.cassandra.modules.CassandraAclModule;
 import org.apache.james.mailbox.cassandra.modules.CassandraMailboxModule;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.UidValidity;
 import org.assertj.core.api.SoftAssertions;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-@ExtendWith(CassandraRestartExtension.class)
 class MailboxPathV2MigrationTest {
 
-    private static final MailboxPath MAILBOX_PATH_1 = MailboxPath.forUser("bob", "Important");
-    private static final int UID_VALIDITY_1 = 452;
-    private static final Mailbox MAILBOX_1 = new Mailbox(MAILBOX_PATH_1, UID_VALIDITY_1);
+    private static final MailboxPath MAILBOX_PATH_1 = MailboxPath.forUser(Username.of("bob"), "Important");
+    private static final UidValidity UID_VALIDITY_1 = UidValidity.of(452);
     private static final CassandraId MAILBOX_ID_1 = CassandraId.timeBased();
 
     public static final CassandraModule MODULES = CassandraModule.aggregateModules(
@@ -68,53 +67,61 @@ class MailboxPathV2MigrationTest {
     private CassandraMailboxMapper mailboxMapper;
     private CassandraMailboxDAO mailboxDAO;
 
-    @BeforeAll
-    static void setUpClass() {
-        MAILBOX_1.setMailboxId(MAILBOX_ID_1);
-    }
-
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
         daoV1 = new CassandraMailboxPathDAOImpl(
             cassandra.getConf(),
             cassandra.getTypesProvider(),
-            CassandraUtils.WITH_DEFAULT_CONFIGURATION);
+            CassandraUtils.WITH_DEFAULT_CONFIGURATION,
+            cassandraCluster.getCassandraConsistenciesConfiguration());
         daoV2 = new CassandraMailboxPathV2DAO(
             cassandra.getConf(),
-            CassandraUtils.WITH_DEFAULT_CONFIGURATION);
+            CassandraUtils.WITH_DEFAULT_CONFIGURATION,
+            cassandraCluster.getCassandraConsistenciesConfiguration());
 
         CassandraUserMailboxRightsDAO userMailboxRightsDAO = new CassandraUserMailboxRightsDAO(cassandra.getConf(), CassandraUtils.WITH_DEFAULT_CONFIGURATION);
-        mailboxDAO = new CassandraMailboxDAO(cassandra.getConf(), cassandra.getTypesProvider());
+        mailboxDAO = new CassandraMailboxDAO(
+            cassandra.getConf(),
+            cassandra.getTypesProvider(),
+            cassandraCluster.getCassandraConsistenciesConfiguration());
         mailboxMapper = new CassandraMailboxMapper(
             mailboxDAO,
             daoV1,
             daoV2,
             userMailboxRightsDAO,
-            new CassandraACLMapper(cassandra.getConf(), userMailboxRightsDAO, CassandraConfiguration.DEFAULT_CONFIGURATION));
+            new CassandraACLMapper(
+                cassandra.getConf(),
+                userMailboxRightsDAO,
+                CassandraConfiguration.DEFAULT_CONFIGURATION,
+                cassandraCluster.getCassandraConsistenciesConfiguration()),
+            new CassandraSchemaVersionManager(new CassandraSchemaVersionDAO(cassandra.getConf())));
     }
 
     @Test
-    void newValuesShouldBeSavedInMostRecentDAO() throws Exception {
-        mailboxMapper.save(MAILBOX_1);
+    void newValuesShouldBeSavedInMostRecentDAO() {
+        Mailbox mailbox = createMailbox();
+        CassandraId mailboxId = (CassandraId) mailbox.getMailboxId();
 
         assertThat(daoV2.retrieveId(MAILBOX_PATH_1).blockOptional())
-            .contains(new CassandraIdAndPath(MAILBOX_ID_1, MAILBOX_PATH_1));
+            .contains(new CassandraIdAndPath(mailboxId, MAILBOX_PATH_1));
     }
 
     @Test
-    void newValuesShouldNotBeSavedInOldDAO() throws Exception {
-        mailboxMapper.save(MAILBOX_1);
+    void newValuesShouldNotBeSavedInOldDAO() {
+        createMailbox();
 
         assertThat(daoV1.retrieveId(MAILBOX_PATH_1).blockOptional())
             .isEmpty();
     }
 
     @Test
-    void readingOldValuesShouldMigrateThem() throws Exception {
-        daoV1.save(MAILBOX_PATH_1, MAILBOX_ID_1).block();
-        mailboxDAO.save(MAILBOX_1).block();
+    void readingOldValuesShouldMigrateThem() {
+        Mailbox mailbox = new Mailbox(MAILBOX_PATH_1, UID_VALIDITY_1, MAILBOX_ID_1);
 
-        mailboxMapper.findMailboxByPath(MAILBOX_PATH_1);
+        daoV1.save(MAILBOX_PATH_1, MAILBOX_ID_1).block();
+        mailboxDAO.save(mailbox).block();
+
+        mailboxMapper.findMailboxByPath(MAILBOX_PATH_1).block();
 
         SoftAssertions softly = new SoftAssertions();
         softly.assertThat(daoV1.retrieveId(MAILBOX_PATH_1).blockOptional()).isEmpty();
@@ -134,5 +141,9 @@ class MailboxPathV2MigrationTest {
         softly.assertThat(daoV2.retrieveId(MAILBOX_PATH_1).blockOptional())
             .contains(new CassandraIdAndPath(MAILBOX_ID_1, MAILBOX_PATH_1));
         softly.assertAll();
+    }
+
+    private Mailbox createMailbox() {
+        return mailboxMapper.create(MAILBOX_PATH_1, UID_VALIDITY_1).block();
     }
 }

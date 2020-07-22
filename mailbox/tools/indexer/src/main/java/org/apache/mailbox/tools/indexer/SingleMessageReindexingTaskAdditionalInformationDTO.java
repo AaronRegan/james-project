@@ -18,7 +18,8 @@
  ****************************************************************/
 package org.apache.mailbox.tools.indexer;
 
-import java.util.function.Function;
+import java.time.Clock;
+import java.time.Instant;
 
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailbox.MessageUid;
@@ -30,21 +31,35 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class SingleMessageReindexingTaskAdditionalInformationDTO implements AdditionalInformationDTO {
 
-    static final Function<MailboxId.Factory, AdditionalInformationDTOModule<SingleMessageReindexingTask.AdditionalInformation, SingleMessageReindexingTaskAdditionalInformationDTO>> SERIALIZATION_MODULE =
-        factory ->
-            DTOModule.forDomainObject(SingleMessageReindexingTask.AdditionalInformation.class)
-                .convertToDTO(SingleMessageReindexingTaskAdditionalInformationDTO.class)
-                .toDomainObjectConverter(dto -> new SingleMessageReindexingTask.AdditionalInformation(factory.fromString(dto.mailboxId), MessageUid.of(dto.getUid())))
-                .toDTOConverter((details, type) -> new SingleMessageReindexingTaskAdditionalInformationDTO(details.getMailboxId(), details.getUid()))
-                .typeName(SingleMessageReindexingTask.MESSAGE_RE_INDEXING.asString())
-                .withFactory(AdditionalInformationDTOModule::new);
+    public static AdditionalInformationDTOModule<SingleMessageReindexingTask.AdditionalInformation, SingleMessageReindexingTaskAdditionalInformationDTO> module(MailboxId.Factory factory) {
+        return DTOModule.forDomainObject(SingleMessageReindexingTask.AdditionalInformation.class)
+            .convertToDTO(SingleMessageReindexingTaskAdditionalInformationDTO.class)
+            .toDomainObjectConverter(dto -> new SingleMessageReindexingTask.AdditionalInformation(
+                factory.fromString(dto.mailboxId),
+                MessageUid.of(dto.getUid()),
+                dto.timestamp))
+            .toDTOConverter((details, type) -> new SingleMessageReindexingTaskAdditionalInformationDTO(
+                type,
+                details.getMailboxId(),
+                details.getUid(),
+                details.timestamp()))
+            .typeName(SingleMessageReindexingTask.MESSAGE_RE_INDEXING.asString())
+            .withFactory(AdditionalInformationDTOModule::new);
+    }
 
+    private final String type;
     private final String mailboxId;
     private final long uid;
+    private final Instant timestamp;
 
-    private SingleMessageReindexingTaskAdditionalInformationDTO(@JsonProperty("mailboxId") String mailboxId, @JsonProperty("uid") long uid) {
+    private SingleMessageReindexingTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                                @JsonProperty("mailboxId") String mailboxId,
+                                                                @JsonProperty("uid") long uid,
+                                                                @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.mailboxId = mailboxId;
         this.uid = uid;
+        this.timestamp = timestamp;
     }
 
     public String getMailboxId() {
@@ -55,7 +70,16 @@ public class SingleMessageReindexingTaskAdditionalInformationDTO implements Addi
         return uid;
     }
 
+    @Override
+    public String getType() {
+        return type;
+    }
+
+    public Instant getTimestamp() {
+        return timestamp;
+    }
+
     public static SingleMessageReindexingTaskAdditionalInformationDTO of(SingleMessageReindexingTask task) {
-        return new SingleMessageReindexingTaskAdditionalInformationDTO(task.getMailboxId().serialize(), task.getUid().asLong());
+        return new SingleMessageReindexingTaskAdditionalInformationDTO(task.type().asString(), task.getMailboxId().serialize(), task.getUid().asLong(), Clock.systemUTC().instant());
     }
 }

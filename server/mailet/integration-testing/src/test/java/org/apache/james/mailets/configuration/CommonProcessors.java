@@ -44,8 +44,8 @@ import org.apache.james.transport.matchers.SMTPAuthSuccessful;
 
 public class CommonProcessors {
 
-    public static final MailRepositoryUrl ERROR_REPOSITORY = MailRepositoryUrl.from("file://var/mail/error/");
-    public static final MailRepositoryUrl RRT_ERROR_REPOSITORY = MailRepositoryUrl.from("file://var/mail/rrt-error/");
+    public static final MailRepositoryUrl ERROR_REPOSITORY = MailRepositoryUrl.from("memory://var/mail/error/");
+    public static final MailRepositoryUrl RRT_ERROR_REPOSITORY = MailRepositoryUrl.from("memory://var/mail/rrt-error/");
     private static final String RRT_ERROR = "rrt-error";
 
     public static ProcessorConfiguration root() {
@@ -114,7 +114,7 @@ public class CommonProcessors {
                         .mailet(RemoteDelivery.class)
                         .addProperty("outgoingQueue", "outgoing")
                         .addProperty("delayTime", "5000, 100000, 500000")
-                        .addProperty("maxRetries", "25")
+                        .addProperty("maxRetries", "3")
                         .addProperty("maxDnsProblemRetries", "0")
                         .addProperty("deliveryThreads", "10")
                         .addProperty("sendpartial", "true")
@@ -143,7 +143,7 @@ public class CommonProcessors {
                 .build();
     }
 
-    public static final ProcessorConfiguration.Builder rrtErrorEnabledTransport() {
+    public static ProcessorConfiguration.Builder rrtErrorEnabledTransport() {
         return ProcessorConfiguration.transport()
             .addMailet(MailetConfiguration.builder()
                 .matcher(All.class)

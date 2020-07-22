@@ -32,7 +32,6 @@ import org.apache.james.blob.objectstorage.swift.ProjectName;
 import org.apache.james.blob.objectstorage.swift.Region;
 import org.apache.james.blob.objectstorage.swift.SwiftKeystone3ObjectStorage;
 import org.apache.james.blob.objectstorage.swift.UserName;
-import org.apache.james.util.OptionalUtils;
 
 import com.google.common.base.Preconditions;
 
@@ -66,9 +65,9 @@ public class SwiftKeystone3ConfigurationReader implements SwiftConfiguration {
         String crendentialsStr = configuration.getString(OBJECTSTORAGE_SWIFT_CREDENTIALS, null);
 
         Preconditions.checkArgument(endpointStr != null,
-            OBJECTSTORAGE_SWIFT_ENDPOINT + " is a mandatory configuration value");
+             "%s is a mandatory configuration value", OBJECTSTORAGE_SWIFT_ENDPOINT);
         Preconditions.checkArgument(crendentialsStr != null,
-            OBJECTSTORAGE_SWIFT_CREDENTIALS + " is a mandatory configuration value");
+             "%s is a mandatory configuration value", OBJECTSTORAGE_SWIFT_CREDENTIALS);
 
         URI endpoint = URI.create(endpointStr);
         Credentials credentials = Credentials.of(crendentialsStr);
@@ -100,9 +99,9 @@ public class SwiftKeystone3ConfigurationReader implements SwiftConfiguration {
         String domainNameStr = configuration.getString(OBJECTSTORAGE_SWIFT_KEYSTONE_3_USER_DOMAIN, null);
 
         Preconditions.checkArgument(userNameStr != null,
-            OBJECTSTORAGE_SWIFT_KEYSTONE_3_USER_NAME + " is a mandatory configuration value");
+            "%s is a mandatory configuration value", OBJECTSTORAGE_SWIFT_KEYSTONE_3_USER_NAME);
         Preconditions.checkArgument(domainNameStr != null,
-            OBJECTSTORAGE_SWIFT_KEYSTONE_3_USER_DOMAIN + " is a mandatory configuration value");
+            "%s is a mandatory configuration value", OBJECTSTORAGE_SWIFT_KEYSTONE_3_USER_DOMAIN);
 
         UserName userName =
             UserName.of(userNameStr);
@@ -125,10 +124,8 @@ public class SwiftKeystone3ConfigurationReader implements SwiftConfiguration {
                 configuration.getString(OBJECTSTORAGE_SWIFT_KEYSTONE_3_PROJECT_DOMAIN_ID, null))
             .map(DomainId::of);
 
-        return OptionalUtils.or(
-            projectName.flatMap(project -> projectDomainName.map(domain -> Project.of(project, domain))),
-            projectName.flatMap(project -> projectDomainId.map(domain -> Project.of(project, domain))),
-            projectName.map(Project::of)
-        );
+        return projectName.flatMap(project -> projectDomainName.map(domain -> Project.of(project, domain)))
+            .or(() -> projectName.flatMap(project -> projectDomainId.map(domain -> Project.of(project, domain))))
+            .or(() -> projectName.map(Project::of));
     }
 }

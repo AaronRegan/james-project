@@ -19,24 +19,29 @@
 
 package org.apache.james.mailbox.events;
 
-import static org.apache.james.backend.rabbitmq.Constants.AUTO_DELETE;
-import static org.apache.james.backend.rabbitmq.Constants.DURABLE;
-import static org.apache.james.backend.rabbitmq.Constants.EMPTY_ROUTING_KEY;
-import static org.apache.james.backend.rabbitmq.Constants.EXCLUSIVE;
-import static org.apache.james.backend.rabbitmq.Constants.NO_ARGUMENTS;
+import static org.apache.james.backends.rabbitmq.Constants.AUTO_DELETE;
+import static org.apache.james.backends.rabbitmq.Constants.DURABLE;
+import static org.apache.james.backends.rabbitmq.Constants.EMPTY_ROUTING_KEY;
+import static org.apache.james.backends.rabbitmq.Constants.EXCLUSIVE;
+import static org.apache.james.backends.rabbitmq.Constants.REQUEUE;
+import static org.apache.james.backends.rabbitmq.Constants.deadLetterQueue;
 import static org.apache.james.mailbox.events.RabbitMQEventBus.MAILBOX_EVENT;
+import static org.apache.james.mailbox.events.RabbitMQEventBus.MAILBOX_EVENT_DEAD_LETTER_EXCHANGE_NAME;
 import static org.apache.james.mailbox.events.RabbitMQEventBus.MAILBOX_EVENT_EXCHANGE_NAME;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 
+import org.apache.james.backends.rabbitmq.ReceiverProvider;
 import org.apache.james.event.json.EventSerializer;
 import org.apache.james.util.MDCBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import com.github.fge.lambdas.Throwing;
 import com.google.common.base.Preconditions;
-import com.rabbitmq.client.Connection;
+
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -45,10 +50,9 @@ import reactor.rabbitmq.AcknowledgableDelivery;
 import reactor.rabbitmq.BindingSpecification;
 import reactor.rabbitmq.ConsumeOptions;
 import reactor.rabbitmq.QueueSpecification;
-import reactor.rabbitmq.RabbitFlux;
 import reactor.rabbitmq.Receiver;
-import reactor.rabbitmq.ReceiverOptions;
 import reactor.rabbitmq.Sender;
+import reactor.util.retry.Retry;
 
 class GroupRegistration implements Registration {
     static class WorkQueueName {
@@ -70,10 +74,11 @@ class GroupRegistration implements Registration {
         }
     }
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(GroupRegistration.class);
     static final String RETRY_COUNT = "retry-count";
     static final int DEFAULT_RETRY_COUNT = 0;
 
-    private final MailboxListener mailboxListener;
+    private final MailboxListener.ReactiveMailboxListener mailboxListener;
     private final WorkQueueName queueName;
     private final Receiver receiver;
     private final Runnable unregisterGroup;
@@ -82,18 +87,20 @@ class GroupRegistration implements Registration {
     private final GroupConsumerRetry retryHandler;
     private final WaitDelayGenerator delayGenerator;
     private final Group group;
+    private final RetryBackoffConfiguration retryBackoff;
     private final MailboxListenerExecutor mailboxListenerExecutor;
     private Optional<Disposable> receiverSubscriber;
 
-    GroupRegistration(Mono<Connection> connectionSupplier, Sender sender, EventSerializer eventSerializer,
-                      MailboxListener mailboxListener, Group group, RetryBackoffConfiguration retryBackoff,
+    GroupRegistration(Sender sender, ReceiverProvider receiverProvider, EventSerializer eventSerializer,
+                      MailboxListener.ReactiveMailboxListener mailboxListener, Group group, RetryBackoffConfiguration retryBackoff,
                       EventDeadLetters eventDeadLetters,
                       Runnable unregisterGroup, MailboxListenerExecutor mailboxListenerExecutor) {
         this.eventSerializer = eventSerializer;
         this.mailboxListener = mailboxListener;
         this.queueName = WorkQueueName.of(group);
         this.sender = sender;
-        this.receiver = RabbitFlux.createReceiver(new ReceiverOptions().connectionMono(connectionSupplier));
+        this.receiver = receiverProvider.createReceiver();
+        this.retryBackoff = retryBackoff;
         this.mailboxListenerExecutor = mailboxListenerExecutor;
         this.receiverSubscriber = Optional.empty();
         this.unregisterGroup = unregisterGroup;
@@ -107,6 +114,7 @@ class GroupRegistration implements Registration {
             .of(createGroupWorkQueue()
                 .then(retryHandler.createRetryExchange(queueName))
                 .then(Mono.fromCallable(() -> this.consumeWorkQueue()))
+                .retryWhen(Retry.backoff(retryBackoff.getMaxRetries(), retryBackoff.getFirstBackoff()).jitter(retryBackoff.getJitterFactor()).scheduler(Schedulers.elastic()))
                 .block());
         return this;
     }
@@ -117,7 +125,7 @@ class GroupRegistration implements Registration {
                 .durable(DURABLE)
                 .exclusive(!EXCLUSIVE)
                 .autoDelete(!AUTO_DELETE)
-                .arguments(NO_ARGUMENTS)),
+                .arguments(deadLetterQueue(MAILBOX_EVENT_DEAD_LETTER_EXCHANGE_NAME))),
             sender.bind(BindingSpecification.binding()
                 .exchange(MAILBOX_EVENT_EXCHANGE_NAME)
                 .queue(queueName.asString())
@@ -135,22 +143,30 @@ class GroupRegistration implements Registration {
 
     private Mono<Void> deliver(AcknowledgableDelivery acknowledgableDelivery) {
         byte[] eventAsBytes = acknowledgableDelivery.getBody();
-        Event event = eventSerializer.fromJson(new String(eventAsBytes, StandardCharsets.UTF_8)).get();
         int currentRetryCount = getRetryCount(acknowledgableDelivery);
 
-        return delayGenerator.delayIfHaveTo(currentRetryCount)
-            .publishOn(Schedulers.elastic())
-            .flatMap(any -> Mono.fromRunnable(Throwing.runnable(() -> runListener(event))))
-            .onErrorResume(throwable -> retryHandler.handleRetry(event, currentRetryCount, throwable))
-            .then(Mono.fromRunnable(acknowledgableDelivery::ack));
+        return deserializeEvent(eventAsBytes)
+            .flatMap(event -> delayGenerator.delayIfHaveTo(currentRetryCount)
+                .flatMap(any -> runListener(event))
+                .onErrorResume(throwable -> retryHandler.handleRetry(event, currentRetryCount, throwable))
+                .then(Mono.<Void>fromRunnable(acknowledgableDelivery::ack)))
+            .onErrorResume(e -> {
+                LOGGER.error("Unable to process delivery for group {}", group, e);
+                return Mono.fromRunnable(() -> acknowledgableDelivery.nack(!REQUEUE));
+            });
+    }
+
+    private Mono<Event> deserializeEvent(byte[] eventAsBytes) {
+        return Mono.fromCallable(() -> eventSerializer.fromJson(new String(eventAsBytes, StandardCharsets.UTF_8)).get())
+            .subscribeOn(Schedulers.parallel());
     }
 
     Mono<Void> reDeliver(Event event) {
         return retryHandler.retryOrStoreToDeadLetter(event, DEFAULT_RETRY_COUNT);
     }
 
-    private void runListener(Event event) throws Exception {
-        mailboxListenerExecutor.execute(
+    private Mono<Void> runListener(Event event) {
+        return mailboxListenerExecutor.execute(
             mailboxListener,
             MDCBuilder.create()
                 .addContext(EventBus.StructuredLoggingFields.GROUP, group),
@@ -167,7 +183,7 @@ class GroupRegistration implements Registration {
 
     @Override
     public void unregister() {
-        receiverSubscriber.filter(subscriber -> !subscriber.isDisposed())
+        receiverSubscriber.filter(Predicate.not(Disposable::isDisposed))
             .ifPresent(Disposable::dispose);
         receiver.close();
         unregisterGroup.run();

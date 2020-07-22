@@ -38,8 +38,8 @@ import org.apache.james.modules.protocols.SmtpGuiceProbe;
 import org.apache.james.probe.DataProbe;
 import org.apache.james.transport.matchers.All;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.apache.mailet.base.test.FakeMail;
 import org.junit.After;
 import org.junit.Before;
@@ -55,7 +55,7 @@ public class AddFooterTest {
     @Rule
     public SMTPMessageSender smtpMessageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
 
     private TemporaryJamesServer jamesServer;
 
@@ -63,7 +63,7 @@ public class AddFooterTest {
     public void setup() throws Exception {
         jamesServer = TemporaryJamesServer.builder()
             .withOverrides(new ActiveMQQueueModule())
-            .withMailetContainer(TemporaryJamesServer.SIMPLE_MAILET_CONTAINER_CONFIGURATION
+            .withMailetContainer(TemporaryJamesServer.simpleMailetContainerConfiguration()
                 .putProcessor(ProcessorConfiguration.transport()
                     .addMailet(MailetConfiguration.builder()
                         .matcher(All.class)
@@ -71,6 +71,7 @@ public class AddFooterTest {
                         .addProperty("text", MATCH_ME))
                     .addMailetsFrom(CommonProcessors.transport())))
             .build(temporaryFolder.newFolder());
+        jamesServer.start();
 
         DataProbe dataProbe = jamesServer.getProbe(DataProbeImpl.class);
         dataProbe.addDomain(DEFAULT_DOMAIN);
@@ -93,11 +94,11 @@ public class AddFooterTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        String processedMessage = imapMessageReader.readFirstMessage();
+        String processedMessage = testIMAPClient.readFirstMessage();
         assertThat(processedMessage).contains(MATCH_ME);
     }
 
@@ -118,11 +119,11 @@ public class AddFooterTest {
                 .sender(FROM)
                 .recipient(RECIPIENT));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(RECIPIENT, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        String processedMessage = imapMessageReader.readFirstMessage();
+        String processedMessage = testIMAPClient.readFirstMessage();
         assertThat(processedMessage).contains(MATCH_ME);
     }
 }

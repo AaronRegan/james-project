@@ -23,23 +23,23 @@ import java.util.Date;
 
 import javax.mail.Flags;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.message.request.ImapRequest;
+
+import com.google.common.base.MoreObjects;
 
 /**
  * {@link ImapRequest} which request the append of a message to a mailbox
  */
 public class AppendRequest extends AbstractImapRequest {
     private final String mailboxName;
-
     private final Flags flags;
-
     private final Date datetime;
-
     private final InputStream message;
 
-    public AppendRequest(ImapCommand command, String mailboxName, Flags flags, Date datetime, InputStream message, String tag) {
-        super(tag, command);
+    public AppendRequest(String mailboxName, Flags flags, Date datetime, InputStream message, Tag tag) {
+        super(tag, ImapConstants.APPEND_COMMAND);
         this.mailboxName = mailboxName;
         this.flags = flags;
         this.datetime = datetime;
@@ -82,4 +82,13 @@ public class AppendRequest extends AbstractImapRequest {
         return message;
     }
 
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("mailboxName", mailboxName)
+            .add("flags", flags)
+            .add("datetime", datetime)
+            .add("message", message)
+            .toString();
+    }
 }

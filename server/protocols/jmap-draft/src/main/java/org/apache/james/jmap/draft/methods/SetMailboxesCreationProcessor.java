@@ -41,6 +41,7 @@ import org.apache.james.jmap.draft.utils.SortingHierarchicalCollections;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.SubscriptionManager;
+import org.apache.james.mailbox.exception.InboxAlreadyCreated;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxExistsException;
 import org.apache.james.mailbox.exception.MailboxNameException;
@@ -51,7 +52,6 @@ import org.apache.james.mailbox.model.MailboxId.Factory;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.metrics.api.TimeMetric;
-import org.apache.james.util.OptionalUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -103,13 +103,13 @@ public class SetMailboxesCreationProcessor implements SetMailboxesProcessor {
     }
 
     private void markRequestsAsNotCreatedDueToCycle(SetMailboxesRequest request, SetMailboxesResponse.Builder builder) {
-        request.getCreate().entrySet()
-            .forEach(entry ->
-                builder.notCreated(entry.getKey(),
-                        SetError.builder()
-                        .type(SetError.Type.INVALID_ARGUMENTS)
-                        .description("The created mailboxes introduce a cycle.")
-                        .build()));
+        request.getCreate().forEach((key, value) ->
+            builder.notCreated(
+                key,
+                SetError.builder()
+                    .type(SetError.Type.INVALID_ARGUMENTS)
+                    .description("The created mailboxes introduce a cycle.")
+                    .build()));
     }
 
     private void createMailbox(MailboxCreationId mailboxCreationId, MailboxCreateRequest mailboxRequest, MailboxSession mailboxSession,
@@ -147,6 +147,13 @@ public class SetMailboxesCreationProcessor implements SetMailboxesProcessor {
                     .type(SetError.Type.INVALID_ARGUMENTS)
                     .description(e.getMessage())
                     .build());
+        } catch (InboxAlreadyCreated e) {
+            String message = String.format("The mailbox '%s' already exists as 'INBOX'", e.getMailboxName());
+            LOGGER.error(message, e);
+            builder.notCreated(mailboxCreationId, SetError.builder()
+                .type(SetError.Type.INVALID_ARGUMENTS)
+                .description(message)
+                .build());
         } catch (MailboxExistsException e) {
             String message = String.format("The mailbox '%s' already exists.", mailboxCreationId.getCreationId());
             builder.notCreated(mailboxCreationId, SetError.builder()
@@ -157,9 +164,9 @@ public class SetMailboxesCreationProcessor implements SetMailboxesProcessor {
             String message = String.format("An error occurred when creating the mailbox '%s'", mailboxCreationId.getCreationId());
             LOGGER.error(message, e);
             builder.notCreated(mailboxCreationId, SetError.builder()
-                    .type(SetError.Type.ERROR)
-                    .description(message)
-                    .build());
+                .type(SetError.Type.ERROR)
+                .description(message)
+                .build());
         }
     }
 
@@ -178,10 +185,10 @@ public class SetMailboxesCreationProcessor implements SetMailboxesProcessor {
 
             assertBelongsToUser(parentPath, mailboxSession);
 
-            return MailboxPath.forUser(mailboxSession.getUser().asString(),
+            return MailboxPath.forUser(mailboxSession.getUser(),
                 parentPath.getName() + mailboxSession.getPathDelimiter() + mailboxRequest.getName());
         }
-        return MailboxPath.forUser(mailboxSession.getUser().asString(), mailboxRequest.getName());
+        return MailboxPath.forUser(mailboxSession.getUser(), mailboxRequest.getName());
     }
 
     private void assertBelongsToUser(MailboxPath mailboxPath, MailboxSession mailboxSession) throws MailboxNotOwnedException {
@@ -191,9 +198,8 @@ public class SetMailboxesCreationProcessor implements SetMailboxesProcessor {
     }
 
     private MailboxPath getMailboxPath(Map<MailboxCreationId, MailboxId> creationIdsToCreatedMailboxId, MailboxSession mailboxSession, MailboxCreationId parentId) throws MailboxException {
-        Optional<MailboxId> mailboxId = OptionalUtils.or(
-            readCreationIdAsMailboxId(parentId),
-            Optional.ofNullable(creationIdsToCreatedMailboxId.get(parentId)));
+        Optional<MailboxId> mailboxId = readCreationIdAsMailboxId(parentId)
+            .or(() -> Optional.ofNullable(creationIdsToCreatedMailboxId.get(parentId)));
 
         return getMailboxPathFromId(mailboxId, mailboxSession)
                 .orElseThrow(() -> new MailboxParentNotFoundException(parentId));

@@ -20,15 +20,26 @@
 package org.apache.james.webadmin.routes;
 
 import static org.apache.james.webadmin.Constants.SEPARATOR;
+import static spark.Spark.halt;
+
+import java.util.List;
 
 import javax.inject.Inject;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
+import javax.ws.rs.HEAD;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 
+import org.apache.james.core.MailAddress;
+import org.apache.james.core.Username;
+import org.apache.james.rrt.api.CanSendFrom;
+import org.apache.james.rrt.api.RecipientRewriteTable;
+import org.apache.james.rrt.api.RecipientRewriteTableException;
+import org.apache.james.user.api.InvalidUsernameException;
 import org.apache.james.user.api.UsersRepositoryException;
+import org.apache.james.webadmin.Constants;
 import org.apache.james.webadmin.Routes;
 import org.apache.james.webadmin.dto.AddUserRequest;
 import org.apache.james.webadmin.dto.UserResponse;
@@ -43,12 +54,15 @@ import org.eclipse.jetty.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.steveash.guavate.Guavate;
+
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiImplicitParam;
 import io.swagger.annotations.ApiImplicitParams;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.ApiResponses;
+import spark.HaltException;
 import spark.Request;
 import spark.Response;
 import spark.Service;
@@ -65,14 +79,16 @@ public class UserRoutes implements Routes {
 
     private final UserService userService;
     private final JsonTransformer jsonTransformer;
+    private final CanSendFrom canSendFrom;
     private final JsonExtractor<AddUserRequest> jsonExtractor;
 
     private Service service;
 
     @Inject
-    public UserRoutes(UserService userService, JsonTransformer jsonTransformer) {
+    public UserRoutes(UserService userService, CanSendFrom canSendFrom, JsonTransformer jsonTransformer) {
         this.userService = userService;
         this.jsonTransformer = jsonTransformer;
+        this.canSendFrom = canSendFrom;
         this.jsonExtractor = new JsonExtractor<>(AddUserRequest.class);
     }
 
@@ -90,6 +106,10 @@ public class UserRoutes implements Routes {
         defineCreateUser();
 
         defineDeleteUser();
+
+        defineAllowedFromHeaders();
+
+        defineUserExist();
     }
 
     @DELETE
@@ -108,12 +128,29 @@ public class UserRoutes implements Routes {
         service.delete(USERS + SEPARATOR + USER_NAME, this::removeUser);
     }
 
+    @HEAD
+    @Path("/{username}")
+    @ApiOperation(value = "Testing an user existence")
+    @ApiImplicitParams({
+        @ApiImplicitParam(required = true, dataType = "string", name = "username", paramType = "path")
+    })
+    @ApiResponses(value = {
+        @ApiResponse(code = HttpStatus.OK_200, message = "OK. User exists."),
+        @ApiResponse(code = HttpStatus.BAD_REQUEST_400, message = "Invalid input user."),
+        @ApiResponse(code = HttpStatus.NOT_FOUND_404, message = "User does not exist."),
+        @ApiResponse(code = HttpStatus.INTERNAL_SERVER_ERROR_500,
+            message = "Internal server error - Something went bad on the server side.")
+    })
+    public void defineUserExist() {
+        service.head(USERS + SEPARATOR + USER_NAME, this::userExist);
+    }
+
     @PUT
     @Path("/{username}")
     @ApiOperation(value = "Creating an user")
     @ApiImplicitParams({
             @ApiImplicitParam(required = true, dataType = "string", name = "username", paramType = "path"),
-            @ApiImplicitParam(required = true, dataType = "org.apache.james.webadmin.dto.AddUserRequest", paramType = "body")
+            @ApiImplicitParam(required = true, dataTypeClass = AddUserRequest.class, paramType = "body")
     })
     @ApiResponses(value = {
             @ApiResponse(code = HttpStatus.NO_CONTENT_204, message = "OK. New user is added."),
@@ -138,8 +175,27 @@ public class UserRoutes implements Routes {
             jsonTransformer);
     }
 
+    @GET
+    @Path("/{username}/allowedFromHeaders")
+    @ApiOperation(value = "List all possible From header value for an existing user")
+    @ApiImplicitParams({
+        @ApiImplicitParam(required = true, dataType = "string", name = "username", paramType = "path")
+    })
+    @ApiResponses(value = {
+        @ApiResponse(code = HttpStatus.NO_CONTENT_204, message = "OK.", response = List.class),
+        @ApiResponse(code = HttpStatus.BAD_REQUEST_400, message = "user is not valid."),
+        @ApiResponse(code = HttpStatus.NOT_FOUND_404, message = "user does not exist."),
+        @ApiResponse(code = HttpStatus.INTERNAL_SERVER_ERROR_500,
+            message = "Internal server error - Something went bad on the server side.")
+    })
+    public void defineAllowedFromHeaders() {
+        service.get(USERS + SEPARATOR + USER_NAME + SEPARATOR + "allowedFromHeaders",
+            this::allowedFromHeaders,
+            jsonTransformer);
+    }
+
     private String removeUser(Request request, Response response) {
-        String username = request.params(USER_NAME);
+        Username username = extractUsername(request);
         try {
             userService.removeUser(username);
             return Responses.returnNoContent(response);
@@ -150,38 +206,76 @@ public class UserRoutes implements Routes {
                 .message("The user " + username + " does not exists")
                 .cause(e)
                 .haltError();
-        } catch (IllegalArgumentException e) {
-            LOGGER.info("Invalid user path", e);
+        }
+    }
+
+    private String userExist(Request request, Response response) throws UsersRepositoryException {
+        Username username = extractUsername(request);
+        if (userService.userExists(username)) {
+            response.status(HttpStatus.OK_200);
+        } else {
+            response.status(HttpStatus.NOT_FOUND_404);
+        }
+        return Constants.EMPTY_BODY;
+    }
+
+    private HaltException upsertUser(Request request, Response response) throws JsonExtractException {
+        Username username = extractUsername(request);
+        try {
+            userService.upsertUser(username,
+                jsonExtractor.parse(request.body()).getPassword());
+
+            return halt(HttpStatus.NO_CONTENT_204);
+        } catch (InvalidUsernameException e) {
+            LOGGER.info("Invalid username", e);
             throw ErrorResponder.builder()
                 .statusCode(HttpStatus.BAD_REQUEST_400)
                 .type(ErrorType.INVALID_ARGUMENT)
-                .message("Invalid user path")
+                .message("Username supplied is invalid")
+                .cause(e)
+                .haltError();
+        } catch (UsersRepositoryException e) {
+            String errorMessage = String.format("Error while upserting user '%s'", username);
+            LOGGER.info(errorMessage, e);
+            throw ErrorResponder.builder()
+                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .type(ErrorType.SERVER_ERROR)
+                .message(errorMessage)
                 .cause(e)
                 .haltError();
         }
     }
 
-    private String upsertUser(Request request, Response response) throws UsersRepositoryException {
+    private List<String> allowedFromHeaders(Request request, Response response) {
+        Username username = extractUsername(request);
+
         try {
-            return userService.upsertUser(request.params(USER_NAME),
-                jsonExtractor.parse(request.body()).getPassword(),
-                response);
-        } catch (JsonExtractException e) {
-            LOGGER.info("Error while deserializing addUser request", e);
+            if (!userService.userExists(username)) {
+                LOGGER.info("Allowed FROM headers requested for an unknown user: '{}", username.asString());
+                throw ErrorResponder.builder()
+                    .statusCode(HttpStatus.NOT_FOUND_404)
+                    .type(ErrorType.INVALID_ARGUMENT)
+                    .message(String.format("user '%s' does not exist", username.asString()))
+                    .haltError();
+            }
+
+            return canSendFrom
+                .allValidFromAddressesForUser(username)
+                .map(MailAddress::asString)
+                .collect(Guavate.toImmutableList());
+        } catch (RecipientRewriteTable.ErrorMappingException | RecipientRewriteTableException | UsersRepositoryException e) {
+            String errorMessage = String.format("Error while listing allowed From headers for user '%s'", username);
+            LOGGER.info(errorMessage, e);
             throw ErrorResponder.builder()
-                .statusCode(HttpStatus.BAD_REQUEST_400)
-                .type(ErrorType.INVALID_ARGUMENT)
-                .message("Error while deserializing addUser request")
-                .cause(e)
-                .haltError();
-        } catch (IllegalArgumentException e) {
-            LOGGER.info("Invalid user path", e);
-            throw ErrorResponder.builder()
-                .statusCode(HttpStatus.BAD_REQUEST_400)
-                .type(ErrorType.INVALID_ARGUMENT)
-                .message("Invalid user path")
+                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .type(ErrorType.SERVER_ERROR)
+                .message(errorMessage)
                 .cause(e)
                 .haltError();
         }
+    }
+
+    private Username extractUsername(Request request) {
+        return Username.of(request.params(USER_NAME));
     }
 }

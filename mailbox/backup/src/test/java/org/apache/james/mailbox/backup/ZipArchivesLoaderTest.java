@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test;
 
 import com.github.fge.lambdas.Throwing;
 
-public class ZipArchivesLoaderTest implements MailboxMessageFixture {
+class ZipArchivesLoaderTest implements MailboxMessageFixture {
     private static final int BUFFER_SIZE = 4096;
 
     private final ArchiveService archiveService = new Zipper();
@@ -61,21 +61,18 @@ public class ZipArchivesLoaderTest implements MailboxMessageFixture {
     private void createMailBoxWithMessage(MailboxPath mailboxPath, MailboxMessage... messages) throws Exception {
         MailboxSession session = mailboxManager.createSystemSession(mailboxPath.getUser());
         MailboxId mailboxId = mailboxManager.createMailbox(mailboxPath, session).get();
-        Arrays.stream(messages).forEach(Throwing.consumer(message ->
-            {
+        Arrays.stream(messages).forEach(Throwing.consumer(message -> {
                 MessageManager.AppendCommand appendCommand = MessageManager.AppendCommand.builder()
                     .withFlags(message.createFlags())
                     .build(message.getFullContent());
                 mailboxManager.getMailbox(mailboxId, session).appendMessage(appendCommand, session);
-            }
-            )
-        );
+            }));
     }
 
     @Test
     void mailAccountIteratorFromEmptyArchiveShouldThrowNoSuchElementException() throws Exception {
         ByteArrayOutputStream destination = new ByteArrayOutputStream(BUFFER_SIZE);
-        backup.backupAccount(USER1, destination);
+        backup.backupAccount(USERNAME_1, destination);
 
         InputStream source = new ByteArrayInputStream(destination.toByteArray());
         MailArchiveIterator mailArchiveIterator = archiveLoader.load(source);
@@ -87,7 +84,7 @@ public class ZipArchivesLoaderTest implements MailboxMessageFixture {
     @Test
     void callingNextSeveralTimeOnAnEmptyIteratorShouldThrowNoSuchElementException()  throws Exception {
         ByteArrayOutputStream destination = new ByteArrayOutputStream(BUFFER_SIZE);
-        backup.backupAccount(USER1, destination);
+        backup.backupAccount(USERNAME_1, destination);
 
         InputStream source = new ByteArrayInputStream(destination.toByteArray());
         MailArchiveIterator mailArchiveIterator = archiveLoader.load(source);
@@ -103,7 +100,7 @@ public class ZipArchivesLoaderTest implements MailboxMessageFixture {
         createMailBoxWithMessage(MAILBOX_PATH_USER1_MAILBOX1);
 
         ByteArrayOutputStream destination = new ByteArrayOutputStream(BUFFER_SIZE);
-        backup.backupAccount(USER1, destination);
+        backup.backupAccount(USERNAME_1, destination);
 
         InputStream source = new ByteArrayInputStream(destination.toByteArray());
         MailArchiveIterator mailArchiveIterator = archiveLoader.load(source);
@@ -120,7 +117,7 @@ public class ZipArchivesLoaderTest implements MailboxMessageFixture {
         createMailBoxWithMessage(MAILBOX_PATH_USER1_MAILBOX2);
 
         ByteArrayOutputStream destination = new ByteArrayOutputStream(BUFFER_SIZE);
-        backup.backupAccount(USER1, destination);
+        backup.backupAccount(USERNAME_1, destination);
 
         InputStream source = new ByteArrayInputStream(destination.toByteArray());
         MailArchiveIterator mailArchiveIterator = archiveLoader.load(source);

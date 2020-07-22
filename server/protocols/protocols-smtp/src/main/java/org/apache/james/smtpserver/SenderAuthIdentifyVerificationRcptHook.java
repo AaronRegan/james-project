@@ -20,45 +20,36 @@ package org.apache.james.smtpserver;
 
 import javax.inject.Inject;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.core.Domain;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.MaybeSender;
+import org.apache.james.core.Username;
 import org.apache.james.domainlist.api.DomainList;
 import org.apache.james.domainlist.api.DomainListException;
 import org.apache.james.protocols.smtp.SMTPSession;
 import org.apache.james.protocols.smtp.core.AbstractSenderAuthIdentifyVerificationRcptHook;
 import org.apache.james.protocols.smtp.hook.HookResult;
+import org.apache.james.rrt.api.CanSendFrom;
 import org.apache.james.user.api.UsersRepository;
 import org.apache.james.user.api.UsersRepositoryException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Handler which check if the authenticated user is incorrect
  */
 public class SenderAuthIdentifyVerificationRcptHook extends AbstractSenderAuthIdentifyVerificationRcptHook {
+    private static final Logger LOGGER = LoggerFactory.getLogger(SenderAuthIdentifyVerificationRcptHook.class);
 
-    private DomainList domains;
-    private UsersRepository users;
-
-    @Inject
-    public final void setUsersRepository(UsersRepository users) {
-        this.users = users;
-    }
+    private final DomainList domains;
+    private final UsersRepository users;
+    private final CanSendFrom canSendFrom;
 
     @Inject
-    public void setDomainList(DomainList domains) {
+    public SenderAuthIdentifyVerificationRcptHook(DomainList domains, UsersRepository users, CanSendFrom canSendFrom) {
         this.domains = domains;
-    }
-
-    @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
+        this.users = users;
+        this.canSendFrom = canSendFrom;
     }
 
     @Override
@@ -81,12 +72,22 @@ public class SenderAuthIdentifyVerificationRcptHook extends AbstractSenderAuthId
     }
 
     @Override
-    protected String getUser(MailAddress mailAddress) {
+    protected Username getUser(MailAddress mailAddress) {
         try {
-            return users.getUser(mailAddress);
+            return users.getUsername(mailAddress);
         } catch (UsersRepositoryException e) {
             throw new RuntimeException(e);
         }
     }
 
+    @Override
+    protected boolean isSenderAllowed(Username connectedUser, Username sender) {
+        boolean allowed = canSendFrom.userCanSendFrom(connectedUser, sender);
+        if (allowed) {
+            LOGGER.debug("{} is allowed to send a mail using {} identity", connectedUser.asString(), sender.asString());
+        } else {
+            LOGGER.info("{} is not allowed to send a mail using {} identity", connectedUser.asString(), sender.asString());
+        }
+        return allowed;
+    }
 }

@@ -23,19 +23,18 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.apache.james.core.User;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.elasticsearch.IndexAttachments;
-import org.apache.james.mailbox.elasticsearch.query.DateResolutionFormater;
 import org.apache.james.mailbox.extractor.TextExtractor;
+import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
-import org.apache.james.mailbox.store.mail.model.Property;
-import org.apache.james.mailbox.store.mail.model.impl.PropertyBuilder;
-import org.apache.james.mailbox.store.mail.model.impl.SimpleProperty;
 import org.apache.james.mailbox.store.search.SearchUtil;
 import org.apache.james.mime4j.MimeException;
 
@@ -44,9 +43,10 @@ import com.github.steveash.guavate.Guavate;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Multimap;
 
 public class IndexableMessage {
+
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssZ");
 
     public static class Builder {
         private static ZonedDateTime getSanitizedInternalDate(MailboxMessage message, ZoneId zoneId) {
@@ -57,11 +57,10 @@ public class IndexableMessage {
                     Instant.ofEpochMilli(message.getInternalDate().getTime()),
                     zoneId);
         }
-        
+
         private IndexAttachments indexAttachments;
         private MailboxMessage message;
         private TextExtractor textExtractor;
-        private List<User> users;
 
         private ZoneId zoneId;
 
@@ -70,14 +69,12 @@ public class IndexableMessage {
 
         public IndexableMessage build() {
             Preconditions.checkNotNull(message.getMailboxId());
-            Preconditions.checkNotNull(users);
             Preconditions.checkNotNull(textExtractor);
             Preconditions.checkNotNull(indexAttachments);
             Preconditions.checkNotNull(zoneId);
-            Preconditions.checkState(!users.isEmpty());
 
             try {
-                return instanciateIndexedMessage();
+                return instantiateIndexedMessage();
             } catch (IOException | MimeException e) {
                 throw new RuntimeException(e);
             }
@@ -98,47 +95,31 @@ public class IndexableMessage {
             return this;
         }
 
-        public Builder users(List<User> users) {
-            this.users = users;
-            return this;
-        }
-
         public Builder zoneId(ZoneId zoneId) {
             this.zoneId = zoneId;
             return this;
         }
 
-        private boolean computeHasAttachment(MailboxMessage message) {
-            return message.getProperties()
-                    .stream()
-                    .anyMatch(property -> property.equals(HAS_ATTACHMENT_PROPERTY));
-        }
-
-        private IndexableMessage instanciateIndexedMessage() throws IOException, MimeException {
+        private IndexableMessage instantiateIndexedMessage() throws IOException, MimeException {
             String messageId = SearchUtil.getSerializedMessageIdIfSupportedByUnderlyingStorageOrNull(message);
             MimePart parsingResult = new MimePartParser(message, textExtractor).parse();
-
-            List<String> stringifiedUsers = users.stream()
-                    .map(User::asString)
-                    .collect(Guavate.toImmutableList());
 
             Optional<String> bodyText = parsingResult.locateFirstTextBody();
             Optional<String> bodyHtml = parsingResult.locateFirstHtmlBody();
 
-            boolean hasAttachment = computeHasAttachment(message);
+            boolean hasAttachment = MessageAttachmentMetadata.hasNonInlinedAttachment(message.getAttachments());
             List<MimePart> attachments = setFlattenedAttachments(parsingResult, indexAttachments);
 
             HeaderCollection headerCollection = parsingResult.getHeaderCollection();
             ZonedDateTime internalDate = getSanitizedInternalDate(message, zoneId);
 
-            Multimap<String, String> headers = headerCollection.getHeaders();
+            List<HeaderCollection.Header> headers = headerCollection.getHeaders();
             Subjects subjects = Subjects.from(headerCollection.getSubjectSet());
             EMailers from = EMailers.from(headerCollection.getFromAddressSet());
             EMailers to = EMailers.from(headerCollection.getToAddressSet());
-            EMailers replyTo = EMailers.from(headerCollection.getReplyToAddressSet());
             EMailers cc = EMailers.from(headerCollection.getCcAddressSet());
             EMailers bcc = EMailers.from(headerCollection.getBccAddressSet());
-            String sentDate = DateResolutionFormater.DATE_TIME_FOMATTER.format(headerCollection.getSentDate().orElse(internalDate));
+            String sentDate = DATE_TIME_FORMATTER.format(headerCollection.getSentDate().orElse(internalDate));
             Optional<String> mimeMessageID = headerCollection.getMessageID();
 
             String text = Stream.of(from.serialize(),
@@ -148,14 +129,14 @@ public class IndexableMessage {
                         subjects.serialize(),
                         bodyText.orElse(null),
                         bodyHtml.orElse(null))
-                    .filter(str -> !Strings.isNullOrEmpty(str))
+                    .filter(Predicate.not(Strings::isNullOrEmpty))
                     .collect(Collectors.joining(" "));
 
             long uid = message.getUid().asLong();
             String mailboxId = message.getMailboxId().serialize();
-            long modSeq = message.getModSeq();
+            ModSeq modSeq = message.getModSeq();
             long size = message.getFullContentOctets();
-            String date = DateResolutionFormater.DATE_TIME_FOMATTER.format(getSanitizedInternalDate(message, zoneId));
+            String date = DATE_TIME_FORMATTER.format(getSanitizedInternalDate(message, zoneId));
             String mediaType = message.getMediaType();
             String subType = message.getSubType();
             boolean isAnswered = message.isAnswered();
@@ -165,7 +146,6 @@ public class IndexableMessage {
             boolean isRecent = message.isRecent();
             boolean isUnRead = !message.isSeen();
             String[] userFlags = message.createFlags().getUserFlags();
-            List<Property> properties = message.getProperties();
 
             return new IndexableMessage(
                     attachments,
@@ -187,8 +167,6 @@ public class IndexableMessage {
                     mediaType,
                     messageId,
                     modSeq,
-                    properties,
-                    replyTo,
                     sentDate,
                     size,
                     subjects,
@@ -197,7 +175,6 @@ public class IndexableMessage {
                     to,
                     uid,
                     userFlags,
-                    stringifiedUsers,
                     mimeMessageID);
         }
 
@@ -211,8 +188,6 @@ public class IndexableMessage {
         }
     }
 
-    public static final SimpleProperty HAS_ATTACHMENT_PROPERTY = new SimpleProperty(PropertyBuilder.JAMES_INTERNALS, PropertyBuilder.HAS_ATTACHMENT, "true");
-
     public static Builder builder() {
         return new Builder();
     }
@@ -225,7 +200,7 @@ public class IndexableMessage {
     private final String date;
     private final EMailers from;
     private final boolean hasAttachment;
-    private final Multimap<String, String> headers;
+    private final List<HeaderCollection.Header> headers;
     private final boolean isAnswered;
     private final boolean isDeleted;
     private final boolean isDraft;
@@ -236,8 +211,6 @@ public class IndexableMessage {
     private final String mediaType;
     private final String messageId;
     private final long modSeq;
-    private final List<Property> properties;
-    private final EMailers replyTo;
     private final String sentDate;
     private final long size;
     private final Subjects subjects;
@@ -246,41 +219,34 @@ public class IndexableMessage {
     private final EMailers to;
     private final long uid;
     private final String[] userFlags;
-    private final List<String> users;
     private final Optional<String> mimeMessageID;
 
-    private IndexableMessage(
-            List<MimePart> attachments,
-            EMailers bcc,
-            Optional<String> bodyHtml,
-            Optional<String> bodyText,
-            EMailers cc,
-            String date,
-            EMailers from,
-            boolean hasAttachment,
-            Multimap<String, String> headers,
-            boolean isAnswered,
-            boolean isDeleted,
-            boolean isDraft,
-            boolean isFlagged,
-            boolean isRecent,
-            boolean isUnRead,
-            String mailboxId,
-            String mediaType,
-            String messageId,
-            long modSeq,
-            List<Property> properties,
-            EMailers replyTo,
-            String sentDate,
-            long size,
-            Subjects subjects,
-            String subType,
-            String text,
-            EMailers to,
-            long uid,
-            String[] userFlags,
-            List<String> users,
-            Optional<String> mimeMessageID) {
+    private IndexableMessage(List<MimePart> attachments,
+                             EMailers bcc,
+                             Optional<String> bodyHtml,
+                             Optional<String> bodyText,
+                             EMailers cc,
+                             String date,
+                             EMailers from,
+                             boolean hasAttachment,
+                             List<HeaderCollection.Header> headers,
+                             boolean isAnswered,
+                             boolean isDeleted,
+                             boolean isDraft,
+                             boolean isFlagged,
+                             boolean isRecent,
+                             boolean isUnRead,
+                             String mailboxId,
+                             String mediaType, String messageId,
+                             ModSeq modSeq,
+                             String sentDate,
+                             long size,
+                             Subjects subjects,
+                             String subType, String text,
+                             EMailers to,
+                             long uid,
+                             String[] userFlags,
+                             Optional<String> mimeMessageID) {
         this.attachments = attachments;
         this.bcc = bcc;
         this.bodyHtml = bodyHtml;
@@ -299,9 +265,7 @@ public class IndexableMessage {
         this.mailboxId = mailboxId;
         this.mediaType = mediaType;
         this.messageId = messageId;
-        this.modSeq = modSeq;
-        this.properties = properties;
-        this.replyTo = replyTo;
+        this.modSeq = modSeq.asLong();
         this.sentDate = sentDate;
         this.size = size;
         this.subjects = subjects;
@@ -310,7 +274,6 @@ public class IndexableMessage {
         this.to = to;
         this.uid = uid;
         this.userFlags = userFlags;
-        this.users = users;
         this.mimeMessageID = mimeMessageID;
     }
 
@@ -318,12 +281,12 @@ public class IndexableMessage {
     public List<MimePart> getAttachments() {
         return attachments;
     }
-    
+
     @JsonProperty(JsonMessageConstants.BCC)
     public EMailers getBcc() {
         return bcc;
     }
-    
+
     @JsonProperty(JsonMessageConstants.HTML_BODY)
     public Optional<String> getBodyHtml() {
         return bodyHtml;
@@ -355,7 +318,7 @@ public class IndexableMessage {
     }
 
     @JsonProperty(JsonMessageConstants.HEADERS)
-    public Multimap<String, String> getHeaders() {
+    public List<HeaderCollection.Header> getHeaders() {
         return headers;
     }
 
@@ -377,16 +340,6 @@ public class IndexableMessage {
     @JsonProperty(JsonMessageConstants.MODSEQ)
     public long getModSeq() {
         return modSeq;
-    }
-
-    @JsonProperty(JsonMessageConstants.PROPERTIES)
-    public List<Property> getProperties() {
-        return properties;
-    }
-
-    @JsonProperty(JsonMessageConstants.REPLY_TO)
-    public EMailers getReplyTo() {
-        return replyTo;
     }
 
     @JsonProperty(JsonMessageConstants.SENT_DATE)
@@ -427,11 +380,6 @@ public class IndexableMessage {
     @JsonProperty(JsonMessageConstants.USER_FLAGS)
     public String[] getUserFlags() {
         return userFlags;
-    }
-
-    @JsonProperty(JsonMessageConstants.USERS)
-    public List<String> getUsers() {
-        return users;
     }
 
     @JsonProperty(JsonMessageConstants.IS_ANSWERED)

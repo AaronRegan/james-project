@@ -19,84 +19,55 @@
 
 package org.apache.mailbox.tools.indexer;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
-import java.util.function.Function;
 
 import javax.inject.Inject;
 
-import org.apache.james.core.User;
-import org.apache.james.json.DTOModule;
-import org.apache.james.mailbox.exception.MailboxException;
-import org.apache.james.server.task.json.dto.TaskDTO;
-import org.apache.james.server.task.json.dto.TaskDTOModule;
+import org.apache.james.core.Username;
+import org.apache.james.mailbox.indexer.ReIndexer.RunningOptions;
+import org.apache.james.mailbox.indexer.ReIndexingExecutionFailures;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.task.TaskType;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.annotations.VisibleForTesting;
+
+import reactor.core.publisher.Mono;
 
 public class UserReindexingTask implements Task {
 
-    public static final TaskType USER_RE_INDEXING = TaskType.of("userReIndexing");
+    public static final TaskType USER_RE_INDEXING = TaskType.of("user-reindexing");
 
-    public static final Function<UserReindexingTask.Factory, TaskDTOModule<UserReindexingTask, UserReindexingTask.UserReindexingTaskDTO>> MODULE = (factory) ->
-        DTOModule
-            .forDomainObject(UserReindexingTask.class)
-            .convertToDTO(UserReindexingTask.UserReindexingTaskDTO.class)
-            .toDomainObjectConverter(factory::create)
-            .toDTOConverter(UserReindexingTask.UserReindexingTaskDTO::of)
-            .typeName(USER_RE_INDEXING.asString())
-            .withFactory(TaskDTOModule::new);
+    public static class AdditionalInformation extends ReprocessingContextInformation {
+        private final Username username;
 
-    public static class UserReindexingTaskDTO implements TaskDTO {
-
-        public static UserReindexingTaskDTO of(UserReindexingTask task, String type) {
-            return new UserReindexingTaskDTO(type, task.user.asString());
-        }
-
-        private final String type;
-        private final String username;
-
-        private UserReindexingTaskDTO(@JsonProperty("type") String type, @JsonProperty("username") String username) {
-            this.type = type;
+        @VisibleForTesting
+        public AdditionalInformation(Username username, int successfullyReprocessedMailCount,
+                              int failedReprocessedMailCount, ReIndexingExecutionFailures failures,
+                              Instant timestamp, RunningOptions runningOptions) {
+            super(successfullyReprocessedMailCount, failedReprocessedMailCount, failures, timestamp, runningOptions);
             this.username = username;
         }
 
-        @Override
-        public String getType() {
-            return type;
-        }
-
         public String getUsername() {
-            return username;
+            return username.asString();
         }
 
-    }
-
-    public static class AdditionalInformation extends ReprocessingContextInformation {
-        private final User user;
-
-        AdditionalInformation(ReprocessingContext reprocessingContext, User user) {
-            super(reprocessingContext);
-            this.user = user;
-        }
-
-        public String getUser() {
-            return user.asString();
-        }
     }
 
     private final ReIndexerPerformer reIndexerPerformer;
-    private final User user;
-    private final AdditionalInformation additionalInformation;
+    private final Username username;
     private final ReprocessingContext reprocessingContext;
+    private final RunningOptions runningOptions;
 
     @Inject
-    public UserReindexingTask(ReIndexerPerformer reIndexerPerformer, User user) {
+    public UserReindexingTask(ReIndexerPerformer reIndexerPerformer, Username username, RunningOptions runningOptions) {
         this.reIndexerPerformer = reIndexerPerformer;
-        this.user = user;
+        this.username = username;
         this.reprocessingContext = new ReprocessingContext();
-        this.additionalInformation = new AdditionalInformation(reprocessingContext, user);
+        this.runningOptions = runningOptions;
     }
 
     public static class Factory {
@@ -109,18 +80,23 @@ public class UserReindexingTask implements Task {
         }
 
         public UserReindexingTask create(UserReindexingTaskDTO dto) {
-            User user = User.fromUsername(dto.getUsername());
-            return new UserReindexingTask(reIndexerPerformer, user);
+            Username username = Username.of(dto.getUsername());
+            return new UserReindexingTask(reIndexerPerformer, username,
+                dto.getRunningOptions()
+                .map(RunningOptionsDTO::toDomainObject)
+                .orElse(RunningOptions.DEFAULT));
         }
     }
 
     @Override
     public Result run() {
-        try {
-            return reIndexerPerformer.reIndex(user, reprocessingContext);
-        } catch (MailboxException e) {
-            return Result.PARTIAL;
-        }
+        return reIndexerPerformer.reIndexUserMailboxes(username, reprocessingContext, runningOptions)
+            .onErrorResume(e -> Mono.just(Result.PARTIAL))
+            .block();
+    }
+
+    public Username getUsername() {
+        return username;
     }
 
     @Override
@@ -128,8 +104,18 @@ public class UserReindexingTask implements Task {
         return USER_RE_INDEXING;
     }
 
+    public RunningOptions getRunningOptions() {
+        return runningOptions;
+    }
+
     @Override
     public Optional<TaskExecutionDetails.AdditionalInformation> details() {
-        return Optional.of(additionalInformation);
+        return Optional.of(new UserReindexingTask.AdditionalInformation(username,
+            reprocessingContext.successfullyReprocessedMailCount(),
+            reprocessingContext.failedReprocessingMailCount(),
+            reprocessingContext.failures(),
+            Clock.systemUTC().instant(),
+            runningOptions)
+        );
     }
 }

@@ -20,25 +20,22 @@
 package org.apache.james.mailbox.cassandra.mail;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.mailbox.cassandra.mail.CassandraAttachmentDAOV2.DAOAttachment;
 import org.apache.james.mailbox.cassandra.modules.CassandraAttachmentModule;
-import org.apache.james.mailbox.model.Attachment;
 import org.apache.james.mailbox.model.AttachmentId;
+import org.apache.james.mailbox.model.AttachmentMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-@ExtendWith(CassandraRestartExtension.class)
 class CassandraAttachmentDAOV2Test {
     private static final AttachmentId ATTACHMENT_ID = AttachmentId.from("id1");
     private static final HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
@@ -50,7 +47,10 @@ class CassandraAttachmentDAOV2Test {
 
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
-        testee = new CassandraAttachmentDAOV2(BLOB_ID_FACTORY, cassandra.getConf());
+        testee = new CassandraAttachmentDAOV2(
+            BLOB_ID_FACTORY,
+            cassandra.getConf(),
+            cassandraCluster.getCassandraConsistenciesConfiguration());
     }
 
     @Test
@@ -61,11 +61,17 @@ class CassandraAttachmentDAOV2Test {
     }
 
     @Test
+    void deleteShouldNotThrowWhenDoesNotExist() {
+        assertThatCode(() -> testee.delete(ATTACHMENT_ID).block())
+            .doesNotThrowAnyException();
+    }
+
+    @Test
     void getAttachmentShouldReturnAttachmentWhenStored() {
-        Attachment attachment = Attachment.builder()
+        AttachmentMetadata attachment = AttachmentMetadata.builder()
             .attachmentId(ATTACHMENT_ID)
             .type("application/json")
-            .bytes("{\"property\":`\"value\"}".getBytes(StandardCharsets.UTF_8))
+            .size(4)
             .build();
         BlobId blobId = BLOB_ID_FACTORY.from("blobId");
         DAOAttachment daoAttachment = CassandraAttachmentDAOV2.from(attachment, blobId);
@@ -74,5 +80,23 @@ class CassandraAttachmentDAOV2Test {
         Optional<DAOAttachment> actual = testee.getAttachment(ATTACHMENT_ID).blockOptional();
 
         assertThat(actual).contains(daoAttachment);
+    }
+
+    @Test
+    void getAttachmentShouldNotReturnDeletedAttachments() {
+        AttachmentMetadata attachment = AttachmentMetadata.builder()
+            .attachmentId(ATTACHMENT_ID)
+            .type("application/json")
+            .size(36)
+            .build();
+        BlobId blobId = BLOB_ID_FACTORY.from("blobId");
+        DAOAttachment daoAttachment = CassandraAttachmentDAOV2.from(attachment, blobId);
+        testee.storeAttachment(daoAttachment).block();
+
+        testee.delete(ATTACHMENT_ID).block();
+
+        Optional<DAOAttachment> actual = testee.getAttachment(ATTACHMENT_ID).blockOptional();
+
+        assertThat(actual).isEmpty();
     }
 }

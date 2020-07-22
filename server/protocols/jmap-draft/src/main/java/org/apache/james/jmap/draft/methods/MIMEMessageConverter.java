@@ -20,19 +20,27 @@
 package org.apache.james.jmap.draft.methods;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+
+import javax.inject.Inject;
 
 import org.apache.james.jmap.draft.model.CreationMessage;
 import org.apache.james.jmap.draft.model.CreationMessage.DraftEmailer;
-import org.apache.james.jmap.draft.model.MessageFactory;
-import org.apache.james.mailbox.model.MessageAttachment;
+import org.apache.james.jmap.draft.model.message.view.MessageViewFactory;
+import org.apache.james.mailbox.AttachmentContentLoader;
+import org.apache.james.mailbox.MailboxSession;
+import org.apache.james.mailbox.exception.AttachmentNotFoundException;
+import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mime4j.codec.DecodeMonitor;
 import org.apache.james.mime4j.codec.EncoderUtil;
 import org.apache.james.mime4j.codec.EncoderUtil.Usage;
@@ -63,7 +71,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableMap.Builder;
 import com.google.common.io.ByteStreams;
 import com.google.common.net.MediaType;
 
@@ -76,6 +83,7 @@ public class MIMEMessageConverter {
     private static final NameValuePair UTF_8_CHARSET = new NameValuePair("charset", StandardCharsets.UTF_8.name());
     private static final String ALTERNATIVE_SUB_TYPE = "alternative";
     private static final String MIXED_SUB_TYPE = "mixed";
+    private static final String RELATED_SUB_TYPE = "related";
     private static final String FIELD_PARAMETERS_SEPARATOR = ";";
     private static final String QUOTED_PRINTABLE = "quoted-printable";
     private static final String BASE64 = "base64";
@@ -98,13 +106,16 @@ public class MIMEMessageConverter {
             .collect(Guavate.toImmutableList());
 
     private final BasicBodyFactory bodyFactory;
+    private final AttachmentContentLoader attachmentContentLoader;
 
-    public MIMEMessageConverter() {
+    @Inject
+    public MIMEMessageConverter(AttachmentContentLoader attachmentContentLoader) {
+        this.attachmentContentLoader = attachmentContentLoader;
         this.bodyFactory = new BasicBodyFactory();
     }
 
-    public byte[] convert(ValueWithId.CreationMessageEntry creationMessageEntry, ImmutableList<MessageAttachment> messageAttachments) {
-        return asBytes(convertToMime(creationMessageEntry, messageAttachments));
+    public byte[] convert(ValueWithId.CreationMessageEntry creationMessageEntry, ImmutableList<MessageAttachmentMetadata> messageAttachments, MailboxSession session) {
+        return asBytes(convertToMime(creationMessageEntry, messageAttachments, session));
     }
 
     public byte[] asBytes(Message message) {
@@ -115,14 +126,14 @@ public class MIMEMessageConverter {
         }
     }
 
-    @VisibleForTesting Message convertToMime(ValueWithId.CreationMessageEntry creationMessageEntry, ImmutableList<MessageAttachment> messageAttachments) {
+    @VisibleForTesting Message convertToMime(ValueWithId.CreationMessageEntry creationMessageEntry, ImmutableList<MessageAttachmentMetadata> messageAttachments, MailboxSession session) {
         if (creationMessageEntry == null || creationMessageEntry.getValue() == null) {
             throw new IllegalArgumentException("creationMessageEntry is either null or has null message");
         }
 
         Message.Builder messageBuilder = Message.Builder.of();
         if (isMultipart(creationMessageEntry.getValue(), messageAttachments)) {
-            messageBuilder.setBody(createMultipart(creationMessageEntry.getValue(), messageAttachments));
+            messageBuilder.setBody(createMultipart(creationMessageEntry.getValue(), messageAttachments, session));
         } else {
             messageBuilder.setBody(createTextBody(creationMessageEntry.getValue()))
                 .setContentTransferEncoding(QUOTED_PRINTABLE);
@@ -131,7 +142,7 @@ public class MIMEMessageConverter {
         return messageBuilder.build();
     }
 
-    private void buildMimeHeaders(Message.Builder messageBuilder, CreationMessage newMessage, ImmutableList<MessageAttachment> messageAttachments) {
+    private void buildMimeHeaders(Message.Builder messageBuilder, CreationMessage newMessage, ImmutableList<MessageAttachmentMetadata> messageAttachments) {
         Optional<Mailbox> fromAddress = newMessage.getFrom().filter(DraftEmailer::hasValidEmail).map(this::convertEmailToMimeHeader);
         fromAddress.ifPresent(messageBuilder::setFrom);
         fromAddress.ifPresent(messageBuilder::setSender);
@@ -175,22 +186,22 @@ public class MIMEMessageConverter {
     }
 
     private void addMultivaluedHeader(Message.Builder messageBuilder, String fieldName, String multipleValues) {
-        Splitter.on(MessageFactory.JMAP_MULTIVALUED_FIELD_DELIMITER).split(multipleValues)
+        Splitter.on(MessageViewFactory.JMAP_MULTIVALUED_FIELD_DELIMITER).split(multipleValues)
             .forEach(value -> addHeader(messageBuilder, fieldName, value));
     }
-    
+
     private void addHeader(Message.Builder messageBuilder, String fieldName, String value) {
         FieldParser<UnstructuredField> parser = UnstructuredFieldImpl.PARSER;
         RawField rawField = new RawField(fieldName, value);
         messageBuilder.addField(parser.parse(rawField, DecodeMonitor.SILENT));
     }
 
-    private boolean isMultipart(CreationMessage newMessage, ImmutableList<MessageAttachment> messageAttachments) {
+    private boolean isMultipart(CreationMessage newMessage, ImmutableList<MessageAttachmentMetadata> messageAttachments) {
         return (newMessage.getTextBody().isPresent() && newMessage.getHtmlBody().isPresent())
                 || hasAttachment(messageAttachments);
     }
 
-    private boolean hasAttachment(ImmutableList<MessageAttachment> messageAttachments) {
+    private boolean hasAttachment(ImmutableList<MessageAttachmentMetadata> messageAttachments) {
         return !messageAttachments.isEmpty();
     }
 
@@ -201,16 +212,10 @@ public class MIMEMessageConverter {
         return bodyFactory.textBody(body, StandardCharsets.UTF_8);
     }
 
-    private Multipart createMultipart(CreationMessage newMessage, ImmutableList<MessageAttachment> messageAttachments) {
+    private Multipart createMultipart(CreationMessage newMessage, ImmutableList<MessageAttachmentMetadata> messageAttachments, MailboxSession session) {
         try {
             if (hasAttachment(messageAttachments)) {
-                MultipartBuilder builder = MultipartBuilder.create(MIXED_SUB_TYPE);
-                addBody(newMessage, builder);
-    
-                Consumer<MessageAttachment> addAttachment = addAttachment(builder);
-                messageAttachments.forEach(addAttachment);
-    
-                return builder.build();
+                return createMultipartWithAttachments(newMessage, messageAttachments, session);
             } else {
                 return createMultipartAlternativeBody(newMessage);
             }
@@ -220,6 +225,43 @@ public class MIMEMessageConverter {
         }
     }
 
+    private Multipart createMultipartWithAttachments(CreationMessage newMessage, ImmutableList<MessageAttachmentMetadata> messageAttachments, MailboxSession session) throws IOException {
+        MultipartBuilder mixedMultipartBuilder = MultipartBuilder.create(MIXED_SUB_TYPE);
+        List<MessageAttachmentMetadata> inlineAttachments = messageAttachments.stream()
+            .filter(MessageAttachmentMetadata::isInline)
+            .collect(Guavate.toImmutableList());
+        List<MessageAttachmentMetadata> besideAttachments = messageAttachments.stream()
+            .filter(Predicate.not(MessageAttachmentMetadata::isInline))
+            .collect(Guavate.toImmutableList());
+
+        if (inlineAttachments.size() > 0) {
+            mixedMultipartBuilder.addBodyPart(relatedInnerMessage(newMessage, inlineAttachments, session));
+        } else {
+            addBody(newMessage, mixedMultipartBuilder);
+        }
+
+        addAttachments(besideAttachments, mixedMultipartBuilder, session);
+
+        return mixedMultipartBuilder.build();
+    }
+
+    private Message relatedInnerMessage(CreationMessage newMessage, List<MessageAttachmentMetadata> inlines, MailboxSession session) throws IOException {
+        MultipartBuilder relatedMultipart = MultipartBuilder.create(RELATED_SUB_TYPE);
+        addBody(newMessage, relatedMultipart);
+
+        return Message.Builder.of()
+            .setBody(addAttachments(inlines, relatedMultipart, session)
+                .build())
+            .build();
+    }
+
+    private MultipartBuilder addAttachments(List<MessageAttachmentMetadata> messageAttachments,
+                                            MultipartBuilder multipartBuilder, MailboxSession session) {
+        messageAttachments.forEach(addAttachment(multipartBuilder, session));
+
+        return multipartBuilder;
+    }
+    
     private void addBody(CreationMessage newMessage, MultipartBuilder builder) throws IOException {
         if (newMessage.getHtmlBody().isPresent() && newMessage.getTextBody().isPresent()) {
             Multipart body = createMultipartAlternativeBody(newMessage);
@@ -257,52 +299,59 @@ public class MIMEMessageConverter {
         }
     }
 
-    private Consumer<MessageAttachment> addAttachment(MultipartBuilder builder) {
+    private Consumer<MessageAttachmentMetadata> addAttachment(MultipartBuilder builder, MailboxSession session) {
         return att -> { 
             try {
-                builder.addBodyPart(attachmentBodyPart(att));
-            } catch (IOException e) {
+                builder.addBodyPart(attachmentBodyPart(att, session));
+            } catch (IOException | AttachmentNotFoundException e) {
                 LOGGER.error("Error while creating attachment", e);
                 throw new RuntimeException(e);
             }
         };
     }
 
-    private BodyPart attachmentBodyPart(MessageAttachment att) throws IOException {
-        BodyPartBuilder builder = BodyPartBuilder.create()
-            .use(bodyFactory)
-            .setBody(new BasicBodyFactory().binaryBody(ByteStreams.toByteArray(att.getAttachment().getStream())))
-            .setField(contentTypeField(att))
-            .setField(contentDispositionField(att.isInline()))
-            .setContentTransferEncoding(BASE64);
-        contentId(builder, att);
-        return builder.build();
+    private BodyPart attachmentBodyPart(MessageAttachmentMetadata att, MailboxSession session) throws IOException, AttachmentNotFoundException {
+        try (InputStream attachmentStream = attachmentContentLoader.load(att.getAttachment(), session)) {
+            BodyPartBuilder builder = BodyPartBuilder.create()
+                .use(bodyFactory)
+                .setBody(new BasicBodyFactory().binaryBody(ByteStreams.toByteArray(attachmentStream)))
+                .setField(contentTypeField(att))
+                .setField(contentDispositionField(att.isInline()))
+                .setContentTransferEncoding(BASE64);
+            contentId(builder, att);
+            return builder.build();
+        }
     }
 
-    private void contentId(BodyPartBuilder builder, MessageAttachment att) {
+    private void contentId(BodyPartBuilder builder, MessageAttachmentMetadata att) {
         if (att.getCid().isPresent()) {
             builder.setField(new RawField("Content-ID", att.getCid().get().getValue()));
         }
     }
 
-    private ContentTypeField contentTypeField(MessageAttachment att) {
-        Builder<String, String> parameters = ImmutableMap.builder();
+    @VisibleForTesting
+    ContentTypeField contentTypeField(MessageAttachmentMetadata att) {
+        ContentTypeField typeAsField =  att.getAttachment().getType().asMime4J();
         if (att.getName().isPresent()) {
-            parameters.put("name", encode(att.getName().get()));
+            return Fields.contentType(typeAsField.getMimeType(),
+                ImmutableMap.<String, String>builder()
+                    .putAll(parametersWithoutName(typeAsField))
+                    .put("name", encode(att.getName().get()))
+                    .build());
         }
-        String type = att.getAttachment().getType();
-        if (type.contains(FIELD_PARAMETERS_SEPARATOR)) {
-            return Fields.contentType(contentTypeWithoutParameters(type), parameters.build());
-        }
-        return Fields.contentType(type, parameters.build());
+        return typeAsField;
+    }
+
+    private ImmutableMap<String, String> parametersWithoutName(ContentTypeField typeAsField) {
+        return typeAsField.getParameters()
+            .entrySet()
+            .stream()
+            .filter(entry -> !entry.getKey().equals("name"))
+            .collect(Guavate.toImmutableMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     private String encode(String name) {
         return EncoderUtil.encodeEncodedWord(name, Usage.TEXT_TOKEN);
-    }
-
-    private String contentTypeWithoutParameters(String type) {
-        return Splitter.on(FIELD_PARAMETERS_SEPARATOR).splitToList(type).get(0);
     }
 
     private ContentDispositionField contentDispositionField(boolean isInline) {

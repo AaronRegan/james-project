@@ -22,17 +22,18 @@ package org.apache.james.imap.processor.fetch;
 import static org.apache.james.imap.processor.fetch.MessageResultUtils.getMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.james.mailbox.model.MessageResult;
+import org.apache.james.mailbox.model.Header;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.google.common.collect.ImmutableList;
+
 public class MailboxMessageResultUtilsTest {
 
-    private static final String[] NAMES = { "One", "Three" };
+    private static final ImmutableList<String> NAMES = ImmutableList.of("One", "Three");
 
     Header headerOne;
 
@@ -40,48 +41,13 @@ public class MailboxMessageResultUtilsTest {
 
     Header headerThree;
 
-    List<MessageResult.Header> headers;
-
-    private static class Header implements MessageResult.Header {
-
-        public String name;
-
-        public String value;
-
-        public Header(String name) {
-            this.name = name;
-            value = "Value";
-        }
-
-        @Override
-        public long size() {
-            return 0;
-        }
-
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public String getValue() {
-            return value;
-        }
-
-        
-        @Override
-        public InputStream getInputStream() {
-            return null;
-        }
-
-
-    }
+    List<Header> headers;
 
     @Before
     public void setUp() throws Exception {
-        headerOne = new Header("One");
-        headerTwo = new Header("Two");
-        headerThree = new Header("Three");
+        headerOne = new Header("One", "Value");
+        headerTwo = new Header("Two", "Value");
+        headerThree = new Header("Three", "Value");
         headers = new ArrayList<>();
         headers.add(headerOne);
         headers.add(headerTwo);
@@ -90,7 +56,7 @@ public class MailboxMessageResultUtilsTest {
 
     @Test
     public void testGetAllContent() {
-        List<MessageResult.Header> results = MessageResultUtils.getAll(headers.iterator());
+        List<Header> results = MessageResultUtils.getAll(headers.iterator());
         assertThat(results.size()).isEqualTo(3);
         assertThat(results.get(0)).isEqualTo(headerOne);
         assertThat(results.get(1)).isEqualTo(headerTwo);
@@ -98,9 +64,8 @@ public class MailboxMessageResultUtilsTest {
     }
 
     @Test
-    public void testGetMatching() throws Exception {
-
-        List<MessageResult.Header> results = MessageResultUtils
+    public void testGetMatching() {
+        List<Header> results = MessageResultUtils
                 .getMatching(NAMES, headers.iterator());
         assertThat(results.size()).isEqualTo(2);
         assertThat(results.get(0)).isEqualTo(headerOne);
@@ -108,16 +73,15 @@ public class MailboxMessageResultUtilsTest {
     }
 
     @Test
-    public void testGetNotMatching() throws Exception {
-
-        List<MessageResult.Header> results = MessageResultUtils.getNotMatching(NAMES, headers
+    public void testGetNotMatching() {
+        List<Header> results = MessageResultUtils.getNotMatching(NAMES, headers
                 .iterator());
         assertThat(results.size()).isEqualTo(1);
         assertThat(results.get(0)).isEqualTo(headerTwo);
     }
 
     @Test
-    public void testGetMatchingSingle() throws Exception {
+    public void testGetMatchingSingle() {
         assertThat(MessageResultUtils.getMatching("One", headers
                 .iterator())).isEqualTo(headerOne);
         assertThat(MessageResultUtils.getMatching("Three",

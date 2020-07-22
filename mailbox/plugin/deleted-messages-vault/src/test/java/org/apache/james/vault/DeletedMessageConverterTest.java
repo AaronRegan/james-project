@@ -28,23 +28,23 @@ import static org.apache.james.vault.DeletedMessageFixture.MAILBOX_ID_1;
 import static org.apache.james.vault.DeletedMessageFixture.MAILBOX_ID_2;
 import static org.apache.james.vault.DeletedMessageFixture.MESSAGE_ID;
 import static org.apache.james.vault.DeletedMessageFixture.SUBJECT;
-import static org.apache.james.vault.DeletedMessageFixture.USER;
+import static org.apache.james.vault.DeletedMessageFixture.USERNAME;
 import static org.apache.mailet.base.MailAddressFixture.RECIPIENT1;
 import static org.apache.mailet.base.MailAddressFixture.RECIPIENT2;
 import static org.apache.mailet.base.MailAddressFixture.SENDER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 
 import org.apache.james.core.MaybeSender;
-import org.apache.james.core.User;
-import org.apache.james.mailbox.model.Attachment;
+import org.apache.james.core.Username;
+import org.apache.james.mailbox.model.AttachmentId;
+import org.apache.james.mailbox.model.AttachmentMetadata;
 import org.apache.james.mailbox.model.MailboxId;
-import org.apache.james.mailbox.model.MessageAttachment;
+import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mailbox.store.MessageBuilder;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.apache.james.mailbox.store.mail.model.impl.SimpleMailboxMessage;
@@ -65,33 +65,33 @@ class DeletedMessageConverterTest {
     private static final List<MailboxId> ORIGIN_MAILBOXES = ImmutableList.of(MAILBOX_ID_1, MAILBOX_ID_2);
     private static final DeletedMessageVaultHook.DeletedMessageMailboxContext DELETED_MESSAGE_MAILBOX_CONTEXT = new DeletedMessageVaultHook.DeletedMessageMailboxContext(
         DeletedMessageFixture.MESSAGE_ID,
-        USER,
+        USERNAME,
         ORIGIN_MAILBOXES);
 
-    private static final User EMPTY_OWNER = null;
+    private static final Username EMPTY_OWNER = null;
 
-    private static final Collection<MessageAttachment> NO_ATTACHMENT = ImmutableList.of();
-    private static final Collection<MessageAttachment> ATTACHMENTS = ImmutableList.of(MessageAttachment.builder()
-        .attachment(Attachment.builder()
-            .bytes("content".getBytes(StandardCharsets.UTF_8))
+    private static final Collection<MessageAttachmentMetadata> NO_ATTACHMENT = ImmutableList.of();
+    private static final Collection<MessageAttachmentMetadata> ATTACHMENTS = ImmutableList.of(MessageAttachmentMetadata.builder()
+        .attachment(AttachmentMetadata.builder()
+            .attachmentId(AttachmentId.from("1"))
             .type("type")
+            .size(48)
             .build())
         .build());
 
     private DeletedMessageConverter deletedMessageConverter;
 
     private MessageBuilder getMessageBuilder() {
-        MessageBuilder builder = new MessageBuilder();
-        builder.header(SENDER_FIELD, SENDER.asString());
-        builder.header(FROM_FIELD, "alice@james.com");
-        builder.header(TO_FIELD, RECIPIENT1.asString());
-        builder.header(CC_FIELD, RECIPIENT2.asString());
-        builder.header(SUBJECT_FIELD, SUBJECT);
-        builder.header(DATE_FIELD, "Thu, 30 Oct 2014 14:12:00 +0000 (GMT)");
-        return builder;
+        return new MessageBuilder()
+            .header(SENDER_FIELD, SENDER.asString())
+            .header(FROM_FIELD, "alice@james.com")
+            .header(TO_FIELD, RECIPIENT1.asString())
+            .header(CC_FIELD, RECIPIENT2.asString())
+            .header(SUBJECT_FIELD, SUBJECT)
+            .header(DATE_FIELD, "Thu, 30 Oct 2014 14:12:00 +0000 (GMT)");
     }
 
-    private MailboxMessage buildMessage(MessageBuilder messageBuilder, Collection<MessageAttachment> attachments) throws Exception {
+    private MailboxMessage buildMessage(MessageBuilder messageBuilder, Collection<MessageAttachmentMetadata> attachments) throws Exception {
         MailboxMessage mailboxMessage = messageBuilder
             .size(CONTENT.length)
             .build(MESSAGE_ID);
@@ -116,8 +116,12 @@ class DeletedMessageConverterTest {
 
     @Test
     void convertShouldReturnCorrespondingDeletedMessageWhenNoDeliveryDateInMimeMessageButInMailboxMessage() throws Exception {
-        MessageBuilder builder = getMessageBuilder();
-        builder.headers.remove(DATE_FIELD);
+        MessageBuilder builder = new MessageBuilder()
+            .header(SENDER_FIELD, SENDER.asString())
+            .header(FROM_FIELD, "alice@james.com")
+            .header(TO_FIELD, RECIPIENT1.asString())
+            .header(CC_FIELD, RECIPIENT2.asString())
+            .header(SUBJECT_FIELD, SUBJECT);
 
         assertThat(deletedMessageConverter.convert(DELETED_MESSAGE_MAILBOX_CONTEXT, buildMessage(builder, NO_ATTACHMENT), DELETION_DATE))
             .isEqualTo(DELETED_MESSAGE_WITH_SUBJECT);
@@ -125,8 +129,12 @@ class DeletedMessageConverterTest {
 
     @Test
     void convertShouldReturnCorrespondingDeletedMessageWhenNoSubject() throws Exception {
-        MessageBuilder builder = getMessageBuilder();
-        builder.headers.remove(SUBJECT_FIELD);
+        MessageBuilder builder = new MessageBuilder()
+            .header(SENDER_FIELD, SENDER.asString())
+            .header(FROM_FIELD, "alice@james.com")
+            .header(TO_FIELD, RECIPIENT1.asString())
+            .header(CC_FIELD, RECIPIENT2.asString())
+            .header(DATE_FIELD, "Thu, 30 Oct 2014 14:12:00 +0000 (GMT)");
 
         assertThat(deletedMessageConverter.convert(DELETED_MESSAGE_MAILBOX_CONTEXT, buildMessage(builder, NO_ATTACHMENT), DELETION_DATE))
             .isEqualTo(DELETED_MESSAGE);
@@ -142,9 +150,11 @@ class DeletedMessageConverterTest {
 
     @Test
     void convertShouldReturnCorrespondingDeletedMessageWhenNoRecipient() throws Exception {
-        MessageBuilder builder = getMessageBuilder();
-        builder.headers.remove(TO_FIELD);
-        builder.headers.remove(CC_FIELD);
+        MessageBuilder builder = new MessageBuilder()
+            .header(SENDER_FIELD, SENDER.asString())
+            .header(FROM_FIELD, "alice@james.com")
+            .header(SUBJECT_FIELD, SUBJECT)
+            .header(DATE_FIELD, "Thu, 30 Oct 2014 14:12:00 +0000 (GMT)");
 
         DeletedMessage deletedMessage = deletedMessageConverter.convert(DELETED_MESSAGE_MAILBOX_CONTEXT, buildMessage(builder, NO_ATTACHMENT), DELETION_DATE);
 
@@ -175,8 +185,12 @@ class DeletedMessageConverterTest {
 
     @Test
     void convertShouldReturnCorrespondingDeletedMessageWhenNoSender() throws Exception {
-        MessageBuilder builder = getMessageBuilder();
-        builder.headers.remove(SENDER_FIELD);
+        MessageBuilder builder = new MessageBuilder()
+            .header(FROM_FIELD, "alice@james.com")
+            .header(TO_FIELD, RECIPIENT1.asString())
+            .header(CC_FIELD, RECIPIENT2.asString())
+            .header(SUBJECT_FIELD, SUBJECT)
+            .header(DATE_FIELD, "Thu, 30 Oct 2014 14:12:00 +0000 (GMT)");
 
         DeletedMessage deletedMessage = deletedMessageConverter.convert(DELETED_MESSAGE_MAILBOX_CONTEXT, buildMessage(builder, NO_ATTACHMENT), DELETION_DATE);
 

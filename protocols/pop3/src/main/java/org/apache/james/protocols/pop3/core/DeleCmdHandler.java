@@ -19,11 +19,10 @@
 
 package org.apache.james.protocols.pop3.core;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.protocols.api.ProtocolSession.State;
 import org.apache.james.protocols.api.Request;
 import org.apache.james.protocols.api.Response;
@@ -42,16 +41,6 @@ public class DeleCmdHandler implements CommandHandler<POP3Session> {
 
     private static final Response SYNTAX_ERROR = new POP3Response(POP3Response.ERR_RESPONSE, "Usage: DELE [mail number]").immutable();
     private static final Response DELETED = new POP3Response(POP3Response.OK_RESPONSE, "Message deleted").immutable();
-
-    @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
-    }
 
     /**
      * Handler method called upon receipt of a DELE command. This command
@@ -73,7 +62,12 @@ public class DeleCmdHandler implements CommandHandler<POP3Session> {
                     StringBuilder responseBuffer = new StringBuilder(64).append("Message (").append(num).append(") does not exist.");
                     return  new POP3Response(POP3Response.ERR_RESPONSE, responseBuffer.toString());
                 }
-                List<String> deletedUidList = (List<String>) session.getAttachment(POP3Session.DELETED_UID_LIST, State.Transaction);
+                List<String> deletedUidList = session.getAttachment(POP3Session.DELETED_UID_LIST, State.Transaction)
+                    .orElseGet(() -> {
+                        ArrayList<String> uidList = new ArrayList<>();
+                        session.setAttachment(POP3Session.DELETED_UID_LIST, uidList, State.Transaction);
+                        return uidList;
+                    });
 
                 String uid = meta.getUid();
 

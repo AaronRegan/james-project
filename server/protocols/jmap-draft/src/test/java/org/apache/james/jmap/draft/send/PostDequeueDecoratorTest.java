@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import javax.mail.Flags;
 import javax.mail.Flags.Flag;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.DefaultMailboxes;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageIdManager;
@@ -43,7 +44,7 @@ import org.apache.james.mailbox.exception.MailboxRoleNotFoundException;
 import org.apache.james.mailbox.inmemory.InMemoryMessageId;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
 import org.apache.james.mailbox.model.ComposedMessageId;
-import org.apache.james.mailbox.model.FetchGroupImpl;
+import org.apache.james.mailbox.model.FetchGroup;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageRange;
@@ -66,11 +67,12 @@ import com.google.common.collect.ImmutableList;
 public class PostDequeueDecoratorTest {
     private static final String OUTBOX = DefaultMailboxes.OUTBOX;
     private static final String SENT = DefaultMailboxes.SENT;
-    private static final String USERNAME = "username@domain.tld";
+    private static final String RAW_USERNAME = "username@domain.tld";
+    private static final Username USERNAME = Username.of(RAW_USERNAME);
     private static final MessageUid UID = MessageUid.of(1);
     private static final MailboxPath OUTBOX_MAILBOX_PATH = MailboxPath.forUser(USERNAME, OUTBOX);
     private static final MailboxPath SENT_MAILBOX_PATH = MailboxPath.forUser(USERNAME, SENT);
-    private static final Attribute USERNAME_ATTRIBUTE = new Attribute(MailMetadata.MAIL_METADATA_USERNAME_ATTRIBUTE, AttributeValue.of(USERNAME));
+    private static final Attribute USERNAME_ATTRIBUTE = new Attribute(MailMetadata.MAIL_METADATA_USERNAME_ATTRIBUTE, AttributeValue.of(RAW_USERNAME));
     
     private StoreMailboxManager mailboxManager;
     private MailQueueItem mockedMailQueueItem;
@@ -112,7 +114,7 @@ public class PostDequeueDecoratorTest {
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         mailboxManager.createMailbox(SENT_MAILBOX_PATH, mailboxSession);
         MessageManager messageManager = mailboxManager.getMailbox(SENT_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId sentMessageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId sentMessageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(sentMessageId.getMessageId().serialize()));
         mail.setAttribute(USERNAME_ATTRIBUTE);
         
@@ -124,7 +126,7 @@ public class PostDequeueDecoratorTest {
         MailboxSession mailboxSession = mailboxManager.createSystemSession(USERNAME);
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         MessageManager messageManager = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(messageId.getMessageId().serialize()));
         mail.setAttribute(USERNAME_ATTRIBUTE);
 
@@ -137,14 +139,14 @@ public class PostDequeueDecoratorTest {
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         mailboxManager.createMailbox(SENT_MAILBOX_PATH, mailboxSession);
         MessageManager messageManager = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(messageId.getMessageId().serialize()));
         mail.setAttribute(USERNAME_ATTRIBUTE);
         
         testee.done(true);
         
         MessageManager sentMailbox = mailboxManager.getMailbox(SENT_MAILBOX_PATH, mailboxSession);
-        MessageResultIterator resultIterator = sentMailbox.getMessages(MessageRange.one(UID), FetchGroupImpl.FULL_CONTENT, mailboxSession);
+        MessageResultIterator resultIterator = sentMailbox.getMessages(MessageRange.one(UID), FetchGroup.FULL_CONTENT, mailboxSession);
         assertThat(resultIterator).toIterable()
             .hasSize(1);
     }
@@ -155,14 +157,14 @@ public class PostDequeueDecoratorTest {
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         mailboxManager.createMailbox(SENT_MAILBOX_PATH, mailboxSession);
         MessageManager messageManager = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(messageId.getMessageId().serialize()));
         mail.setAttribute(USERNAME_ATTRIBUTE);
         
         testee.done(true);
         
         MessageManager mailbox = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroupImpl.FULL_CONTENT, mailboxSession);
+        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroup.FULL_CONTENT, mailboxSession);
         assertThat(resultIterator).toIterable()
             .hasSize(0);
     }
@@ -173,14 +175,14 @@ public class PostDequeueDecoratorTest {
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         mailboxManager.createMailbox(SENT_MAILBOX_PATH, mailboxSession);
         MessageManager messageManager = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(messageId.getMessageId().serialize()));
         mail.setAttribute(USERNAME_ATTRIBUTE);
         
         testee.done(false);
         
         MessageManager mailbox = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroupImpl.FULL_CONTENT, mailboxSession);
+        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroup.FULL_CONTENT, mailboxSession);
         assertThat(resultIterator).toIterable()
             .hasSize(1);
     }
@@ -196,7 +198,7 @@ public class PostDequeueDecoratorTest {
         testee.done(true);
         
         MessageManager mailbox = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroupImpl.FULL_CONTENT, mailboxSession);
+        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroup.FULL_CONTENT, mailboxSession);
         assertThat(resultIterator).toIterable()
             .hasSize(1);
     }
@@ -207,13 +209,13 @@ public class PostDequeueDecoratorTest {
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         mailboxManager.createMailbox(SENT_MAILBOX_PATH, mailboxSession);
         MessageManager messageManager = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(messageId.getMessageId().serialize()));
         
         testee.done(true);
         
         MessageManager mailbox = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroupImpl.FULL_CONTENT, mailboxSession);
+        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroup.FULL_CONTENT, mailboxSession);
         assertThat(resultIterator).toIterable()
             .hasSize(1);
     }
@@ -230,7 +232,7 @@ public class PostDequeueDecoratorTest {
         testee.done(true);
         
         MessageManager mailbox = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroupImpl.FULL_CONTENT, mailboxSession);
+        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroup.FULL_CONTENT, mailboxSession);
         assertThat(resultIterator).toIterable()
             .hasSize(1);
     }
@@ -248,7 +250,7 @@ public class PostDequeueDecoratorTest {
         testee.done(true);
         
         MessageManager mailbox = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroupImpl.FULL_CONTENT, mailboxSession);
+        MessageResultIterator resultIterator = mailbox.getMessages(MessageRange.one(UID), FetchGroup.FULL_CONTENT, mailboxSession);
         assertThat(resultIterator).toIterable()
             .hasSize(1);
     }
@@ -263,18 +265,18 @@ public class PostDequeueDecoratorTest {
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         MailboxId sentMailboxId = mailboxManager.createMailbox(SENT_MAILBOX_PATH, mailboxSession).get();
         MessageManager messageManager = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(messageId.getMessageId().serialize()));
         mail.setAttribute(USERNAME_ATTRIBUTE);
 
-        ImmutableList<MessageResult> allMessages = ImmutableList.copyOf(messageManager.getMessages(MessageRange.all(), FetchGroupImpl.MINIMAL, mailboxSession));
+        ImmutableList<MessageResult> allMessages = ImmutableList.copyOf(messageManager.getMessages(MessageRange.all(), FetchGroup.MINIMAL, mailboxSession));
 
-        when(messageIdManager.getMessages(eq(ImmutableList.of(messageId.getMessageId())), eq(FetchGroupImpl.MINIMAL), any(MailboxSession.class))).thenReturn(allMessages);
+        when(messageIdManager.getMessage(eq(messageId.getMessageId()), eq(FetchGroup.MINIMAL), any(MailboxSession.class))).thenReturn(allMessages);
 
         testee.done(true);
         testee.done(true);
 
-        verify(messageIdManager, times(1)).getMessages(eq(ImmutableList.of(messageId.getMessageId())), eq(FetchGroupImpl.MINIMAL), any(MailboxSession.class));
+        verify(messageIdManager, times(1)).getMessage(eq(messageId.getMessageId()), eq(FetchGroup.MINIMAL), any(MailboxSession.class));
         verify(messageIdManager, times(1)).setInMailboxes(eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)), any(MailboxSession.class));
         verify(messageIdManager, times(1)).setFlags(eq(new Flags(Flag.SEEN)), eq(MessageManager.FlagsUpdateMode.ADD), eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)), any(MailboxSession.class));
 
@@ -291,11 +293,11 @@ public class PostDequeueDecoratorTest {
         mailboxManager.createMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
         mailboxManager.createMailbox(SENT_MAILBOX_PATH, mailboxSession).get();
         MessageManager messageManager = mailboxManager.getMailbox(OUTBOX_MAILBOX_PATH, mailboxSession);
-        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession);
+        ComposedMessageId messageId = messageManager.appendMessage(AppendCommand.from(message), mailboxSession).getId();
         mail.setAttribute(messageIdAttribute(messageId.getMessageId().serialize()));
         mail.setAttribute(USERNAME_ATTRIBUTE);
 
-        when(messageIdManager.getMessages(eq(ImmutableList.of(messageId.getMessageId())), eq(FetchGroupImpl.MINIMAL), any(MailboxSession.class))).thenThrow(MailboxException.class);
+        when(messageIdManager.getMessage(eq(messageId.getMessageId()), eq(FetchGroup.MINIMAL), any(MailboxSession.class))).thenThrow(MailboxException.class);
 
         testee.done(true);
     }

@@ -22,16 +22,16 @@ package org.apache.james.jmap.draft.methods.integration;
 import static io.restassured.RestAssured.given;
 import static io.restassured.RestAssured.with;
 import static org.apache.james.jmap.HttpJmapAuthentication.authenticateJamesUser;
+import static org.apache.james.jmap.JMAPTestingConstants.ARGUMENTS;
+import static org.apache.james.jmap.JMAPTestingConstants.DOMAIN;
+import static org.apache.james.jmap.JMAPTestingConstants.NAME;
+import static org.apache.james.jmap.JMAPTestingConstants.calmlyAwait;
+import static org.apache.james.jmap.JMAPTestingConstants.jmapRequestSpecBuilder;
 import static org.apache.james.jmap.JmapCommonRequests.getInboxId;
 import static org.apache.james.jmap.JmapCommonRequests.getOutboxId;
 import static org.apache.james.jmap.JmapCommonRequests.listMessageIdsForAccount;
 import static org.apache.james.jmap.JmapCommonRequests.listMessageIdsInMailbox;
 import static org.apache.james.jmap.JmapURIBuilder.baseUri;
-import static org.apache.james.jmap.TestingConstants.ARGUMENTS;
-import static org.apache.james.jmap.TestingConstants.DOMAIN;
-import static org.apache.james.jmap.TestingConstants.NAME;
-import static org.apache.james.jmap.TestingConstants.calmlyAwait;
-import static org.apache.james.jmap.TestingConstants.jmapRequestSpecBuilder;
 import static org.awaitility.Duration.TWO_MINUTES;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
@@ -42,36 +42,38 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.startsWith;
 
 import java.util.List;
-import java.util.Optional;
 
 import org.apache.james.GuiceJamesServer;
-import org.apache.james.core.quota.QuotaSize;
+import org.apache.james.core.Username;
+import org.apache.james.core.quota.QuotaSizeLimit;
+import org.apache.james.jmap.AccessToken;
 import org.apache.james.jmap.MessageAppender;
-import org.apache.james.jmap.api.access.AccessToken;
-import org.apache.james.jmap.categories.BasicFeature;
+import org.apache.james.jmap.draft.JmapGuiceProbe;
+import org.apache.james.junit.categories.BasicFeature;
 import org.apache.james.mailbox.DefaultMailboxes;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.MailboxConstants;
+import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
-import org.apache.james.mailbox.model.SerializableQuotaValue;
+import org.apache.james.mailbox.model.QuotaRoot;
 import org.apache.james.mailbox.probe.MailboxProbe;
 import org.apache.james.mailbox.probe.QuotaProbe;
 import org.apache.james.modules.MailboxProbeImpl;
 import org.apache.james.modules.QuotaProbesImpl;
 import org.apache.james.probe.DataProbe;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.junit.experimental.categories.Category;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.Iterables;
+
 import io.restassured.RestAssured;
 import io.restassured.parsing.Parser;
 
 public abstract class SendMDNMethodTest {
-    private static final String HOMER = "homer@" + DOMAIN;
-    private static final String BART = "bart@" + DOMAIN;
+    private static final Username HOMER = Username.of("homer@" + DOMAIN);
+    private static final Username BART = Username.of("bart@" + DOMAIN);
     private static final String PASSWORD = "password";
     private static final String BOB_PASSWORD = "bobPassword";
 
@@ -88,14 +90,14 @@ public abstract class SendMDNMethodTest {
         DataProbe dataProbe = jmapServer.getProbe(DataProbeImpl.class);
 
         RestAssured.requestSpecification = jmapRequestSpecBuilder
-                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort())
+                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort().getValue())
                 .build();
         RestAssured.defaultParser = Parser.JSON;
 
         dataProbe.addDomain(DOMAIN);
-        dataProbe.addUser(HOMER, PASSWORD);
-        dataProbe.addUser(BART, BOB_PASSWORD);
-        mailboxProbe.createMailbox("#private", HOMER, DefaultMailboxes.INBOX);
+        dataProbe.addUser(HOMER.asString(), PASSWORD);
+        dataProbe.addUser(BART.asString(), BOB_PASSWORD);
+        mailboxProbe.createMailbox("#private", HOMER.asString(), DefaultMailboxes.INBOX);
         homerAccessToken = authenticateJamesUser(baseUri(jmapServer), HOMER, PASSWORD);
         bartAccessToken = authenticateJamesUser(baseUri(jmapServer), BART, BOB_PASSWORD);
     }
@@ -108,9 +110,9 @@ public abstract class SendMDNMethodTest {
             "    \"setMessages\"," +
             "    {" +
             "      \"create\": { \"" + messageCreationId  + "\" : {" +
-            "        \"headers\":{\"Disposition-Notification-To\":\"" + BART + "\"}," +
-            "        \"from\": { \"name\": \"Bob\", \"email\": \"" + BART + "\"}," +
-            "        \"to\": [{ \"name\": \"User\", \"email\": \"" + HOMER + "\"}]," +
+            "        \"headers\":{\"Disposition-Notification-To\":\"" + BART.asString() + "\"}," +
+            "        \"from\": { \"name\": \"Bob\", \"email\": \"" + BART.asString() + "\"}," +
+            "        \"to\": [{ \"name\": \"User\", \"email\": \"" + HOMER.asString() + "\"}]," +
             "        \"subject\": \"Message with an attachment\"," +
             "        \"textBody\": \"Test body, plain text version\"," +
             "        \"htmlBody\": \"Test <b>body</b>, HTML version\"," +
@@ -122,7 +124,7 @@ public abstract class SendMDNMethodTest {
             "]";
 
         String id = with()
-            .header("Authorization", bartAccessToken.serialize())
+            .header("Authorization", bartAccessToken.asString())
             .body(requestBody)
             .post("/jmap")
         .then()
@@ -142,8 +144,8 @@ public abstract class SendMDNMethodTest {
             "    \"setMessages\"," +
             "    {" +
             "      \"create\": { \"" + messageCreationId  + "\" : {" +
-            "        \"from\": { \"name\": \"Bob\", \"email\": \"" + BART + "\"}," +
-            "        \"to\": [{ \"name\": \"User\", \"email\": \"" + HOMER + "\"}]," +
+            "        \"from\": { \"name\": \"Bob\", \"email\": \"" + BART.asString() + "\"}," +
+            "        \"to\": [{ \"name\": \"User\", \"email\": \"" + HOMER.asString() + "\"}]," +
             "        \"subject\": \"Message with an attachment\"," +
             "        \"textBody\": \"Test body, plain text version\"," +
             "        \"htmlBody\": \"Test <b>body</b>, HTML version\"," +
@@ -155,7 +157,7 @@ public abstract class SendMDNMethodTest {
             "]";
 
         with()
-            .header("Authorization", bartAccessToken.serialize())
+            .header("Authorization", bartAccessToken.asString())
             .body(requestBody)
             .post("/jmap")
         .then()
@@ -174,7 +176,7 @@ public abstract class SendMDNMethodTest {
 
         String creationId = "creation-1";
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                     "    \"messageId\":\"" + messageIds.get(0) + "\"," +
@@ -204,7 +206,7 @@ public abstract class SendMDNMethodTest {
         String creationId = "creation-1";
         String randomMessageId = randomMessageId().serialize();
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                     "    \"messageId\":\"" + randomMessageId + "\"," +
@@ -240,7 +242,7 @@ public abstract class SendMDNMethodTest {
         String creationId = "creation-1";
 
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                     "    \"messageId\":\"" + messageIds.get(0) + "\"," +
@@ -280,7 +282,7 @@ public abstract class SendMDNMethodTest {
         // HOMER sends a MDN back to BART
         String creationId = "creation-1";
         with()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                 "    \"messageId\":\"" + homerReceivedMessageId + "\"," +
@@ -302,14 +304,14 @@ public abstract class SendMDNMethodTest {
 
         String firstMessage = ARGUMENTS + ".list[0]";
         given()
-            .header("Authorization", bartAccessToken.serialize())
+            .header("Authorization", bartAccessToken.asString())
             .body("[[\"getMessages\", {\"ids\": [\"" + bartInboxMessageIds + "\"]}, \"#0\"]]")
         .when()
             .post("/jmap")
         .then()
             .statusCode(200)
-            .body(firstMessage + ".from.email", is(HOMER))
-            .body(firstMessage + ".to.email", contains(BART))
+            .body(firstMessage + ".from.email", is(HOMER.asString()))
+            .body(firstMessage + ".to.email", contains(BART.asString()))
             .body(firstMessage + ".hasAttachment", is(true))
             .body(firstMessage + ".textBody", is("Read confirmation"))
             .body(firstMessage + ".subject", is("subject"))
@@ -327,7 +329,7 @@ public abstract class SendMDNMethodTest {
         // USER sends a MDN back to BART
         String creationId = "creation-1";
         with()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                 "    \"messageId\":\"" + messageIds.get(0) + "\"," +
@@ -348,7 +350,7 @@ public abstract class SendMDNMethodTest {
         List<String> bobInboxMessageIds = listMessageIdsInMailbox(bartAccessToken, getInboxId(bartAccessToken));
 
         String blobId = with()
-            .header("Authorization", bartAccessToken.serialize())
+            .header("Authorization", bartAccessToken.asString())
             .body("[[\"getMessages\", {\"ids\": [\"" + bobInboxMessageIds.get(0) + "\"]}, \"#0\"]]")
             .post("/jmap")
         .then()
@@ -357,7 +359,7 @@ public abstract class SendMDNMethodTest {
             .path(ARGUMENTS + ".list[0].attachments[0].blobId");
 
         given()
-            .header("Authorization", bartAccessToken.serialize())
+            .header("Authorization", bartAccessToken.asString())
         .when()
             .get("/download/" + blobId)
         .then()
@@ -373,7 +375,7 @@ public abstract class SendMDNMethodTest {
         String creationId = "creation-1";
         // Missing subject
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                     "    \"messageId\":\"" + randomMessageId().serialize() + "\"," +
@@ -403,14 +405,14 @@ public abstract class SendMDNMethodTest {
         List<String> messageIds = listMessageIdsForAccount(homerAccessToken);
 
         QuotaProbe quotaProbe = jmapServer.getProbe(QuotaProbesImpl.class);
-        String inboxQuotaRoot = quotaProbe.getQuotaRoot("#private", HOMER, DefaultMailboxes.INBOX);
-        quotaProbe.setMaxStorage(inboxQuotaRoot, SerializableQuotaValue.valueOf(Optional.of(QuotaSize.size(100))));
+        QuotaRoot inboxQuotaRoot = quotaProbe.getQuotaRoot(MailboxPath.inbox(HOMER));
+        quotaProbe.setMaxStorage(inboxQuotaRoot, QuotaSizeLimit.size(100));
 
-        MessageAppender.fillMailbox(jmapServer.getProbe(MailboxProbeImpl.class), HOMER, MailboxConstants.INBOX);
+        MessageAppender.fillMailbox(jmapServer.getProbe(MailboxProbeImpl.class), HOMER.asString(), MailboxConstants.INBOX);
 
         String creationId = "creation-1";
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                 "    \"messageId\":\"" + messageIds.get(0) + "\"," +
@@ -440,7 +442,7 @@ public abstract class SendMDNMethodTest {
         String creationId = "creation-1";
         // Missing actionMode
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                 "    \"messageId\":\"" + randomMessageId().serialize() + "\"," +
@@ -467,7 +469,7 @@ public abstract class SendMDNMethodTest {
     void invalidEnumValuesInMDNShouldBeReported() {
         String creationId = "creation-1";
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"setMessages\", {\"sendMDN\": {" +
                 "\"" + creationId + "\":{" +
                 "    \"messageId\":\"" + randomMessageId().serialize() + "\"," +

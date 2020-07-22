@@ -20,49 +20,34 @@
 
 package org.apache.james.rrt.cassandra.migration;
 
-import static net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-import java.io.IOException;
+import java.time.Instant;
 
-import org.apache.james.server.task.json.JsonTaskAdditionalInformationsSerializer;
-import org.apache.james.server.task.json.JsonTaskSerializer;
-import org.apache.james.task.TaskExecutionDetails;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.james.JsonSerializationVerifier;
 import org.junit.jupiter.api.Test;
 
 class MappingsSourcesMigrationTaskSerializationTest {
+    private static final Instant TIMESTAMP = Instant.parse("2018-11-13T12:00:55Z");
     private static final MappingsSourcesMigration MIGRATION = mock(MappingsSourcesMigration.class);
     private static final MappingsSourcesMigration.MappingsSourcesMigrationTask TASK = new MappingsSourcesMigration.MappingsSourcesMigrationTask(MIGRATION);
-    private static final String SERIALIZED_TASK = "{\"type\": \"mappingsSourcesMigration\"}";
-    private static final MappingsSourcesMigration.AdditionalInformation DETAILS = new MappingsSourcesMigration.AdditionalInformation(42L, 10);
-    private static final String SERIALIZED_ADDITIONAL_INFORMATION = "{\"successfulMappingsCount\":42,\"errorMappinsCount\":10}";
-
-    private static final JsonTaskSerializer TASK_SERIALIZER = new JsonTaskSerializer(MappingsSourcesMigrationTaskDTO.MODULE.apply(MIGRATION));
-    private static final JsonTaskAdditionalInformationsSerializer JSON_TASK_ADDITIONAL_INFORMATIONS_SERIALIZER = new JsonTaskAdditionalInformationsSerializer(MappingsSourcesMigrationTaskAdditionalInformationDTO.MODULE);
+    private static final String SERIALIZED_TASK = "{\"type\": \"mappings-sources-migration\"}";
+    private static final MappingsSourcesMigration.AdditionalInformation DETAILS = new MappingsSourcesMigration.AdditionalInformation(42L, 10, TIMESTAMP);
+    private static final String SERIALIZED_ADDITIONAL_INFORMATION = "{\"type\": \"mappings-sources-migration\", \"successfulMappingsCount\":42,\"errorMappingsCount\":10,\"timestamp\":\"2018-11-13T12:00:55Z\"}";
 
     @Test
-    void taskShouldBeSerializable() throws JsonProcessingException {
-        assertThatJson(TASK_SERIALIZER.serialize(TASK))
-            .isEqualTo(SERIALIZED_TASK);
+    void taskShouldBeSerializable() throws Exception {
+        JsonSerializationVerifier.dtoModule(MappingsSourcesMigrationTaskDTO.MODULE.apply(MIGRATION))
+            .bean(TASK)
+            .json(SERIALIZED_TASK)
+            .verify();
     }
 
     @Test
-    void taskShouldBeDeserializable() throws IOException {
-        assertThat(TASK_SERIALIZER.deserialize(SERIALIZED_TASK))
-            .isEqualToComparingFieldByField(TASK);
-    }
-
-    @Test
-    void additionalInformationShouldBeSerializable() throws JsonProcessingException {
-        assertThatJson(JSON_TASK_ADDITIONAL_INFORMATIONS_SERIALIZER.serialize(DETAILS)).isEqualTo(SERIALIZED_ADDITIONAL_INFORMATION);
-    }
-
-    @Test
-    void additonalInformationShouldBeDeserializable() throws IOException {
-        assertThat(JSON_TASK_ADDITIONAL_INFORMATIONS_SERIALIZER.deserialize("mappingsSourcesMigration", SERIALIZED_ADDITIONAL_INFORMATION))
-            .isEqualToComparingFieldByField(DETAILS);
+    void additionalInformationShouldBeSerializable() throws Exception {
+        JsonSerializationVerifier.dtoModule(MappingsSourcesMigrationTaskAdditionalInformationDTO.module(MappingsSourcesMigration.TYPE))
+            .bean(DETAILS)
+            .json(SERIALIZED_ADDITIONAL_INFORMATION)
+            .verify();
     }
 }

@@ -21,25 +21,31 @@ package org.apache.james.blob.api;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
-import reactor.core.publisher.Mono;
+import org.reactivestreams.Publisher;
 
 public interface BlobStore {
 
-    Mono<BlobId> save(BucketName bucketName, byte[] data);
+    enum StoragePolicy {
+        SIZE_BASED,
+        LOW_COST,
+        HIGH_PERFORMANCE
+    }
 
-    Mono<BlobId> save(BucketName bucketName, InputStream data);
+    Publisher<BlobId> save(BucketName bucketName, byte[] data, StoragePolicy storagePolicy);
 
-    Mono<byte[]> readBytes(BucketName bucketName, BlobId blobId);
+    Publisher<BlobId> save(BucketName bucketName, InputStream data, StoragePolicy storagePolicy);
+
+    default Publisher<BlobId> save(BucketName bucketName, String data, StoragePolicy storagePolicy) {
+        return save(bucketName, data.getBytes(StandardCharsets.UTF_8), storagePolicy);
+    }
+
+    Publisher<byte[]> readBytes(BucketName bucketName, BlobId blobId);
 
     InputStream read(BucketName bucketName, BlobId blobId);
 
-    default Mono<BlobId> save(BucketName bucketName, String data) {
-        return save(bucketName, data.getBytes(StandardCharsets.UTF_8));
-    }
-
     BucketName getDefaultBucketName();
 
-    Mono<Void> deleteBucket(BucketName bucketName);
+    Publisher<Void> deleteBucket(BucketName bucketName);
 
-    Mono<Void> delete(BucketName bucketName, BlobId blobId);
+    Publisher<Void> delete(BucketName bucketName, BlobId blobId);
 }

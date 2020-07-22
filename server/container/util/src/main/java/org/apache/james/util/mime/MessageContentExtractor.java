@@ -34,9 +34,11 @@ import org.apache.james.mime4j.dom.Body;
 import org.apache.james.mime4j.dom.Entity;
 import org.apache.james.mime4j.dom.Multipart;
 import org.apache.james.mime4j.dom.TextBody;
+import org.apache.james.util.html.HtmlTextExtractor;
 
 import com.github.fge.lambdas.Throwing;
 import com.github.fge.lambdas.functions.ThrowingFunction;
+import com.google.common.base.Strings;
 
 public class MessageContentExtractor {
 
@@ -177,7 +179,7 @@ public class MessageContentExtractor {
             && part.getHeader().getField(CONTENT_ID) == null;
     }
 
-    public static class MessageContent {
+    public static final class MessageContent {
         private final Optional<String> textBody;
         private final Optional<String> htmlBody;
 
@@ -220,9 +222,20 @@ public class MessageContentExtractor {
                     htmlBody.map(Optional::of).orElse(fromInnerMultipart.getHtmlBody()));
         }
 
+        public Optional<String> extractMainTextContent(HtmlTextExtractor htmlTextExtractor) {
+            return htmlBody.map(htmlTextExtractor::toPlainText)
+                .filter(Predicate.not(Strings::isNullOrEmpty))
+                .or(() -> textBody);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(textBody, htmlBody);
+        }
+
         @Override
         public boolean equals(Object other) {
-            if (other == null || !(other instanceof MessageContent)) {
+            if (!(other instanceof MessageContent)) {
                 return false;
             }
             MessageContent otherMessageContent = (MessageContent)other;

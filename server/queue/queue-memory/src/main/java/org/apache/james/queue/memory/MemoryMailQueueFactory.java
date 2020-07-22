@@ -42,6 +42,7 @@ import org.apache.james.core.MailAddress;
 import org.apache.james.queue.api.MailQueue;
 import org.apache.james.queue.api.MailQueueFactory;
 import org.apache.james.queue.api.MailQueueItemDecoratorFactory;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.queue.api.ManageableMailQueue;
 import org.apache.james.server.core.MailImpl;
 import org.apache.mailet.Mail;
@@ -51,14 +52,15 @@ import com.github.fge.lambdas.Throwing;
 import com.github.steveash.guavate.Guavate;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
-public class MemoryMailQueueFactory implements MailQueueFactory<ManageableMailQueue> {
+public class MemoryMailQueueFactory implements MailQueueFactory<MemoryMailQueueFactory.MemoryCacheableMailQueue> {
 
-    private final ConcurrentHashMap<String, MemoryMailQueueFactory.MemoryMailQueue> mailQueues;
+    private final ConcurrentHashMap<MailQueueName, MemoryCacheableMailQueue> mailQueues;
     private final MailQueueItemDecoratorFactory mailQueueItemDecoratorFactory;
 
     @Inject
@@ -68,40 +70,48 @@ public class MemoryMailQueueFactory implements MailQueueFactory<ManageableMailQu
     }
 
     @Override
-    public Set<ManageableMailQueue> listCreatedMailQueues() {
-        return ImmutableSet.copyOf(mailQueues.values());
+    public Set<MailQueueName> listCreatedMailQueues() {
+        return mailQueues.values()
+            .stream()
+            .map(MemoryCacheableMailQueue::getName)
+            .collect(Guavate.toImmutableSet());
     }
 
     @Override
-    public Optional<ManageableMailQueue> getQueue(String name) {
+    public Optional<MemoryCacheableMailQueue> getQueue(MailQueueName name, PrefetchCount count) {
         return Optional.ofNullable(mailQueues.get(name));
     }
 
     @Override
-    public MemoryMailQueueFactory.MemoryMailQueue createQueue(String name) {
-        MemoryMailQueueFactory.MemoryMailQueue newMailQueue = new MemoryMailQueue(name, mailQueueItemDecoratorFactory);
-        return Optional.ofNullable(mailQueues.putIfAbsent(name, newMailQueue))
-            .orElse(newMailQueue);
+    public MemoryCacheableMailQueue createQueue(MailQueueName name, PrefetchCount prefetchCount) {
+        return mailQueues.computeIfAbsent(name, mailQueueName -> new MemoryCacheableMailQueue(mailQueueName, mailQueueItemDecoratorFactory));
     }
 
-    public static class MemoryMailQueue implements ManageableMailQueue {
+    public static class MemoryCacheableMailQueue implements ManageableMailQueue {
         private final DelayQueue<MemoryMailQueueItem> mailItems;
         private final LinkedBlockingDeque<MemoryMailQueueItem> inProcessingMailItems;
-        private final String name;
+        private final MailQueueName name;
         private final Flux<MailQueueItem> flux;
 
-        public MemoryMailQueue(String name, MailQueueItemDecoratorFactory mailQueueItemDecoratorFactory) {
+        public MemoryCacheableMailQueue(MailQueueName name, MailQueueItemDecoratorFactory mailQueueItemDecoratorFactory) {
             this.mailItems = new DelayQueue<>();
             this.inProcessingMailItems = new LinkedBlockingDeque<>();
             this.name = name;
             this.flux = Mono.fromCallable(mailItems::take)
                 .repeat()
-                .flatMap(item -> Mono.just(inProcessingMailItems.add(item)).thenReturn(item))
-                .map(mailQueueItemDecoratorFactory::decorate);
+                .subscribeOn(Schedulers.elastic())
+                .flatMap(item ->
+                    Mono.fromRunnable(() -> inProcessingMailItems.add(item)).thenReturn(item))
+                .map(item -> mailQueueItemDecoratorFactory.decorate(item, name));
         }
 
         @Override
-        public String getName() {
+        public void close() {
+            //There's no resource to free
+        }
+
+        @Override
+        public MailQueueName getName() {
             return name;
         }
 
@@ -163,7 +173,7 @@ public class MemoryMailQueueFactory implements MailQueueFactory<ManageableMailQu
         @Override
         public long flush() throws MailQueueException {
             int count = 0;
-            for (MailQueueItem item: mailItems) {
+            for (MemoryMailQueueItem item: mailItems) {
                 if (mailItems.remove(item)) {
                     enQueue(item.getMail());
                     count += 1;
@@ -211,9 +221,9 @@ public class MemoryMailQueueFactory implements MailQueueFactory<ManageableMailQu
 
         @Override
         public MailQueueIterator browse() throws MailQueueException {
-            Iterator<MailQueueItemView> underlying = ImmutableList.copyOf(mailItems)
+            Iterator<DefaultMailQueueItemView> underlying = ImmutableList.copyOf(mailItems)
                 .stream()
-                .map(item -> new MailQueueItemView(item.getMail(), item.delivery))
+                .map(item -> new DefaultMailQueueItemView(item.getMail(), item.delivery))
                 .iterator();
 
             return new MailQueueIterator() {
@@ -240,7 +250,7 @@ public class MemoryMailQueueFactory implements MailQueueFactory<ManageableMailQu
                 return false;
             }
 
-            MemoryMailQueue that = (MemoryMailQueue) o;
+            MemoryCacheableMailQueue that = (MemoryCacheableMailQueue) o;
 
             return Objects.equal(this.name, that.name);
         }
@@ -253,10 +263,10 @@ public class MemoryMailQueueFactory implements MailQueueFactory<ManageableMailQu
 
     public static class MemoryMailQueueItem implements MailQueue.MailQueueItem, Delayed {
         private final Mail mail;
-        private final MemoryMailQueue queue;
+        private final MemoryCacheableMailQueue queue;
         private final ZonedDateTime delivery;
 
-        public MemoryMailQueueItem(Mail mail, MemoryMailQueue queue, ZonedDateTime delivery) {
+        public MemoryMailQueueItem(Mail mail, MemoryCacheableMailQueue queue, ZonedDateTime delivery) {
             this.mail = mail;
             this.queue = queue;
             this.delivery = delivery;

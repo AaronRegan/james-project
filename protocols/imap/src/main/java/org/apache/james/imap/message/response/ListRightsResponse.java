@@ -19,7 +19,7 @@
 
 package org.apache.james.imap.message.response;
 
-import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 import org.apache.james.imap.api.ImapConstants;
@@ -30,12 +30,11 @@ import org.apache.james.mailbox.model.MailboxACL;
  * LISTRIGHTS Response.
  */
 public final class ListRightsResponse implements ImapResponseMessage {
-
     private final String identifier;
     private final String mailboxName;
-    private final MailboxACL.Rfc4314Rights[] rights;
+    private final List<MailboxACL.Rfc4314Rights> rights;
 
-    public ListRightsResponse(String mailboxName, String identifier, MailboxACL.Rfc4314Rights[] rights) {
+    public ListRightsResponse(String mailboxName, String identifier, List<MailboxACL.Rfc4314Rights> rights) {
         super();
         this.mailboxName = mailboxName;
         this.identifier = identifier;
@@ -50,7 +49,7 @@ public final class ListRightsResponse implements ImapResponseMessage {
         return mailboxName;
     }
 
-    public MailboxACL.Rfc4314Rights[] getRights() {
+    public List<MailboxACL.Rfc4314Rights> getRights() {
         return rights;
     }
 
@@ -61,19 +60,19 @@ public final class ListRightsResponse implements ImapResponseMessage {
 
             return Objects.equals(this.mailboxName, other.mailboxName) &&
                 Objects.equals(this.identifier, other.identifier) &&
-                Arrays.equals(this.rights, other.rights);
+                Objects.equals(this.rights, other.rights);
         }
         return false;
     }
 
     @Override
     public final int hashCode() {
-        return Objects.hash(mailboxName, identifier, Arrays.hashCode(rights));
+        return Objects.hash(mailboxName, identifier, rights);
     }
 
     @Override
     public String toString() {
-        StringBuilder result = new StringBuilder().append(ImapConstants.LISTRIGHTS_RESPONSE_NAME).append(' ').append(mailboxName).append(' ').append(identifier);
+        StringBuilder result = new StringBuilder().append(ImapConstants.LISTRIGHTS_COMMAND.getName()).append(' ').append(mailboxName).append(' ').append(identifier);
 
         for (MailboxACL.Rfc4314Rights optionalRightsGroup : rights) {
             result.append(' ').append(optionalRightsGroup.toString());

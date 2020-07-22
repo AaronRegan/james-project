@@ -18,19 +18,23 @@
  ****************************************************************/
 package org.apache.james.quota.search.elasticsearch.events;
 
-import java.io.IOException;
-
 import javax.inject.Inject;
 import javax.inject.Named;
 
+import org.apache.james.backends.es.DocumentId;
 import org.apache.james.backends.es.ElasticSearchIndexer;
+import org.apache.james.backends.es.RoutingKey;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.events.Event;
 import org.apache.james.mailbox.events.Group;
 import org.apache.james.mailbox.events.MailboxListener;
 import org.apache.james.quota.search.elasticsearch.QuotaRatioElasticSearchConstants;
 import org.apache.james.quota.search.elasticsearch.json.QuotaRatioToElasticSearchJson;
+import org.reactivestreams.Publisher;
 
-public class ElasticSearchQuotaMailboxListener implements MailboxListener.GroupMailboxListener {
+import reactor.core.publisher.Mono;
+
+public class ElasticSearchQuotaMailboxListener implements MailboxListener.ReactiveGroupMailboxListener {
     public static class ElasticSearchQuotaMailboxListenerGroup extends Group {
 
     }
@@ -39,13 +43,15 @@ public class ElasticSearchQuotaMailboxListener implements MailboxListener.GroupM
 
     private final ElasticSearchIndexer indexer;
     private final QuotaRatioToElasticSearchJson quotaRatioToElasticSearchJson;
+    private final RoutingKey.Factory<Username> routingKeyFactory;
 
     @Inject
-    public ElasticSearchQuotaMailboxListener(
-        @Named(QuotaRatioElasticSearchConstants.InjectionNames.QUOTA_RATIO) ElasticSearchIndexer indexer,
-        QuotaRatioToElasticSearchJson quotaRatioToElasticSearchJson) {
+    public ElasticSearchQuotaMailboxListener(@Named(QuotaRatioElasticSearchConstants.InjectionNames.QUOTA_RATIO) ElasticSearchIndexer indexer,
+                                             QuotaRatioToElasticSearchJson quotaRatioToElasticSearchJson,
+                                             RoutingKey.Factory<Username> routingKeyFactory) {
         this.indexer = indexer;
         this.quotaRatioToElasticSearchJson = quotaRatioToElasticSearchJson;
+        this.routingKeyFactory = routingKeyFactory;
     }
 
     @Override
@@ -59,12 +65,21 @@ public class ElasticSearchQuotaMailboxListener implements MailboxListener.GroupM
     }
 
     @Override
-    public void event(Event event) throws IOException {
-        handleEvent((QuotaUsageUpdatedEvent) event);
+    public Publisher<Void> reactiveEvent(Event event) {
+        return handleEvent((QuotaUsageUpdatedEvent) event);
     }
 
-    private void handleEvent(QuotaUsageUpdatedEvent event) throws IOException {
-        indexer.index(event.getUser().asString(),
-            quotaRatioToElasticSearchJson.convertToJson(event));
+    private Mono<Void> handleEvent(QuotaUsageUpdatedEvent event) {
+        Username user = event.getUsername();
+        DocumentId id = toDocumentId(user);
+        RoutingKey routingKey = routingKeyFactory.from(user);
+
+        return Mono.fromCallable(() -> quotaRatioToElasticSearchJson.convertToJson(event))
+            .flatMap(json -> indexer.index(id, json, routingKey))
+            .then();
+    }
+
+    private DocumentId toDocumentId(Username user) {
+        return DocumentId.fromString(user.asString());
     }
 }

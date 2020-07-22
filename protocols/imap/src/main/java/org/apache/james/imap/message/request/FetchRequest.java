@@ -18,25 +18,23 @@
  ****************************************************************/
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.message.FetchData;
 import org.apache.james.imap.api.message.IdRange;
 
+import com.google.common.base.MoreObjects;
+
 public class FetchRequest extends AbstractImapRequest {
     private final boolean useUids;
-
     private final IdRange[] idSet;
-
     private final FetchData fetch;
 
-    public FetchRequest(ImapCommand command, boolean useUids, IdRange[] idSet, FetchData fetch, String tag) {
-        super(tag, command);
+    public FetchRequest(boolean useUids, IdRange[] idSet, FetchData fetch, Tag tag) {
+        super(tag, ImapConstants.FETCH_COMMAND);
         this.useUids = useUids;
         this.idSet = idSet;
         this.fetch = fetch;
-        if (useUids) {
-            fetch.setUid(true);
-        }
     }
 
     public final FetchData getFetch() {
@@ -51,4 +49,12 @@ public class FetchRequest extends AbstractImapRequest {
         return useUids;
     }
 
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("useUids", useUids)
+            .add("idSet", idSet)
+            .add("fetch", fetch)
+            .toString();
+    }
 }

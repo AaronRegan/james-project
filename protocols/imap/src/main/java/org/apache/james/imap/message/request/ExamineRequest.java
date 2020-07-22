@@ -18,13 +18,28 @@
  ****************************************************************/
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.UidRange;
 
+import com.google.common.base.MoreObjects;
+
 public class ExamineRequest extends AbstractMailboxSelectionRequest {
-    public ExamineRequest(ImapCommand command, String mailboxName, boolean condstore, Long lastKnownUidValidity, Long knownModSeq, UidRange[] uidSet, UidRange[] knownUidSet, IdRange[] knownSequenceSet, String tag) {
-        super(command, mailboxName, condstore, lastKnownUidValidity, knownModSeq, uidSet, knownUidSet, knownSequenceSet, tag);
+    public ExamineRequest(String mailboxName, boolean condstore, ClientSpecifiedUidValidity lastKnownUidValidity, Long knownModSeq, UidRange[] uidSet, UidRange[] knownUidSet, IdRange[] knownSequenceSet, Tag tag) {
+        super(ImapConstants.EXAMINE_COMMAND, mailboxName, condstore, lastKnownUidValidity, knownModSeq, uidSet, knownUidSet, knownSequenceSet, tag);
     }
 
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("mailboxName", getMailboxName())
+            .add("condstore", getCondstore())
+            .add("lastKnownUidValidity", getLastKnownUidValidity())
+            .add("knownModSeq", getKnownModSeq())
+            .add("uidSet", getUidSet())
+            .add("knownUidSet", getKnownUidSet())
+            .add("knownSequenceSet", getKnownSequenceSet())
+            .toString();
+    }
 }

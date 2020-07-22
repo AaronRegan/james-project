@@ -19,7 +19,10 @@
 
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
+
+import com.google.common.base.MoreObjects;
 
 /**
  * GETACL Request.
@@ -27,8 +30,8 @@ import org.apache.james.imap.api.ImapCommand;
 public class GetACLRequest extends AbstractImapRequest {
     private final String mailboxName;
 
-    public GetACLRequest(String tag, ImapCommand command, String mailboxName) {
-        super(tag, command);
+    public GetACLRequest(Tag tag, String mailboxName) {
+        super(tag, ImapConstants.GETACL_COMMAND);
         this.mailboxName = mailboxName;
     }
 
@@ -36,4 +39,10 @@ public class GetACLRequest extends AbstractImapRequest {
         return mailboxName;
     }
 
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("mailboxName", mailboxName)
+            .toString();
+    }
 }

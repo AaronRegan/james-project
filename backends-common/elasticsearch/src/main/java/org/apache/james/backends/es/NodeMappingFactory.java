@@ -23,8 +23,8 @@ import java.io.IOException;
 
 import org.apache.http.HttpStatus;
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
+import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.ResponseException;
-import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 
 public class NodeMappingFactory {
@@ -40,6 +40,8 @@ public class NodeMappingFactory {
     public static final String TEXT = "text";
     public static final String KEYWORD = "keyword";
     public static final String PROPERTIES = "properties";
+    public static final String ROUTING = "_routing";
+    public static final String REQUIRED = "required";
     public static final String DATE = "date";
     public static final String FORMAT = "format";
     public static final String NESTED = "nested";
@@ -52,16 +54,18 @@ public class NodeMappingFactory {
     public static final String SNOWBALL = "snowball";
     public static final String IGNORE_ABOVE = "ignore_above";
 
-    public static RestHighLevelClient applyMapping(RestHighLevelClient client, IndexName indexName, XContentBuilder mappingsSources) throws IOException {
+    public static ReactorElasticSearchClient applyMapping(ReactorElasticSearchClient client, IndexName indexName, XContentBuilder mappingsSources) throws IOException {
         if (!mappingAlreadyExist(client, indexName)) {
             createMapping(client, indexName, mappingsSources);
         }
         return client;
     }
 
-    public static boolean mappingAlreadyExist(RestHighLevelClient client, IndexName indexName) throws IOException {
+    // ElasticSearch 6.3.2 does not support field master_timeout that is set up by 6.4.3 REST client when relying on getMapping
+    @SuppressWarnings("deprecation")
+    public static boolean mappingAlreadyExist(ReactorElasticSearchClient client, IndexName indexName) throws IOException {
         try {
-            client.getLowLevelClient().performRequest("GET", indexName.getValue() + "/_mapping/" + NodeMappingFactory.DEFAULT_MAPPING_NAME);
+            client.getLowLevelClient().performRequest("GET", "/" + indexName.getValue() + "/_mapping/" + NodeMappingFactory.DEFAULT_MAPPING_NAME);
             return true;
         } catch (ResponseException e) {
             if (e.getResponse().getStatusLine().getStatusCode() != HttpStatus.SC_NOT_FOUND) {
@@ -71,11 +75,12 @@ public class NodeMappingFactory {
         return false;
     }
 
-    public static void createMapping(RestHighLevelClient client, IndexName indexName, XContentBuilder mappingsSources) throws IOException {
+    public static void createMapping(ReactorElasticSearchClient client, IndexName indexName, XContentBuilder mappingsSources) throws IOException {
         client.indices().putMapping(
             new PutMappingRequest(indexName.getValue())
                 .type(NodeMappingFactory.DEFAULT_MAPPING_NAME)
-                .source(mappingsSources));
+                .source(mappingsSources),
+            RequestOptions.DEFAULT);
     }
 
 }

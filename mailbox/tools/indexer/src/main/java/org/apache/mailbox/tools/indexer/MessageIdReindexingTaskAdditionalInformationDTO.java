@@ -18,7 +18,8 @@
  ****************************************************************/
 package org.apache.mailbox.tools.indexer;
 
-import java.util.function.Function;
+import java.time.Clock;
+import java.time.Instant;
 
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailbox.model.MessageId;
@@ -29,26 +30,44 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class MessageIdReindexingTaskAdditionalInformationDTO implements AdditionalInformationDTO {
 
-    static final Function<MessageId.Factory, AdditionalInformationDTOModule<MessageIdReIndexingTask.AdditionalInformation, MessageIdReindexingTaskAdditionalInformationDTO>> SERIALIZATION_MODULE =
-        factory ->
-            DTOModule.forDomainObject(MessageIdReIndexingTask.AdditionalInformation.class)
-                .convertToDTO(MessageIdReindexingTaskAdditionalInformationDTO.class)
-                .toDomainObjectConverter(dto -> new MessageIdReIndexingTask.AdditionalInformation(factory.fromString(dto.getMessageId())))
-                .toDTOConverter((details, type) -> new MessageIdReindexingTaskAdditionalInformationDTO(details.getMessageId()))
-                .typeName(MessageIdReIndexingTask.TYPE.asString())
-                .withFactory(AdditionalInformationDTOModule::new);
+    public static AdditionalInformationDTOModule<MessageIdReIndexingTask.AdditionalInformation, MessageIdReindexingTaskAdditionalInformationDTO> module(MessageId.Factory factory) {
+        return DTOModule.forDomainObject(MessageIdReIndexingTask.AdditionalInformation.class)
+            .convertToDTO(MessageIdReindexingTaskAdditionalInformationDTO.class)
+            .toDomainObjectConverter(dto -> new MessageIdReIndexingTask.AdditionalInformation(factory.fromString(dto.getMessageId()), dto.timestamp))
+            .toDTOConverter((details, type) -> new MessageIdReindexingTaskAdditionalInformationDTO(type, details.getMessageId(), details.timestamp()))
+            .typeName(MessageIdReIndexingTask.TYPE.asString())
+            .withFactory(AdditionalInformationDTOModule::new);
+    }
 
+    private final String type;
     private final String messageId;
+    private final Instant timestamp;
 
-    private MessageIdReindexingTaskAdditionalInformationDTO(@JsonProperty("messageId") String messageId) {
+    private MessageIdReindexingTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                            @JsonProperty("messageId") String messageId,
+                                                            @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.messageId = messageId;
+        this.timestamp = timestamp;
     }
 
     public String getMessageId() {
         return messageId;
     }
 
+    public Instant getTimestamp() {
+        return timestamp;
+    }
+
+    @Override
+    public String getType() {
+        return type;
+    }
+
     public static MessageIdReindexingTaskAdditionalInformationDTO of(MessageIdReIndexingTask task) {
-        return new MessageIdReindexingTaskAdditionalInformationDTO(task.getMessageId().serialize());
+        return new MessageIdReindexingTaskAdditionalInformationDTO(
+            task.type().asString(),
+            task.getMessageId().serialize(),
+            Clock.systemUTC().instant());
     }
 }

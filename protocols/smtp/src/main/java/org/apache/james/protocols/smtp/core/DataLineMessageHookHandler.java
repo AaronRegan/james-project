@@ -27,14 +27,12 @@ import java.nio.ByteBuffer;
 import java.util.LinkedList;
 import java.util.List;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.protocols.api.ProtocolSession;
 import org.apache.james.protocols.api.Response;
 import org.apache.james.protocols.api.handler.ExtensibleHandler;
 import org.apache.james.protocols.api.handler.LineHandler;
 import org.apache.james.protocols.api.handler.WiringException;
-import org.apache.james.protocols.smtp.MailEnvelopeImpl;
+import org.apache.james.protocols.smtp.MailEnvelope;
 import org.apache.james.protocols.smtp.SMTPResponse;
 import org.apache.james.protocols.smtp.SMTPRetCode;
 import org.apache.james.protocols.smtp.SMTPSession;
@@ -47,8 +45,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * This class handles the actual calling of the {@link MessageHook} implementations to queue the message. If no {@link MessageHook} return OK or DECLINED it will write back an
- * error to the client to report the problem while trying to queue the message 
- *
+ * error to the client to report the problem while trying to queue the message
  */
 public class DataLineMessageHookHandler implements DataLineFilter, ExtensibleHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(DataLineMessageHookHandler.class);
@@ -61,19 +58,11 @@ public class DataLineMessageHookHandler implements DataLineFilter, ExtensibleHan
     private List<?> rHooks;
 
     @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
-    }
-
-    @Override
     public Response onLine(SMTPSession session, ByteBuffer line, LineHandler<SMTPSession> next) {
-        MailEnvelopeImpl env = (MailEnvelopeImpl) session.getAttachment(DataCmdHandler.MAILENV, ProtocolSession.State.Transaction);
-        OutputStream out = env.getMessageOutputStream();
+        MailEnvelope env = session.getAttachment(DataCmdHandler.MAILENV, ProtocolSession.State.Transaction)
+            .orElseThrow(() -> new RuntimeException("'" + DataCmdHandler.MAILENV.asString() + "' has not been filled."));
+
+        OutputStream out = getMessageOutputStream(env);
         try {
             // 46 is "."
             // Stream terminated            
@@ -108,6 +97,14 @@ public class DataLineMessageHookHandler implements DataLineFilter, ExtensibleHan
         return null;
     }
 
+    private OutputStream getMessageOutputStream(MailEnvelope env) {
+        try {
+            return env.getMessageOutputStream();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private byte[] readBytes(ByteBuffer line) {
         line.rewind();
         byte[] bline;
@@ -120,13 +117,10 @@ public class DataLineMessageHookHandler implements DataLineFilter, ExtensibleHan
         return bline;
     }
 
-    /**
-     * @param session
-     */
-    protected Response processExtensions(SMTPSession session, MailEnvelopeImpl mail) {
+    protected Response processExtensions(SMTPSession session, MailEnvelope mail) {
        
 
-        if (mail != null && messageHandlers != null) {
+        if (messageHandlers != null) {
             for (Object messageHandler : messageHandlers) {
                 MessageHook rawHandler = (MessageHook) messageHandler;
                 LOGGER.debug("executing message handler {}", rawHandler);

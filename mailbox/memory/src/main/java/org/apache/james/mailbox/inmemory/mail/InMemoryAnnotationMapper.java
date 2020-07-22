@@ -32,13 +32,10 @@ import org.apache.james.mailbox.model.MailboxAnnotation;
 import org.apache.james.mailbox.model.MailboxAnnotationKey;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.store.mail.AnnotationMapper;
-import org.apache.james.util.streams.Iterators;
 
 import com.github.steveash.guavate.Guavate;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Table;
 
 public class InMemoryAnnotationMapper implements AnnotationMapper {
@@ -59,12 +56,15 @@ public class InMemoryAnnotationMapper implements AnnotationMapper {
         return transaction.run();
     }
 
-    private Iterable<MailboxAnnotation> retrieveAllAnnotations(InMemoryId mailboxId) {
+    private List<MailboxAnnotation> retrieveAllAnnotations(InMemoryId mailboxId) {
         lock.readLock().lock();
         try {
-            return Iterables.transform(
-                mailboxesAnnotations.row(mailboxId).entrySet(),
-                input -> MailboxAnnotation.newInstance(new MailboxAnnotationKey(input.getKey()), input.getValue()));
+            return mailboxesAnnotations
+                .row(mailboxId)
+                .entrySet()
+                .stream()
+                .map(input -> MailboxAnnotation.newInstance(new MailboxAnnotationKey(input.getKey()), input.getValue()))
+                .collect(Guavate.toImmutableList());
         } finally {
             lock.readLock().unlock();
         }
@@ -72,19 +72,21 @@ public class InMemoryAnnotationMapper implements AnnotationMapper {
     
     @Override
     public List<MailboxAnnotation> getAllAnnotations(MailboxId mailboxId) {
-        return ImmutableList.copyOf(retrieveAllAnnotations((InMemoryId)mailboxId));
+        return retrieveAllAnnotations((InMemoryId) mailboxId);
     }
 
     @Override
     public List<MailboxAnnotation> getAnnotationsByKeys(MailboxId mailboxId, final Set<MailboxAnnotationKey> keys) {
-        return ImmutableList.copyOf(
-            Iterables.filter(retrieveAllAnnotations((InMemoryId)mailboxId),
-                input -> keys.contains(input.getKey())));
+        return retrieveAllAnnotations((InMemoryId) mailboxId)
+            .stream()
+            .filter(input -> keys.contains(input.getKey()))
+            .collect(Guavate.toImmutableList());
     }
 
     @Override
     public List<MailboxAnnotation> getAnnotationsByKeysWithAllDepth(MailboxId mailboxId, final Set<MailboxAnnotationKey> keys) {
-        return Iterators.toStream(retrieveAllAnnotations((InMemoryId)mailboxId).iterator())
+        return retrieveAllAnnotations((InMemoryId) mailboxId)
+            .stream()
             .filter(getPredicateFilterByAll(keys))
             .collect(Guavate.toImmutableList());
     }
@@ -118,7 +120,7 @@ public class InMemoryAnnotationMapper implements AnnotationMapper {
         Preconditions.checkArgument(!mailboxAnnotation.isNil());
         lock.writeLock().lock();
         try {
-            mailboxesAnnotations.put((InMemoryId)mailboxId, mailboxAnnotation.getKey().asString(), mailboxAnnotation.getValue().get());
+            mailboxesAnnotations.put((InMemoryId) mailboxId, mailboxAnnotation.getKey().asString(), mailboxAnnotation.getValue().get());
         } finally {
             lock.writeLock().unlock();
         }
@@ -128,7 +130,7 @@ public class InMemoryAnnotationMapper implements AnnotationMapper {
     public void deleteAnnotation(MailboxId mailboxId, MailboxAnnotationKey key) {
         lock.writeLock().lock();
         try {
-            mailboxesAnnotations.remove(mailboxId, key.asString());
+            mailboxesAnnotations.remove((InMemoryId) mailboxId, key.asString());
         } finally {
             lock.writeLock().unlock();
         }
@@ -136,12 +138,12 @@ public class InMemoryAnnotationMapper implements AnnotationMapper {
 
     @Override
     public boolean exist(MailboxId mailboxId, MailboxAnnotation mailboxAnnotation) {
-        return mailboxesAnnotations.contains((InMemoryId)mailboxId, mailboxAnnotation.getKey().asString());
+        return mailboxesAnnotations.contains((InMemoryId) mailboxId, mailboxAnnotation.getKey().asString());
     }
 
     @Override
     public int countAnnotations(MailboxId mailboxId) {
-        return mailboxesAnnotations.row((InMemoryId)mailboxId).size();
+        return mailboxesAnnotations.row((InMemoryId) mailboxId).size();
     }
 
 

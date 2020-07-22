@@ -249,7 +249,7 @@ public class MaildirMessageName {
         int secondEnd = fullName.indexOf('.', firstEnd + 1);
         timestamp = fullName.substring(0, firstEnd);
         uniqueString = fullName.substring(firstEnd + 1, secondEnd);
-        hostnameAndMeta = fullName.substring(secondEnd + 1, fullName.length());
+        hostnameAndMeta = fullName.substring(secondEnd + 1);
     }
     
     /**
@@ -293,7 +293,6 @@ public class MaildirMessageName {
     
     /**
      * Sets new flags for this message name.
-     * @param flags
      */
     public void setFlags(Flags flags) {
         if (this.flags != flags) {

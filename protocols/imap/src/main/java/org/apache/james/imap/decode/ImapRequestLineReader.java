@@ -28,24 +28,24 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 import javax.mail.Flags;
 
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.james.imap.api.ImapConstants;
-import org.apache.james.imap.api.display.CharsetUtil;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.display.HumanReadableText;
+import org.apache.james.imap.api.display.ModifiedUtf7;
 import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.UidRange;
 import org.apache.james.imap.api.message.request.DayMonthYear;
 import org.apache.james.imap.api.process.ImapSession;
 import org.apache.james.imap.api.process.SearchResUtil;
 import org.apache.james.mailbox.MessageUid;
-import org.apache.james.protocols.imap.DecodingException;
-import org.apache.james.protocols.imap.utils.DecoderUtils;
-import org.apache.james.protocols.imap.utils.FastByteArrayOutputStream;
 
 /**
  * Wraps the client input reader with a bunch of convenience methods, allowing
@@ -173,8 +173,6 @@ public abstract class ImapRequestLineReader {
 
     /**
      * Consume the rest of the line
-     * 
-     * @throws DecodingException
      */
     public void consumeLine() throws DecodingException {
         char next = nextChar();
@@ -195,9 +193,9 @@ public abstract class ImapRequestLineReader {
     /**
      * Reads a command "tag" from the request.
      */
-    public String tag() throws DecodingException {
+    public Tag tag() throws DecodingException {
         CharacterValidator validator = new TagCharValidator();
-        return consumeWord(validator);
+        return new Tag(consumeWord(validator));
     }
 
     /**
@@ -244,7 +242,7 @@ public abstract class ImapRequestLineReader {
 
     /**
      * 
-     * Reads the mailbox name via {@link #mailboxUTF7()} but also decode it via {@link CharsetUtil#decodeModifiedUTF7(String)}
+     * Reads the mailbox name via {@link #mailboxUTF7()} but also decode it via {@link ModifiedUtf7#decodeModifiedUTF7(String)}
      * 
      * If you really want to get the modified UTF7 version you should use {@link #mailboxUTF7()}
      * 
@@ -252,7 +250,7 @@ public abstract class ImapRequestLineReader {
      * 
      */
     public String mailbox() throws DecodingException {
-       return CharsetUtil.decodeModifiedUTF7(mailboxUTF7());
+       return ModifiedUtf7.decodeModifiedUTF7(mailboxUTF7());
     }
 
     /**
@@ -264,10 +262,7 @@ public abstract class ImapRequestLineReader {
      * variants of ;; INBOX (e.g. "iNbOx") MUST be interpreted as INBOX ;; not
      * as an astring.
      * 
-     * Be aware that mailbox names are encoded via a modified UTF7. For more informations RFC3501
-     * 
-     * 
-     * 
+     * Be aware that mailbox names are encoded via a modified UTF7. For more information RFC3501
      */
     public String mailboxUTF7() throws DecodingException {
         String mailbox = astring();
@@ -282,7 +277,6 @@ public abstract class ImapRequestLineReader {
      * Reads one <code>date</code> argument from the request.
      * 
      * @return <code>DayMonthYear</code>, not null
-     * @throws DecodingException
      */
     public DayMonthYear date() throws DecodingException {
 
@@ -319,7 +313,7 @@ public abstract class ImapRequestLineReader {
     /**
      * Reads a "date-time" argument from the request.
      */
-    public Date dateTime() throws DecodingException {
+    public LocalDateTime dateTime() throws DecodingException {
         char next = nextWordChar();
         String dateString;
         if (next == '"') {
@@ -375,28 +369,22 @@ public abstract class ImapRequestLineReader {
         if (charset == null) {
             return consumeLiteral(US_ASCII);
         } else {
-            try (FastByteArrayOutputStream out = new FastByteArrayOutputStream();
-                 InputStream in = consumeLiteral(false)) {
-                byte[] buf = new byte[0xFFFF];
-
-                for (int len; (len = in.read(buf)) != -1; ) {
-                    out.write(buf, 0, len);
-                }
-
-                final byte[] bytes = out.toByteArray();
-                final ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            ImmutablePair<Integer, InputStream> literal = consumeLiteral(false);
+            try (InputStream in = literal.right) {
+                Integer size = literal.left;
+                byte[] data = IOUtils.readFully(in, size);
+                ByteBuffer buffer = ByteBuffer.wrap(data);
                 return decode(charset, buffer);
-
             } catch (IOException e) {
                 throw new DecodingException(HumanReadableText.BAD_IO_ENCODING, "Bad character encoding", e);
             }
-            // ignore on close
-            // ignore on close
-
         }
     }
 
-    public InputStream consumeLiteral(boolean extraCRLF) throws DecodingException {
+    /**
+     * @return the literal data and its expected size
+     */
+    public ImmutablePair<Integer, InputStream> consumeLiteral(boolean extraCRLF) throws DecodingException {
         // The 1st character must be '{'
         consumeChar('{');
 
@@ -427,8 +415,8 @@ public abstract class ImapRequestLineReader {
             commandContinuationRequest();
         }
 
-        final int size = Integer.parseInt(digits.toString());
-        return read(size, extraCRLF);
+        int size = Integer.parseInt(digits.toString());
+        return ImmutablePair.of(size, read(size, extraCRLF));
     }
 
     private String decode(Charset charset, ByteBuffer buffer) throws DecodingException {
@@ -443,9 +431,6 @@ public abstract class ImapRequestLineReader {
     /**
      * Consumes a CRLF from the request. TODO: This is too liberal, the spec
      * insists on \r\n for new lines.
-     * 
-     * @param request
-     * @throws DecodingException
      */
     private void consumeCRLF() throws DecodingException {
         char next = nextChar();
@@ -528,10 +513,9 @@ public abstract class ImapRequestLineReader {
     }
 
     /**
-     * Calls {@link #number()} with argument of false
+     * Calls {@link #number(boolean)} with argument of false
      * 
      * @return number
-     * @throws DecodingException
      */
     public long number() throws DecodingException {
         return number(false);
@@ -668,7 +652,7 @@ public abstract class ImapRequestLineReader {
         // merge the ranges to minimize the needed queries.
         // See IMAP-211
         List<IdRange> merged = IdRange.mergeRanges(rangeList);
-        return (IdRange[]) merged.toArray(new IdRange[merged.size()]);
+        return merged.toArray(IdRange[]::new);
     }
 
     /**
@@ -701,7 +685,7 @@ public abstract class ImapRequestLineReader {
         // merge the ranges to minimize the needed queries.
         // See IMAP-211
         List<UidRange> merged = UidRange.mergeRanges(rangeList);
-        return merged.toArray(new UidRange[merged.size()]);
+        return merged.toArray(UidRange[]::new);
     }
     
     /**
@@ -723,10 +707,8 @@ public abstract class ImapRequestLineReader {
     
     /**
      * Parse a range which use a ":" as delimiter
-     * 
-     * @param range
+     *
      * @return idRange
-     * @throws DecodingException
      */
     private IdRange parseRange(String range) throws DecodingException {
         int pos = range.indexOf(':');
@@ -830,6 +812,40 @@ public abstract class ImapRequestLineReader {
          * @return <code>true</code> if chr is valid, <code>false</code> if not.
          */
         boolean isValid(char chr);
+    }
+
+    /**
+     * Verifies subsequent characters match a specified string
+     */
+    public static class StringMatcherCharacterValidator implements CharacterValidator {
+        public static StringMatcherCharacterValidator ignoreCase(String expectedString) {
+            return new StringMatcherCharacterValidator(expectedString);
+        }
+
+        static boolean asciiEqualsIgnoringCase(Character c1, Character c2) {
+            return Character.toUpperCase(c1) == Character.toUpperCase(c2);
+        }
+
+        private final String expectedString;
+        private int position = 0;
+
+        private StringMatcherCharacterValidator(String expectedString) {
+            this.expectedString = expectedString;
+        }
+
+        /**
+         * Verifies whether the next character is valid or not.
+         *
+         * This call will mutate StringValidator internal state, making it progress to following character validation.
+         */
+        @Override
+        public boolean isValid(char chr) {
+            if (position >= expectedString.length()) {
+                return false;
+            } else {
+                return asciiEqualsIgnoringCase(chr, expectedString.charAt(position++));
+            }
+        }
     }
 
     public static class NoopCharValidator implements CharacterValidator {

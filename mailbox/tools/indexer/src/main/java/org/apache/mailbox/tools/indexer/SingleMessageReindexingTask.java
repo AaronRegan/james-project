@@ -19,12 +19,13 @@
 
 package org.apache.mailbox.tools.indexer;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 
 import javax.inject.Inject;
 
 import org.apache.james.mailbox.MessageUid;
-import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskExecutionDetails;
@@ -32,18 +33,22 @@ import org.apache.james.task.TaskType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import reactor.core.publisher.Mono;
+
 public class SingleMessageReindexingTask implements Task {
     private static final Logger LOGGER = LoggerFactory.getLogger(SingleMessageReindexingTask.class);
 
-    public static final TaskType MESSAGE_RE_INDEXING = TaskType.of("messageReIndexing");
+    public static final TaskType MESSAGE_RE_INDEXING = TaskType.of("message-reindexing");
 
     public static class AdditionalInformation implements TaskExecutionDetails.AdditionalInformation {
         private final MailboxId mailboxId;
         private final MessageUid uid;
+        private final Instant timestamp;
 
-        AdditionalInformation(MailboxId mailboxId, MessageUid uid) {
+        AdditionalInformation(MailboxId mailboxId, MessageUid uid, Instant timestamp) {
             this.mailboxId = mailboxId;
             this.uid = uid;
+            this.timestamp = timestamp;
         }
 
         public String getMailboxId() {
@@ -52,6 +57,11 @@ public class SingleMessageReindexingTask implements Task {
 
         public long getUid() {
             return uid.asLong();
+        }
+
+        @Override
+        public Instant timestamp() {
+            return timestamp;
         }
     }
 
@@ -76,24 +86,22 @@ public class SingleMessageReindexingTask implements Task {
     private final ReIndexerPerformer reIndexerPerformer;
     private final MailboxId mailboxId;
     private final MessageUid uid;
-    private final AdditionalInformation additionalInformation;
 
     @Inject
     SingleMessageReindexingTask(ReIndexerPerformer reIndexerPerformer, MailboxId mailboxId, MessageUid uid) {
         this.reIndexerPerformer = reIndexerPerformer;
         this.mailboxId = mailboxId;
         this.uid = uid;
-        this.additionalInformation = new AdditionalInformation(mailboxId, uid);
     }
 
     @Override
     public Result run() {
-        try {
-            return reIndexerPerformer.handleMessageReIndexing(mailboxId, uid, new ReprocessingContext());
-        } catch (MailboxException e) {
-            LOGGER.warn("Error encounteres while reindexing {} : {}", mailboxId, uid, e);
-            return Result.PARTIAL;
-        }
+        return reIndexerPerformer.reIndexSingleMessage(mailboxId, uid, new ReprocessingContext())
+            .onErrorResume(e -> {
+                LOGGER.warn("Error encountered while reindexing {} : {}", mailboxId, uid, e);
+                return Mono.just(Result.PARTIAL);
+            })
+            .block();
     }
 
     MailboxId getMailboxId() {
@@ -111,7 +119,7 @@ public class SingleMessageReindexingTask implements Task {
 
     @Override
     public Optional<TaskExecutionDetails.AdditionalInformation> details() {
-        return Optional.of(additionalInformation);
+        return Optional.of(new AdditionalInformation(mailboxId, uid, Clock.systemUTC().instant()));
     }
 
 }

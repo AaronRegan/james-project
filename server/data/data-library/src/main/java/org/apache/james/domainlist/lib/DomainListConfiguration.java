@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.tree.ImmutableNode;
@@ -93,12 +94,14 @@ public class DomainListConfiguration {
 
         public DomainListConfiguration build() {
             return new DomainListConfiguration(
-                autoDetectIp.orElse(true),
-                autoDetect.orElse(true),
+                autoDetectIp.orElse(false),
+                autoDetect.orElse(false),
                 defaultDomain.orElse(Domain.LOCALHOST),
                 configuredDomains.build());
         }
     }
+
+    public static DomainListConfiguration DEFAULT = builder().build();
 
     public static final String CONFIGURE_AUTODETECT = "autodetect";
     public static final String CONFIGURE_AUTODETECT_IP = "autodetectIP";
@@ -111,7 +114,7 @@ public class DomainListConfiguration {
 
     public static DomainListConfiguration from(HierarchicalConfiguration<ImmutableNode> config) {
         ImmutableList<Domain> configuredDomains = StreamUtils.ofNullable(config.getStringArray(CONFIGURE_DOMAIN_NAMES))
-            .filter(s -> !s.isEmpty())
+            .filter(Predicate.not(String::isEmpty))
             .map(Domain::of)
             .collect(Guavate.toImmutableList());
 

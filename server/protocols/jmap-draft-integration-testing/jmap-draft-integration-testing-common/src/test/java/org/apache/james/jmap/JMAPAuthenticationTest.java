@@ -20,7 +20,7 @@ package org.apache.james.jmap;
 
 import static io.restassured.RestAssured.given;
 import static io.restassured.RestAssured.with;
-import static org.apache.james.jmap.TestingConstants.jmapRequestSpecBuilder;
+import static org.apache.james.jmap.JMAPTestingConstants.jmapRequestSpecBuilder;
 import static org.hamcrest.Matchers.both;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -33,10 +33,10 @@ import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 import org.apache.james.GuiceJamesServer;
-import org.apache.james.jmap.categories.BasicFeature;
-import org.apache.james.jmap.draft.model.ContinuationToken;
-import org.apache.james.utils.DataProbeImpl;
 import org.apache.james.jmap.draft.JmapGuiceProbe;
+import org.apache.james.jmap.draft.model.ContinuationToken;
+import org.apache.james.junit.categories.BasicFeature;
+import org.apache.james.utils.DataProbeImpl;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -64,7 +64,7 @@ public abstract class JMAPAuthenticationTest {
         jmapServer = createJmapServer(zonedDateTimeProvider);
         jmapServer.start();
         RestAssured.requestSpecification = jmapRequestSpecBuilder
-                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort())
+                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort().getValue())
                 .build();
         
         userCredentials = UserCredentials.builder()
@@ -90,6 +90,7 @@ public abstract class JMAPAuthenticationTest {
     public void mustReturnMalformedRequestWhenContentTypeIsMissing() {
         given()
             .accept(ContentType.JSON)
+            .contentType("")
         .when()
             .post("/authentication")
         .then()
@@ -110,6 +111,7 @@ public abstract class JMAPAuthenticationTest {
     @Test
     public void mustReturnMalformedRequestWhenAcceptIsMissing() {
         given()
+            .accept("")
             .contentType(ContentType.JSON)
         .when()
             .post("/authentication")
@@ -160,6 +162,20 @@ public abstract class JMAPAuthenticationTest {
             .post("/authentication")
         .then()
             .statusCode(400);
+    }
+
+    @Test
+    public void mustPositionCorsHeaders() throws Exception {
+        given()
+            .contentType(ContentType.JSON)
+            .accept(ContentType.JSON)
+            .body("{\"username\": \"" + userCredentials.getUsername() + "\", \"clientName\": \"Mozilla Thunderbird\", \"clientVersion\": \"42.0\", \"deviceName\": \"Joe Blogg’s iPhone\"}")
+        .when()
+            .post("/authentication")
+        .then()
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST, DELETE, PUT")
+            .header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
     }
 
     @Test
@@ -335,11 +351,10 @@ public abstract class JMAPAuthenticationTest {
     @Category(BasicFeature.class)
     @Test
     public void getMustReturnEndpointsWhenValidJwtAuthorizationHeader() throws Exception {
-        String token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.T04BTk" +
-                "LXkJj24coSZkK13RfG25lpvmSl2MJ7N10KpBk9_-95EGYZdog-BDAn3PJzqVw52z-Bwjh4VOj1-j7cURu0cT4jXehhUrlCxS4n7QHZ" +
-                "DN_bsEYGu7KzjWTpTsUiHe-rN7izXVFxDGG1TGwlmBCBnPW-EFCf9ylUsJi0r2BKNdaaPRfMIrHptH1zJBkkUziWpBN1RNLjmvlAUf" +
-                "49t1Tbv21ZqYM5Ht2vrhJWczFbuC-TD-8zJkXhjTmA1GVgomIX5dx1cH-dZX1wANNmshUJGHgepWlPU-5VIYxPEhb219RMLJIELMY2" +
-                "qNOR8Q31ydinyqzXvCSzVJOf6T60-w";
+        String token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyQGRvbWFpbi50bGQifQ.U-dUPv6OU6KO5N7CooHUfMkCd" +
+            "FJHx2F3H4fm7Q79g1BPfBSkifPj5xyVlZ0JwEGXypC4zBw9ay3l4DxzX7D_6p1Hx_ihXsoLx1Ca-WUo44x-XRSpPfgxiZjHCJkGBLMV3RZlA" +
+            "jip-d18mxkcX3JGplX_sCQkFisduAOAHuKSUg9wI6VBgUQi_0B35FYv6tP_bD6eFtvaAUN9QyXXh8UQjEp8CO12lRz6enfLx_V6BG_fEMkee" +
+            "6vRqdEqx_F9OF3eWTe1giMp_JhQ7_l1OXXtbd4TndVvTeuVy4irPbsRc-M8x_-qTDpFp6saRRsyOcFspxPp5n3yIhEK7B3UZiseXw";
 
         given()
                 .header("Authorization", "Bearer " + token)
@@ -351,11 +366,10 @@ public abstract class JMAPAuthenticationTest {
 
     @Test
     public void getMustReturnEndpointsWhenValidUnkwnonUserJwtAuthorizationHeader() throws Exception {
-        String token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMzM3IiwibmFtZSI6Ik5ldyBVc2VyIn0.ci8U04EOWKpi_y"
-                + "faKs8fnCBcu1mWs8fvf-t9SDP2kkvDDfD-ya4sEGn4ueCp2dA2ndefZfVu_IfvdlVtxqzSf0tQ-dFKrIe-OtSKhI2otjWctLtk9A"
-                + "G7jpWkXoDgr5IOVmsqg37Zxc2bgkLkC5FJqV6oCp51TNQTH6zZbXIUeuGFbHj2-iJeX8sACKTQB0llwc6TFm7GYUF03rv4DfJjqp"
-                + "Kd0g8RdnlevSOjV-gGzvKEItugtexS5pgOZ2GYcvqEUDb9EnQR7Qe2EzPAX_FCJfGhlv7bDQlTgOHHAjqw2lD4-zeAznw-3wlYLS"
-                + "zhi4ivvPjT-y2T5wnnhzeeYOpYOQ";
+        String token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1bmtub3duQGRvbWFpbi50bGQifQ.hr8AhlNIpiA3Mv_A5ZLyL" +
+            "f1BHeBSaRDfdR_GLV_hlPdIrWv1xtwjBH86E1YnTPx2tTpr_NWTbHcR1OCkuVCpgloEnUNbE3U2l0WrGOX2Eh9dWCXOCtrNvCeSHQuvx5_8W" +
+            "nSVENYidk7o2icE8_gz_Giwf0Z3bHJJYXfAxupv__tCkmhqt3E888VZPjs26AsqxQ29YyX0Fjx8UwKbPrH5-tnyftX-kLjjZNtahVIVtbW4v" +
+            "b8rEEZ4nzqxHqtI2co6yCXjgyoFMdDAKCOU-Bq35Gdo-Qiu8l7a0kQGhuhkjoaVWvw4bcSvunxAnh_0W5g3Lw-rwljNu2JrJS0gAH6NDA";
         
         given()
             .header("Authorization", "Bearer " + token)

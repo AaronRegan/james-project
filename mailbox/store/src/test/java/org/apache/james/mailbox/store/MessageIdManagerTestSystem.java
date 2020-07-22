@@ -28,6 +28,7 @@ import javax.mail.util.SharedByteArrayInputStream;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageIdManager;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.events.MailboxIdRegistrationKey;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.Mailbox;
@@ -42,7 +43,7 @@ import org.apache.james.mailbox.store.mail.model.impl.SimpleMailboxMessage;
 
 public class MessageIdManagerTestSystem {
     private static final byte[] MESSAGE_CONTENT = "subject: any\n\nbody".getBytes(StandardCharsets.UTF_8);
-    public static final int MOD_SEQ = 452;
+    public static final ModSeq MOD_SEQ = ModSeq.of(452);
 
     private final MessageIdManager messageIdManager;
     private final MessageId.Factory messageIdFactory;
@@ -55,8 +56,6 @@ public class MessageIdManagerTestSystem {
      * Should persist flags 
      * Should keep track of flag state for setFlags
      * 
-     * @param mailboxId
-     * @param flags
      * @return the id of persisted message
      */
 
@@ -67,6 +66,9 @@ public class MessageIdManagerTestSystem {
         this.mailboxManager = mailboxManager;
     }
 
+    public StoreMailboxManager getMailboxManager() {
+        return mailboxManager;
+    }
 
     public MessageIdManager getMessageIdManager() {
         return messageIdManager;
@@ -74,13 +76,13 @@ public class MessageIdManagerTestSystem {
 
     public Mailbox createMailbox(MailboxPath mailboxPath, MailboxSession session) throws MailboxException {
         mailboxManager.createMailbox(mailboxPath, session);
-        return mapperFactory.getMailboxMapper(session).findMailboxByPath(mailboxPath);
+        return mapperFactory.getMailboxMapper(session).findMailboxByPath(mailboxPath).block();
     }
 
     public MessageId persist(MailboxId mailboxId, MessageUid uid, Flags flags, MailboxSession mailboxSession) {
         try {
             MessageId messageId = messageIdFactory.generate();
-            Mailbox mailbox = mapperFactory.getMailboxMapper(mailboxSession).findMailboxById(mailboxId);
+            Mailbox mailbox = mapperFactory.getMailboxMapper(mailboxSession).findMailboxById(mailboxId).block();
             MailboxMessage message = createMessage(mailboxId, flags, messageId, uid);
             mapperFactory.getMessageMapper(mailboxSession).add(mailbox, message);
             mailboxManager.getEventBus().dispatch(EventFactory.added()
@@ -103,7 +105,7 @@ public class MessageIdManagerTestSystem {
 
     public void deleteMailbox(MailboxId mailboxId, MailboxSession mailboxSession) {
         try {
-            Mailbox mailbox = mapperFactory.getMailboxMapper(mailboxSession).findMailboxById(mailboxId);
+            Mailbox mailbox = mapperFactory.getMailboxMapper(mailboxSession).findMailboxById(mailboxId).block();
             mailboxManager.deleteMailbox(new MailboxPath(mailbox.getNamespace(), mailbox.getUser(), mailbox.getName()), mailboxSession);
         } catch (Exception e) {
             throw new RuntimeException(e);

@@ -39,9 +39,9 @@ import org.apache.james.transport.matchers.All;
 import org.apache.james.transport.matchers.RemoteAddrInNetwork;
 import org.apache.james.transport.matchers.RemoteAddrNotInNetwork;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.MailRepositoryProbeImpl;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -49,12 +49,12 @@ import org.junit.rules.TemporaryFolder;
 
 public class NetworkMatcherIntegrationTest {
     private static final String FROM = "fromuser@" + DEFAULT_DOMAIN;
-    private static final MailRepositoryUrl DROPPED_MAILS = MailRepositoryUrl.from("file://var/mail/dropped-mails/");
+    private static final MailRepositoryUrl DROPPED_MAILS = MailRepositoryUrl.from("memory://var/mail/dropped-mails/");
 
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
     @Rule
     public SMTPMessageSender messageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
 
@@ -63,10 +63,11 @@ public class NetworkMatcherIntegrationTest {
     private TemporaryJamesServer createJamesServerWithRootProcessor(ProcessorConfiguration.Builder rootProcessor) throws Exception {
         TemporaryJamesServer temporaryJamesServer = TemporaryJamesServer.builder()
             .withBase(MemoryJamesServerMain.SMTP_AND_IMAP_MODULE)
-            .withMailetContainer(TemporaryJamesServer.DEFAULT_MAILET_CONTAINER_CONFIGURATION
+            .withMailetContainer(TemporaryJamesServer.defaultMailetContainerConfiguration()
                 .putProcessor(rootProcessor)
                 .putProcessor(CommonProcessors.deliverOnlyTransport()))
             .build(temporaryFolder.newFolder());
+        temporaryJamesServer.start();
 
         DataProbe dataProbe = temporaryJamesServer.getProbe(DataProbeImpl.class);
         dataProbe.addDomain(DEFAULT_DOMAIN);
@@ -100,9 +101,9 @@ public class NetworkMatcherIntegrationTest {
             .authenticate(FROM, PASSWORD)
             .sendMessage(FROM, FROM);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -120,9 +121,9 @@ public class NetworkMatcherIntegrationTest {
             .authenticate(FROM, PASSWORD)
             .sendMessage(FROM, FROM);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -140,9 +141,9 @@ public class NetworkMatcherIntegrationTest {
             .authenticate(FROM, PASSWORD)
             .sendMessage(FROM, FROM);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -160,9 +161,9 @@ public class NetworkMatcherIntegrationTest {
             .authenticate(FROM, PASSWORD)
             .sendMessage(FROM, FROM);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -180,9 +181,9 @@ public class NetworkMatcherIntegrationTest {
             .authenticate(FROM, PASSWORD)
             .sendMessage(FROM, FROM);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -200,9 +201,9 @@ public class NetworkMatcherIntegrationTest {
             .authenticate(FROM, PASSWORD)
             .sendMessage(FROM, FROM);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -223,9 +224,9 @@ public class NetworkMatcherIntegrationTest {
         MailRepositoryProbeImpl repositoryProbe = jamesServer.getProbe(MailRepositoryProbeImpl.class);
         awaitAtMostOneMinute.until(() -> repositoryProbe.getRepositoryMailCount(DROPPED_MAILS) == 1);
         assertThat(
-            imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+            testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
                 .login(FROM, PASSWORD)
-                .select(IMAPMessageReader.INBOX)
+                .select(TestIMAPClient.INBOX)
                 .hasAMessage())
             .isFalse();
     }
@@ -247,9 +248,9 @@ public class NetworkMatcherIntegrationTest {
         MailRepositoryProbeImpl repositoryProbe = jamesServer.getProbe(MailRepositoryProbeImpl.class);
         awaitAtMostOneMinute.until(() -> repositoryProbe.getRepositoryMailCount(DROPPED_MAILS) == 1);
         assertThat(
-            imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+            testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
                 .login(FROM, PASSWORD)
-                .select(IMAPMessageReader.INBOX)
+                .select(TestIMAPClient.INBOX)
                 .hasAMessage())
             .isFalse();
     }

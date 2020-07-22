@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
+import java.util.List;
 
 import javax.mail.Message;
 import javax.mail.MessagingException;
@@ -35,26 +36,37 @@ import org.apache.james.core.MailAddress;
 import org.apache.james.util.Port;
 import org.apache.mailet.Mail;
 import org.apache.mailet.base.test.FakeMail;
+import org.junit.jupiter.api.extension.AfterEachCallback;
+import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.rules.ExternalResource;
 
 import com.github.fge.lambdas.Throwing;
+import com.github.steveash.guavate.Guavate;
+import com.google.common.collect.ImmutableList;
 
-public class SMTPMessageSender extends ExternalResource implements Closeable {
+public class SMTPMessageSender extends ExternalResource implements Closeable, AfterEachCallback {
+
+    private static final String DEFAULT_PROTOCOL = "TLS";
+    private static final String UTF_8_ENCODING = "UTF-8";
 
     public static SMTPMessageSender noAuthentication(String ip, int port, String senderDomain) throws IOException {
-        AuthenticatingSMTPClient smtpClient = new AuthenticatingSMTPClient();
+        AuthenticatingSMTPClient smtpClient = newUtf8AuthenticatingClient();
         smtpClient.connect(ip, port);
         return new SMTPMessageSender(smtpClient, senderDomain);
     }
 
     public static SMTPMessageSender authentication(String ip, int port, String senderDomain, String username, String password)
         throws NoSuchAlgorithmException, IOException, InvalidKeySpecException, InvalidKeyException {
-        AuthenticatingSMTPClient smtpClient = new AuthenticatingSMTPClient();
+        AuthenticatingSMTPClient smtpClient = newUtf8AuthenticatingClient();
         smtpClient.connect(ip, port);
         if (!smtpClient.auth(AuthenticatingSMTPClient.AUTH_METHOD.PLAIN, username, password)) {
             throw new RuntimeException("auth failed");
         }
         return new SMTPMessageSender(smtpClient, senderDomain);
+    }
+
+    private static AuthenticatingSMTPClient newUtf8AuthenticatingClient() {
+        return new AuthenticatingSMTPClient(DEFAULT_PROTOCOL, UTF_8_ENCODING);
     }
 
     private final AuthenticatingSMTPClient smtpClient;
@@ -66,7 +78,7 @@ public class SMTPMessageSender extends ExternalResource implements Closeable {
     }
 
     public SMTPMessageSender(String senderDomain) {
-        this(new AuthenticatingSMTPClient(), senderDomain);
+        this(newUtf8AuthenticatingClient(), senderDomain);
     }
 
     public SMTPMessageSender connect(String ip, Port port) throws IOException {
@@ -82,15 +94,12 @@ public class SMTPMessageSender extends ExternalResource implements Closeable {
     }
 
     public SMTPMessageSender sendMessage(String from, String recipient) throws IOException {
-        doHelo();
-        doSetSender(from);
-        doRCPT("<" + recipient + ">");
-        doData("FROM: " + from + "\r\n" +
+        String message = "FROM: " + from + "\r\n" +
             "subject: test\r\n" +
             "\r\n" +
             "content\r\n" +
-            ".\r\n");
-        return this;
+            ".\r\n";
+        return sendMessageWithHeaders(from, ImmutableList.of(recipient), message);
     }
 
     public SMTPMessageSender sendMessageNoBracket(String from, String recipient) throws IOException {
@@ -106,22 +115,24 @@ public class SMTPMessageSender extends ExternalResource implements Closeable {
     }
 
     public SMTPMessageSender sendMessageWithHeaders(String from, String recipient, String message) throws IOException {
+        return sendMessageWithHeaders(from, ImmutableList.of(recipient), message);
+    }
+
+    public SMTPMessageSender sendMessageWithHeaders(String from, List<String> recipients, String message) throws IOException {
         doHelo();
         doSetSender(from);
-        doRCPT("<" + recipient + ">");
+        recipients.forEach(Throwing.consumer(this::doAddRcpt).sneakyThrow());
         doData(message);
         return this;
     }
 
     public SMTPMessageSender sendMessage(Mail mail) throws MessagingException, IOException {
         String from = mail.getMaybeSender().asString();
-        doHelo();
-        doSetSender(from);
-        mail.getRecipients().stream()
-            .map(MailAddress::asString)
-            .forEach(Throwing.consumer(this::doAddRcpt).sneakyThrow());
-        doData(asString(mail.getMessage()));
-        return this;
+        ImmutableList<String> recipients = mail.getRecipients().stream()
+            .map(MailAddress::asString).collect(Guavate.toImmutableList());
+        String message = asString(mail.getMessage());
+
+        return sendMessageWithHeaders(from, recipients, message);
     }
 
     public SMTPMessageSender sendMessage(FakeMail.Builder mail) throws MessagingException, IOException {
@@ -132,6 +143,11 @@ public class SMTPMessageSender extends ExternalResource implements Closeable {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         message.writeTo(outputStream);
         return new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public void afterEach(ExtensionContext extensionContext) {
+        after();
     }
 
     @Override

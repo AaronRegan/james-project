@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -34,10 +35,13 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.james.util.concurrent.NamedThreadFactory;
+import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
+
+import reactor.core.publisher.Mono;
 
 public class ConcurrentTestRunner implements Closeable {
 
@@ -46,6 +50,35 @@ public class ConcurrentTestRunner implements Closeable {
     @FunctionalInterface
     public interface RequireOperation {
         RequireThreadCount operation(ConcurrentOperation operation);
+
+        default RequireThreadCount reactorOperation(ReactorOperation reactorOperation) {
+            return operation(reactorOperation.blocking());
+        }
+
+        default RequireThreadCount randomlyDistributedOperations(ConcurrentOperation firstOperation, ConcurrentOperation... operations) {
+            Random random = createReproductibleRandom();
+            ConcurrentOperation aggregateOperation = (threadNumber, step) -> selectRandomOperation(random, firstOperation, operations).execute(threadNumber, step);
+            return operation(aggregateOperation);
+        }
+
+        default RequireThreadCount randomlyDistributedReactorOperations(ReactorOperation firstReactorOperation, ReactorOperation... reactorOperations) {
+            Random random = createReproductibleRandom();
+            ReactorOperation aggregateOperation = (threadNumber, step) -> selectRandomOperation(random, firstReactorOperation, reactorOperations).execute(threadNumber, step);
+            return reactorOperation(aggregateOperation);
+        }
+
+        default Random createReproductibleRandom() {
+            return new Random(2134);
+        }
+
+        default <OperationT> OperationT selectRandomOperation(Random random, OperationT firstReactorOperation, OperationT... reactorOperations) {
+            int whichAction = random.nextInt(reactorOperations.length + 1);
+            if (whichAction == 0) {
+                return firstReactorOperation;
+            } else {
+                return reactorOperations[whichAction - 1];
+            }
+        }
     }
 
     @FunctionalInterface
@@ -57,6 +90,7 @@ public class ConcurrentTestRunner implements Closeable {
         private final int threadCount;
         private final ConcurrentOperation operation;
         private Optional<Integer> operationCount;
+        private Optional<Boolean> noErrorLogs;
 
         private Builder(int threadCount, ConcurrentOperation operation) {
             Preconditions.checkArgument(threadCount > 0, "Thread count should be strictly positive");
@@ -65,6 +99,7 @@ public class ConcurrentTestRunner implements Closeable {
             this.threadCount = threadCount;
             this.operation = operation;
             this.operationCount = Optional.empty();
+            this.noErrorLogs = Optional.empty();
         }
 
         public Builder operationCount(int operationCount) {
@@ -73,10 +108,16 @@ public class ConcurrentTestRunner implements Closeable {
             return this;
         }
 
+        public Builder noErrorLogs() {
+            this.noErrorLogs = Optional.of(true);
+            return this;
+        }
+
         private ConcurrentTestRunner build() {
             return new ConcurrentTestRunner(
                 threadCount,
                 operationCount.orElse(DEFAULT_OPERATION_COUNT),
+                noErrorLogs.orElse(false),
                 operation);
         }
 
@@ -97,18 +138,32 @@ public class ConcurrentTestRunner implements Closeable {
         }
     }
 
+    @FunctionalInterface
     public interface ConcurrentOperation {
         void execute(int threadNumber, int step) throws Exception;
+    }
+
+    @FunctionalInterface
+    public interface ReactorOperation {
+        Publisher<Void> execute(int threadNumber, int step) throws Exception;
+
+        default ConcurrentOperation blocking() {
+            return (threadNumber, step) -> Mono.from(execute(threadNumber, step))
+                .then()
+                .block();
+        }
     }
 
     private class ConcurrentRunnableTask implements Runnable {
         private final int threadNumber;
         private final ConcurrentOperation concurrentOperation;
+        private final boolean noErrorLogs;
         private Exception exception;
 
-        public ConcurrentRunnableTask(int threadNumber, ConcurrentOperation concurrentOperation) {
+        public ConcurrentRunnableTask(int threadNumber, ConcurrentOperation concurrentOperation, boolean noErrorLogs) {
             this.threadNumber = threadNumber;
             this.concurrentOperation = concurrentOperation;
+            this.noErrorLogs = noErrorLogs;
         }
 
         @Override
@@ -119,7 +174,9 @@ public class ConcurrentTestRunner implements Closeable {
                 try {
                     concurrentOperation.execute(threadNumber, i);
                 } catch (Exception e) {
-                    LOGGER.error("Error caught during concurrent testing (iteration {}, threadNumber {})", i, threadNumber, e);
+                    if (!noErrorLogs) {
+                        LOGGER.error("Error caught during concurrent testing (iteration {}, threadNumber {})", i, threadNumber, e);
+                    }
                     exception = e;
                 }
             }
@@ -141,15 +198,17 @@ public class ConcurrentTestRunner implements Closeable {
 
     private final int threadCount;
     private final int operationCount;
+    private final boolean suppressLogger;
     private final CountDownLatch countDownLatch;
     private final ConcurrentOperation biConsumer;
     private final ExecutorService executorService;
     private final List<Future<?>> futures;
 
-    private ConcurrentTestRunner(int threadCount, int operationCount, ConcurrentOperation biConsumer) {
+    private ConcurrentTestRunner(int threadCount, int operationCount, boolean suppressLogger, ConcurrentOperation biConsumer) {
         this.threadCount = threadCount;
         this.operationCount = operationCount;
         this.countDownLatch = new CountDownLatch(threadCount);
+        this.suppressLogger = suppressLogger;
         this.biConsumer = biConsumer;
         ThreadFactory threadFactory = NamedThreadFactory.withClassName(getClass());
         this.executorService = Executors.newFixedThreadPool(threadCount, threadFactory);
@@ -158,7 +217,7 @@ public class ConcurrentTestRunner implements Closeable {
 
     public ConcurrentTestRunner run() {
         for (int i = 0; i < threadCount; i++) {
-            futures.add(executorService.submit(new ConcurrentRunnableTask(i, biConsumer)));
+            futures.add(executorService.submit(new ConcurrentRunnableTask(i, biConsumer, suppressLogger)));
         }
         return this;
     }

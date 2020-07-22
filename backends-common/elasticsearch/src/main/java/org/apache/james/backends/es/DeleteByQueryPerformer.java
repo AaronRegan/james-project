@@ -25,7 +25,7 @@ import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.SearchHit;
@@ -33,34 +33,37 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public class DeleteByQueryPerformer {
     private static final TimeValue TIMEOUT = new TimeValue(60000);
 
-    private final RestHighLevelClient client;
+    private final ReactorElasticSearchClient client;
     private final int batchSize;
     private final WriteAliasName aliasName;
 
     @VisibleForTesting
-    public DeleteByQueryPerformer(RestHighLevelClient client, int batchSize, WriteAliasName aliasName) {
+    DeleteByQueryPerformer(ReactorElasticSearchClient client, int batchSize, WriteAliasName aliasName) {
         this.client = client;
         this.batchSize = batchSize;
         this.aliasName = aliasName;
     }
 
-    public Mono<Void> perform(QueryBuilder queryBuilder) {
-        return Flux.fromStream(new ScrolledSearch(client, prepareSearch(queryBuilder)).searchResponses())
-            .flatMap(searchResponse -> deleteRetrievedIds(client, searchResponse))
-            .thenEmpty(Mono.empty());
+    public Mono<Void> perform(QueryBuilder queryBuilder, RoutingKey routingKey) {
+        SearchRequest searchRequest = prepareSearch(queryBuilder, routingKey);
+
+        return new ScrolledSearch(client, searchRequest).searchResponses()
+            .filter(searchResponse -> searchResponse.getHits().getHits().length > 0)
+            .flatMap(searchResponse -> deleteRetrievedIds(searchResponse, routingKey))
+            .then();
     }
 
-    private SearchRequest prepareSearch(QueryBuilder queryBuilder) {
+    private SearchRequest prepareSearch(QueryBuilder queryBuilder, RoutingKey routingKey) {
         return new SearchRequest(aliasName.getValue())
             .types(NodeMappingFactory.DEFAULT_MAPPING_NAME)
             .scroll(TIMEOUT)
-            .source(searchSourceBuilder(queryBuilder));
+            .source(searchSourceBuilder(queryBuilder))
+            .routing(routingKey.asString());
     }
 
     private SearchSourceBuilder searchSourceBuilder(QueryBuilder queryBuilder) {
@@ -69,16 +72,17 @@ public class DeleteByQueryPerformer {
             .size(batchSize);
     }
 
-    private Mono<BulkResponse> deleteRetrievedIds(RestHighLevelClient client, SearchResponse searchResponse) {
+    private Mono<BulkResponse> deleteRetrievedIds(SearchResponse searchResponse, RoutingKey routingKey) {
         BulkRequest request = new BulkRequest();
 
         for (SearchHit hit : searchResponse.getHits()) {
             request.add(
                 new DeleteRequest(aliasName.getValue())
                     .type(NodeMappingFactory.DEFAULT_MAPPING_NAME)
-                    .id(hit.getId()));
+                    .id(hit.getId())
+                    .routing(routingKey.asString()));
         }
 
-        return Mono.fromCallable(() -> client.bulk(request));
+        return client.bulk(request, RequestOptions.DEFAULT);
     }
 }

@@ -28,4 +28,22 @@ public interface Metric {
     void add(int value);
 
     void remove(int value);
+
+    /**
+     * @return A long guaranteed to be positive.
+     *
+     * Implementation might be doing strict validation (throwing on negative value) or lenient (log and sanitize to 0)
+     */
+    long getCount();
+
+    /**
+     * Moving average.
+     *
+     * Period of the moving average is implementation defined.
+     *
+     * Default to count (naive implementation with period starting at boot time)
+     */
+    default double movingAverage() {
+        return Long.valueOf(getCount()).doubleValue();
+    }
 }

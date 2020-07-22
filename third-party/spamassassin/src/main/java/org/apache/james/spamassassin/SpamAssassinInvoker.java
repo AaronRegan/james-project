@@ -35,7 +35,7 @@ import javax.mail.MessagingException;
 import javax.mail.internet.MimeMessage;
 
 import org.apache.commons.io.IOUtils;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.metrics.api.MetricFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,29 +93,31 @@ public class SpamAssassinInvoker {
      * @throws MessagingException
      *             if an error on scanning is detected
      */
-    public SpamAssassinResult scanMail(MimeMessage message, User user) throws MessagingException {
-        return metricFactory.runPublishingTimerMetric(
+    public SpamAssassinResult scanMail(MimeMessage message, Username username) throws MessagingException {
+        return metricFactory.decorateSupplierWithTimerMetric(
             "spamAssassin-check",
             Throwing.supplier(
                 () -> scanMailWithAdditionalHeaders(message,
-                    "User: " + user.asString()))
+                    "User: " + username.asString()))
                 .sneakyThrow());
     }
 
     public SpamAssassinResult scanMail(MimeMessage message) throws MessagingException {
-        return metricFactory.runPublishingTimerMetric(
+        return metricFactory.decorateSupplierWithTimerMetric(
             "spamAssassin-check",
             Throwing.supplier(
                 () -> scanMailWithoutAdditionalHeaders(message))
             .sneakyThrow());
     }
 
-    public SpamAssassinResult scanMailWithAdditionalHeaders(MimeMessage message, String... additionalHeaders) throws MessagingException {
+    private SpamAssassinResult scanMailWithAdditionalHeaders(MimeMessage message, String... additionalHeaders) throws MessagingException {
         try (Socket socket = new Socket(spamdHost, spamdPort);
              OutputStream out = socket.getOutputStream();
              BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(out);
              PrintWriter writer = new PrintWriter(bufferedOutputStream);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+
+            LOGGER.debug("Sending email {} for spam check", message.getMessageID());
 
             writer.write("CHECK SPAMC/1.2");
             writer.write(CRLF);
@@ -134,11 +136,14 @@ public class SpamAssassinInvoker {
             out.flush();
             socket.shutdownOutput();
 
-            return in.lines()
+            SpamAssassinResult spamAssassinResult = in.lines()
                 .filter(this::isSpam)
                 .map(this::processSpam)
                 .findFirst()
                 .orElse(SpamAssassinResult.empty());
+
+            LOGGER.debug("spam check result: {}", spamAssassinResult);
+            return spamAssassinResult;
         } catch (UnknownHostException e) {
             throw new MessagingException("Error communicating with spamd. Unknown host: " + spamdHost);
         } catch (IOException | MessagingException e) {
@@ -146,7 +151,7 @@ public class SpamAssassinInvoker {
         }
     }
 
-    public SpamAssassinResult scanMailWithoutAdditionalHeaders(MimeMessage message) throws MessagingException {
+    private SpamAssassinResult scanMailWithoutAdditionalHeaders(MimeMessage message) throws MessagingException {
         return scanMailWithAdditionalHeaders(message);
     }
 
@@ -188,11 +193,11 @@ public class SpamAssassinInvoker {
      * @throws MessagingException
      *             if an error occured during learning.
      */
-    public boolean learnAsSpam(InputStream message, User user) throws MessagingException {
-        return metricFactory.runPublishingTimerMetric(
+    public boolean learnAsSpam(InputStream message, Username username) throws MessagingException {
+        return metricFactory.decorateSupplierWithTimerMetric(
             "spamAssassin-spam-report",
             Throwing.supplier(
-                () -> reportMessageAs(message, user, MessageClass.SPAM))
+                () -> reportMessageAs(message, username, MessageClass.SPAM))
                 .sneakyThrow());
     }
 
@@ -204,20 +209,22 @@ public class SpamAssassinInvoker {
      * @throws MessagingException
      *             if an error occured during learning.
      */
-    public boolean learnAsHam(InputStream message, User user) throws MessagingException {
-        return metricFactory.runPublishingTimerMetric(
+    public boolean learnAsHam(InputStream message, Username username) throws MessagingException {
+        return metricFactory.decorateSupplierWithTimerMetric(
             "spamAssassin-ham-report",
             Throwing.supplier(
-                () -> reportMessageAs(message, user, MessageClass.HAM))
+                () -> reportMessageAs(message, username, MessageClass.HAM))
                 .sneakyThrow());
     }
 
-    private boolean reportMessageAs(InputStream message, User user, MessageClass messageClass) throws MessagingException {
+    private boolean reportMessageAs(InputStream message, Username username, MessageClass messageClass) throws MessagingException {
         try (Socket socket = new Socket(spamdHost, spamdPort);
              OutputStream out = socket.getOutputStream();
              BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(out);
              PrintWriter writer = new PrintWriter(bufferedOutputStream);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+
+            LOGGER.debug("Report mail as {}", messageClass);
 
             byte[] byteArray = IOUtils.toByteArray(message);
             writer.write("TELL SPAMC/1.2");
@@ -228,7 +235,7 @@ public class SpamAssassinInvoker {
             writer.write(CRLF);
             writer.write("Set: local, remote");
             writer.write(CRLF);
-            writer.write("User: " + user.asString());
+            writer.write("User: " + username.asString());
             writer.write(CRLF);
             writer.write(CRLF);
             writer.flush();
@@ -237,8 +244,13 @@ public class SpamAssassinInvoker {
             out.flush();
             socket.shutdownOutput();
 
-            return in.lines()
-                .anyMatch(this::hasBeenSet);
+            boolean hasBeenSet = in.lines().anyMatch(this::hasBeenSet);
+            if (hasBeenSet) {
+                LOGGER.debug("Reported mail as {} succeeded", messageClass);
+            } else {
+                LOGGER.debug("Reported mail as {} failed", messageClass);
+            }
+            return hasBeenSet;
         } catch (UnknownHostException e) {
             throw new MessagingException("Error communicating with spamd. Unknown host: " + spamdHost);
         } catch (IOException e) {

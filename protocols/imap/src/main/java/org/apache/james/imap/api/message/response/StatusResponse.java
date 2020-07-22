@@ -19,18 +19,27 @@
 
 package org.apache.james.imap.api.message.response;
 
+import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Set;
+import java.util.stream.Stream;
 
 import javax.mail.Flags;
 
 import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.display.HumanReadableText;
 import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.MessageFlags;
 import org.apache.james.imap.api.message.UidRange;
+import org.apache.james.mailbox.MessageSequenceNumber;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
+import org.apache.james.mailbox.model.UidValidity;
+
+import com.github.steveash.guavate.Guavate;
 
 /**
  * <p>
@@ -42,6 +51,15 @@ import org.apache.james.mailbox.MessageUid;
  * </p>
  */
 public interface StatusResponse extends ImapResponseMessage {
+
+    Set<String> AVAILABLE_CHARSET_NAMES =
+        Charset.availableCharsets()
+            .values()
+            .stream()
+            .flatMap(charset -> Stream.concat(
+                Stream.of(charset.name()),
+                charset.aliases().stream()))
+            .collect(Guavate.toImmutableSet());
 
     /**
      * Gets the server response type of this status message.
@@ -56,7 +74,7 @@ public interface StatusResponse extends ImapResponseMessage {
      * 
      * @return if tagged response, the tag. Otherwise null.
      */
-    String getTag();
+    Tag getTag();
 
     /**
      * Gets the command.
@@ -134,31 +152,31 @@ public interface StatusResponse extends ImapResponseMessage {
 
         
         /** RFC4315 <code>APPENDUID</code> response code */
-        public static ResponseCode appendUid(long uidValidity, UidRange[] uids) {
+        public static ResponseCode appendUid(UidValidity uidValidity, UidRange[] uids) {
             String uidParam = formatRanges(uids);
-            return new ResponseCode("APPENDUID", Arrays.asList(uidParam), uidValidity, false);
+            return new ResponseCode("APPENDUID", Arrays.asList(uidParam), uidValidity.asLong(), false);
         }
 
         /** RFC4315 <code>COPYUID</code> response code */
-        public static ResponseCode copyUid(long uidValidity, IdRange[] sourceRanges, IdRange[] targetRanges) {
+        public static ResponseCode copyUid(UidValidity uidValidity, IdRange[] sourceRanges, IdRange[] targetRanges) {
             String source = formatRanges(sourceRanges);
             String target = formatRanges(targetRanges);
 
-            return new ResponseCode("COPYUID", Arrays.asList(new String[] { source, target }), uidValidity, false);
+            return new ResponseCode("COPYUID", Arrays.asList(source, target), uidValidity.asLong(), false);
         }
 
         /** RFC4551 <code>Conditional STORE</code> response code */
         public static ResponseCode condStore(IdRange[] failedRanges) {
             String failed = formatRanges(failedRanges);
 
-            return new ResponseCode("MODIFIED", Arrays.asList(new String[] { failed}), 0, false);
+            return new ResponseCode("MODIFIED", Arrays.asList(failed), 0, false);
         }
         
         /** RFC4551 <code>Conditional STORE</code> response code */
         public static ResponseCode condStore(UidRange[] failedRanges) {
             String failed = formatRanges(failedRanges);
 
-            return new ResponseCode("MODIFIED", Arrays.asList(new String[] { failed}), 0, false);
+            return new ResponseCode("MODIFIED", Arrays.asList(failed), 0, false);
         }
         
         private static String formatRanges(IdRange[] ranges) {
@@ -211,12 +229,10 @@ public interface StatusResponse extends ImapResponseMessage {
         /**
          * Creates a RFC2060 <code>BADCHARSET</code> response code.
          * 
-         * @param charsetNames
-         *            <code>Collection<String></code> containing charset names
          * @return <code>ResponseCode</code>, not null
          */
-        public static ResponseCode badCharset(Collection<String> charsetNames) {
-            return new ResponseCode("BADCHARSET", charsetNames);
+        public static ResponseCode badCharset() {
+            return new ResponseCode("BADCHARSET", AVAILABLE_CHARSET_NAMES);
         }
 
         /**
@@ -273,8 +289,8 @@ public interface StatusResponse extends ImapResponseMessage {
          *            positive non-zero integer
          * @return <code>ResponseCode</code>, not null
          */
-        public static ResponseCode uidValidity(long uid) {
-            return new ResponseCode("UIDVALIDITY", uid);
+        public static ResponseCode uidValidity(UidValidity uid) {
+            return new ResponseCode("UIDVALIDITY", uid.asLong());
         }
 
         /**
@@ -284,8 +300,8 @@ public interface StatusResponse extends ImapResponseMessage {
          *            positive non-zero integer
          * @return <code>ResponseCode</code>, not null
          */
-        public static ResponseCode unseen(int numberUnseen) {
-            return new ResponseCode("UNSEEN", numberUnseen);
+        public static ResponseCode unseen(MessageSequenceNumber numberUnseen) {
+            return new ResponseCode("UNSEEN", numberUnseen.asInt());
         }
 
         /**
@@ -306,8 +322,8 @@ public interface StatusResponse extends ImapResponseMessage {
          * @param modSeq positive non-zero long
          * @return <code>ResponseCode</code>
          */
-        public static ResponseCode highestModSeq(long modSeq) {
-            return new ResponseCode("HIGHESTMODSEQ", modSeq);
+        public static ResponseCode highestModSeq(ModSeq modSeq) {
+            return new ResponseCode("HIGHESTMODSEQ", modSeq.asLong());
         }
         
         /**

@@ -20,8 +20,6 @@ package org.apache.james.mailbox.store;
 
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.RequestAware;
-import org.apache.james.mailbox.exception.MailboxException;
-import org.apache.james.mailbox.exception.SubscriptionException;
 import org.apache.james.mailbox.store.mail.AnnotationMapper;
 import org.apache.james.mailbox.store.mail.MailboxMapper;
 import org.apache.james.mailbox.store.mail.MailboxMapperFactory;
@@ -48,7 +46,7 @@ public abstract class MailboxSessionMapperFactory implements RequestAware, Mailb
     
     
     @Override
-    public MessageMapper getMessageMapper(MailboxSession session) throws MailboxException {
+    public MessageMapper getMessageMapper(MailboxSession session) {
         MessageMapper mapper = (MessageMapper) session.getAttributes().get(MESSAGEMAPPER);
         if (mapper == null) {
             mapper = createMessageMapper(session);
@@ -57,7 +55,7 @@ public abstract class MailboxSessionMapperFactory implements RequestAware, Mailb
         return mapper;
     }
 
-    public MessageIdMapper getMessageIdMapper(MailboxSession session) throws MailboxException {
+    public MessageIdMapper getMessageIdMapper(MailboxSession session) {
         MessageIdMapper mapper = (MessageIdMapper) session.getAttributes().get(MESSAGEIDMAPPER);
         if (mapper == null) {
             mapper = createMessageIdMapper(session);
@@ -66,7 +64,7 @@ public abstract class MailboxSessionMapperFactory implements RequestAware, Mailb
         return mapper;
     }
 
-    public AnnotationMapper getAnnotationMapper(MailboxSession session) throws MailboxException {
+    public AnnotationMapper getAnnotationMapper(MailboxSession session) {
         AnnotationMapper mapper = (AnnotationMapper)session.getAttributes().get(ANNOTATIONMAPPER);
         if (mapper == null) {
             mapper = createAnnotationMapper(session);
@@ -75,22 +73,20 @@ public abstract class MailboxSessionMapperFactory implements RequestAware, Mailb
         return mapper;
     }
 
-    public abstract AnnotationMapper createAnnotationMapper(MailboxSession session) throws MailboxException;
+    public abstract AnnotationMapper createAnnotationMapper(MailboxSession session);
 
     /**
      * Create a {@link MessageMapper} instance which will get reused during the whole {@link MailboxSession}
      * 
-     * @param session
      * @return messageMapper
-     * @throws MailboxException
      */
-    public abstract MessageMapper createMessageMapper(MailboxSession session) throws MailboxException;
+    public abstract MessageMapper createMessageMapper(MailboxSession session);
 
 
-    public abstract MessageIdMapper createMessageIdMapper(MailboxSession session) throws MailboxException;
+    public abstract MessageIdMapper createMessageIdMapper(MailboxSession session);
 
     @Override
-    public MailboxMapper getMailboxMapper(MailboxSession session) throws MailboxException {
+    public MailboxMapper getMailboxMapper(MailboxSession session) {
         MailboxMapper mapper = (MailboxMapper) session.getAttributes().get(MAILBOXMAPPER);
         if (mapper == null) {
             mapper = createMailboxMapper(session);
@@ -102,20 +98,17 @@ public abstract class MailboxSessionMapperFactory implements RequestAware, Mailb
     /**
      * Create a {@link MailboxMapper} instance which will get reused during the whole {@link MailboxSession}
      * 
-     * @param session
      * @return mailboxMapper
-     * @throws MailboxException
      */
-    public abstract MailboxMapper createMailboxMapper(MailboxSession session) throws MailboxException;
+    public abstract MailboxMapper createMailboxMapper(MailboxSession session);
 
     /**
      * Create a {@link SubscriptionMapper} instance or return the one which exists for the {@link MailboxSession} already
      * 
-     * @param session
      * @return mapper
      */
     @Override
-    public SubscriptionMapper getSubscriptionMapper(MailboxSession session) throws SubscriptionException {
+    public SubscriptionMapper getSubscriptionMapper(MailboxSession session) {
         SubscriptionMapper mapper = (SubscriptionMapper) session.getAttributes().get(SUBSCRIPTIONMAPPER);
         if (mapper == null) {
             mapper = createSubscriptionMapper(session);
@@ -126,11 +119,10 @@ public abstract class MailboxSessionMapperFactory implements RequestAware, Mailb
     
     /**
      * Create a {@link SubscriptionMapper} instance which will get reused during the whole {@link MailboxSession}
-     * @param session
+     *
      * @return subscriptionMapper
-     * @throws SubscriptionException
      */
-    public abstract SubscriptionMapper createSubscriptionMapper(MailboxSession session) throws SubscriptionException;
+    public abstract SubscriptionMapper createSubscriptionMapper(MailboxSession session);
 
     public abstract UidProvider getUidProvider();
 
@@ -138,8 +130,6 @@ public abstract class MailboxSessionMapperFactory implements RequestAware, Mailb
 
     /**
      * Call endRequest on {@link Mapper} instances
-     * 
-     * @param session
      */
     @Override
     public void endProcessingRequest(MailboxSession session) {

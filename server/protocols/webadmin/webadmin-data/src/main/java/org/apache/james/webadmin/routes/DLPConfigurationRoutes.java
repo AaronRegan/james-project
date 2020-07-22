@@ -55,6 +55,7 @@ import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.ApiResponses;
+import reactor.core.publisher.Mono;
 import spark.HaltException;
 import spark.Request;
 import spark.Service;
@@ -110,7 +111,7 @@ public class DLPConfigurationRoutes implements Routes {
     @ApiOperation(value = "Store a DLP configuration for given senderDomain")
     @ApiImplicitParams({
         @ApiImplicitParam(required = true, dataType = "string", name = "senderDomain", paramType = "path"),
-        @ApiImplicitParam(required = true, dataType = "org.apache.james.webadmin.dto.DLPConfigurationDTO", paramType = "body")
+        @ApiImplicitParam(required = true, dataTypeClass = DLPConfigurationDTO.class, paramType = "body")
     })
     @ApiResponses(value = {
         @ApiResponse(code = HttpStatus.NO_CONTENT_204, message = "OK. DLP configuration is stored."),
@@ -166,7 +167,7 @@ public class DLPConfigurationRoutes implements Routes {
     public void defineList(Service service) {
         service.get(SPECIFIC_DLP_RULE_DOMAIN, (request, response) -> {
             Domain senderDomain = parseDomain(request);
-            DLPRules dlpConfigurations = dlpConfigurationStore.list(senderDomain);
+            DLPRules dlpConfigurations = Mono.from(dlpConfigurationStore.list(senderDomain)).block();
 
             DLPConfigurationDTO dto = DLPConfigurationDTO.toDTO(dlpConfigurations);
             response.status(HttpStatus.OK_200);
@@ -239,8 +240,6 @@ public class DLPConfigurationRoutes implements Routes {
             validateDomainInList(domain);
 
             return domain;
-        } catch (IllegalArgumentException e) {
-            throw invalidDomain(String.format("Invalid request for domain: %s", domainName), e);
         } catch (DomainListException e) {
             throw serverError(String.format("Cannot recognize domain: %s in domain list", domainName), e);
         }
@@ -250,15 +249,6 @@ public class DLPConfigurationRoutes implements Routes {
         if (!domainList.containsDomain(domain)) {
             throw notFound(String.format("'%s' is not managed by this James server", domain.name()));
         }
-    }
-
-    private HaltException invalidDomain(String message, Exception e) {
-        return ErrorResponder.builder()
-            .statusCode(HttpStatus.BAD_REQUEST_400)
-            .type(ErrorType.INVALID_ARGUMENT)
-            .message(message)
-            .cause(e)
-            .haltError();
     }
 
     private HaltException serverError(String message, Exception e) {

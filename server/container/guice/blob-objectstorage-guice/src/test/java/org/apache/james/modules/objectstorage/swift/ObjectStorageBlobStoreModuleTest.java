@@ -19,17 +19,20 @@
 
 package org.apache.james.modules.objectstorage.swift;
 
+import static org.apache.james.blob.api.BlobStore.StoragePolicy.LOW_COST;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
 import org.apache.james.blob.api.BucketName;
-import org.apache.james.blob.api.MetricableBlobStore;
+import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.objectstorage.DockerSwift;
 import org.apache.james.blob.objectstorage.DockerSwiftExtension;
+import org.apache.james.blob.objectstorage.ObjectStorageBlobStore;
 import org.apache.james.blob.objectstorage.swift.Credentials;
 import org.apache.james.blob.objectstorage.swift.DomainName;
 import org.apache.james.blob.objectstorage.swift.IdentityV3;
@@ -43,7 +46,7 @@ import org.apache.james.blob.objectstorage.swift.TenantName;
 import org.apache.james.blob.objectstorage.swift.UserHeaderName;
 import org.apache.james.blob.objectstorage.swift.UserName;
 import org.apache.james.modules.objectstorage.ObjectStorageBlobConfiguration;
-import org.apache.james.modules.objectstorage.ObjectStorageBlobStoreModule;
+import org.apache.james.modules.objectstorage.ObjectStorageDependenciesModule;
 import org.apache.james.modules.objectstorage.ObjectStorageProvider;
 import org.apache.james.modules.objectstorage.PayloadCodecFactory;
 import org.junit.jupiter.api.BeforeAll;
@@ -56,8 +59,6 @@ import org.junit.jupiter.params.provider.ArgumentsSource;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.Key;
-import com.google.inject.name.Names;
 import com.google.inject.util.Modules;
 
 @ExtendWith(DockerSwiftExtension.class)
@@ -131,13 +132,13 @@ class ObjectStorageBlobStoreModuleTest {
     @ArgumentsSource(BlobStorageBlobConfigurationProvider.class)
     void shouldSetupBlobStore(ObjectStorageBlobConfiguration configuration) {
         Injector injector = Guice.createInjector(
-            Modules
-                .override(new ObjectStorageBlobStoreModule())
+            Modules.override(binder -> binder.bind(BlobId.Factory.class).to(HashBlobId.Factory.class),
+                    new ObjectStorageDependenciesModule())
                 .with(binder -> binder.bind(ObjectStorageBlobConfiguration.class).toInstance(configuration)));
 
-        BlobStore blobStore = injector.getInstance(Key.get(BlobStore.class, Names.named(MetricableBlobStore.BLOB_STORE_IMPLEMENTATION)));
+        BlobStore blobStore = injector.getInstance(ObjectStorageBlobStore.class);
 
-        assertThatCode(() -> blobStore.save(blobStore.getDefaultBucketName(), new byte[] {0x00})).doesNotThrowAnyException();
+        assertThatCode(() -> blobStore.save(blobStore.getDefaultBucketName(), new byte[] {0x00}, LOW_COST)).doesNotThrowAnyException();
     }
 
 }

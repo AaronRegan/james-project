@@ -26,6 +26,7 @@ import java.util.List;
 
 import javax.mail.Flags;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.ComposedMessageId;
 import org.apache.james.mailbox.model.MailboxPath;
@@ -35,7 +36,9 @@ import com.google.common.collect.ImmutableList;
 
 public class MessageAppender {
 
-    private MessageAppender() {}
+    private MessageAppender() {
+
+    }
 
     public static List<ComposedMessageId> fillMailbox(MailboxProbe mailboxProbe, String user, String mailbox) {
         ImmutableList.Builder<ComposedMessageId> insertedMessages = ImmutableList.builder();
@@ -44,7 +47,7 @@ public class MessageAppender {
                 String mailContent = "Subject: test\r\n\r\ntestmail" + String.valueOf(i);
                 ByteArrayInputStream messagePayload = new ByteArrayInputStream(mailContent.getBytes(StandardCharsets.UTF_8));
                 insertedMessages.add(
-                    mailboxProbe.appendMessage(user, MailboxPath.forUser(user, mailbox), messagePayload, new Date(), false, new Flags()));
+                    mailboxProbe.appendMessage(user, MailboxPath.forUser(Username.of(user), mailbox), messagePayload, new Date(), false, new Flags()));
             }
         } catch (MailboxException ignored) {
             //we expect an exception to be thrown because of quota reached

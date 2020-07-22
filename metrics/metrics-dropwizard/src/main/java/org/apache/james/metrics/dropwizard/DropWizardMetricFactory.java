@@ -19,18 +19,25 @@
 
 package org.apache.james.metrics.dropwizard;
 
+import static org.apache.james.metrics.api.TimeMetric.ExecutionResult.DEFAULT_100_MS_THRESHOLD;
+
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
 
+import org.apache.james.lifecycle.api.Startable;
 import org.apache.james.metrics.api.Metric;
 import org.apache.james.metrics.api.MetricFactory;
-import org.apache.james.metrics.api.TimeMetric;
+import org.reactivestreams.Publisher;
 
+import com.codahale.metrics.Meter;
 import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.SlidingTimeWindowMovingAverages;
 import com.codahale.metrics.jmx.JmxReporter;
 
-public class DropWizardMetricFactory implements MetricFactory {
+import reactor.core.publisher.Flux;
+
+public class DropWizardMetricFactory implements MetricFactory, Startable {
 
     private final MetricRegistry metricRegistry;
     private final JmxReporter jmxReporter;
@@ -44,12 +51,26 @@ public class DropWizardMetricFactory implements MetricFactory {
 
     @Override
     public Metric generate(String name) {
-        return new DropWizardMetric(metricRegistry.counter(name));
+        return new DropWizardMetric(metricRegistry.meter(name, () -> new Meter(new SlidingTimeWindowMovingAverages())), name);
     }
 
     @Override
-    public TimeMetric timer(String name) {
-        return new DropWizardTimeMetric(name, metricRegistry.timer(name).time());
+    public DropWizardTimeMetric timer(String name) {
+        return new DropWizardTimeMetric(name, metricRegistry.timer(name));
+    }
+
+    @Override
+    public <T> Publisher<T> decoratePublisherWithTimerMetric(String name, Publisher<T> publisher) {
+        return Flux.using(() -> timer(name),
+            any -> Flux.from(publisher),
+            DropWizardTimeMetric::stopAndPublish);
+    }
+
+    @Override
+    public <T> Publisher<T> decoratePublisherWithTimerMetricLogP99(String name, Publisher<T> publisher) {
+        return Flux.using(() -> timer(name),
+            any -> Flux.from(publisher),
+            timer -> timer.stopAndPublish().logWhenExceedP99(DEFAULT_100_MS_THRESHOLD));
     }
 
     @PostConstruct
@@ -61,5 +82,4 @@ public class DropWizardMetricFactory implements MetricFactory {
     public void stop() {
         jmxReporter.stop();
     }
-
 }

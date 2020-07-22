@@ -23,14 +23,13 @@ import java.util.List;
 import javax.inject.Inject;
 
 import org.apache.james.mailbox.MailboxSession;
+import org.apache.james.mailbox.SessionProvider;
 import org.apache.james.mailbox.events.Event;
 import org.apache.james.mailbox.events.Group;
 import org.apache.james.mailbox.events.MailboxListener;
-import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.MailboxAnnotation;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.store.MailboxSessionMapperFactory;
-import org.apache.james.mailbox.store.SessionProvider;
 import org.apache.james.mailbox.store.mail.AnnotationMapper;
 
 public class MailboxAnnotationListener implements MailboxListener.GroupMailboxListener {
@@ -38,7 +37,7 @@ public class MailboxAnnotationListener implements MailboxListener.GroupMailboxLi
 
     }
 
-    private static final Group GROUP = new MailboxAnnotationListenerGroup();
+    public static final Group GROUP = new MailboxAnnotationListenerGroup();
 
     private final MailboxSessionMapperFactory mailboxSessionMapperFactory;
     private final SessionProvider sessionProvider;
@@ -55,9 +54,9 @@ public class MailboxAnnotationListener implements MailboxListener.GroupMailboxLi
     }
 
     @Override
-    public void event(Event event) throws MailboxException {
+    public void event(Event event) {
         if (event instanceof MailboxDeletion) {
-            MailboxSession mailboxSession = sessionProvider.createSystemSession(event.getUser().asString());
+            MailboxSession mailboxSession = sessionProvider.createSystemSession(event.getUsername());
             AnnotationMapper annotationMapper = mailboxSessionMapperFactory.getAnnotationMapper(mailboxSession);
             MailboxId mailboxId = ((MailboxDeletion) event).getMailboxId();
 

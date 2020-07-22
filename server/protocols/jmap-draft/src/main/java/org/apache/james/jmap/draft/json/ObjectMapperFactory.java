@@ -25,8 +25,10 @@ import java.util.Set;
 
 import javax.inject.Inject;
 
+import org.apache.james.core.Username;
 import org.apache.james.jmap.draft.model.mailbox.Rights;
 import org.apache.james.mailbox.Role;
+import org.apache.james.mailbox.model.ContentType;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mdn.action.mode.DispositionActionMode;
@@ -75,7 +77,10 @@ public class ObjectMapperFactory {
         mailboxIdModule.addSerializer(MessageId.class, new MessageIdSerializer());
         mailboxIdModule.addKeyDeserializer(MessageId.class, new MessageIdKeyDeserializer(messageIdFactory));
         mailboxIdModule.addKeySerializer(MessageId.class, new MessageIdKeySerializer());
-        mailboxIdModule.addKeyDeserializer(Rights.Username.class, new UsernameKeyDeserializer());
+        mailboxIdModule.addSerializer(Username.class, new UsernameSerializer());
+        mailboxIdModule.addDeserializer(Username.class, new UsernameDeserializer());
+        mailboxIdModule.addKeyDeserializer(Username.class, new UsernameKeyDeserializer());
+        mailboxIdModule.addKeySerializer(Username.class, new UsernameKeySerializer());
         mailboxIdModule.addDeserializer(Rights.Right.class, new RightDeserializer());
 
         SimpleModule mdnModule = new SimpleModule();
@@ -83,10 +88,15 @@ public class ObjectMapperFactory {
         mailboxIdModule.addDeserializer(DispositionSendingMode.class, new MDNSendingModeDeserializer());
         mailboxIdModule.addDeserializer(DispositionType.class, new MDNTypeDeserializer());
 
+        SimpleModule contentTypeModule = new SimpleModule();
+        contentTypeModule.addDeserializer(ContentType.class, new ContentTypeDeserializer());
+        contentTypeModule.addSerializer(ContentType.class, new ContentTypeSerializer());
+
         mailboxIdModule.setMixInAnnotation(Role.class, RoleMixIn.class);
 
         jacksonModules = JACKSON_BASE_MODULES.add(mailboxIdModule)
             .add(mdnModule)
+            .add(contentTypeModule)
             .build();
     }
 
@@ -130,6 +140,21 @@ public class ObjectMapperFactory {
         }
     }
 
+    public static class ContentTypeDeserializer extends JsonDeserializer<ContentType> {
+        @Override
+        public ContentType deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+            String value = jsonParser.getValueAsString();
+            return ContentType.of(value);
+        }
+    }
+
+    public static class ContentTypeSerializer extends JsonSerializer<ContentType> {
+        @Override
+        public void serialize(ContentType value, JsonGenerator gen, SerializerProvider serializers) throws IOException, JsonProcessingException {
+            gen.writeString(value.asString());
+        }
+    }
+
     public static class MDNTypeDeserializer extends JsonDeserializer<DispositionType> {
         private static final ImmutableList<String> ALLOWED_VALUES = Arrays.stream(DispositionType.values())
             .map(DispositionType::getValue)
@@ -165,10 +190,31 @@ public class ObjectMapperFactory {
         }
     }
 
+    public static class UsernameSerializer extends JsonSerializer<Username> {
+        @Override
+        public void serialize(Username value, JsonGenerator gen, SerializerProvider serializers) throws IOException, JsonProcessingException {
+            gen.writeString(value.asString());
+        }
+    }
+
+    public static class UsernameKeySerializer extends JsonSerializer<Username> {
+        @Override
+        public void serialize(Username value, JsonGenerator gen, SerializerProvider serializers) throws IOException, JsonProcessingException {
+            gen.writeFieldName(value.asString());
+        }
+    }
+
+    public static class UsernameDeserializer extends JsonDeserializer<Username> {
+        @Override
+        public Username deserialize(JsonParser p, DeserializationContext ctxt) throws IOException, JsonProcessingException {
+            return Username.of(p.getValueAsString());
+        }
+    }
+
     public static class UsernameKeyDeserializer extends KeyDeserializer {
         @Override
         public Object deserializeKey(String key, DeserializationContext ctxt) {
-            return new Rights.Username(key);
+            return Username.of(key);
         }
     }
 

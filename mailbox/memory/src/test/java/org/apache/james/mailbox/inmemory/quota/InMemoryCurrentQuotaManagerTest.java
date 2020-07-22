@@ -19,98 +19,24 @@
 
 package org.apache.james.mailbox.inmemory.quota;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
+import org.apache.james.mailbox.quota.CurrentQuotaManager;
+import org.apache.james.mailbox.store.quota.CurrentQuotaManagerContract;
+import org.junit.jupiter.api.BeforeEach;
 
-import java.util.Optional;
+class InMemoryCurrentQuotaManagerTest implements CurrentQuotaManagerContract {
 
-import org.apache.james.core.quota.QuotaCount;
-import org.apache.james.core.quota.QuotaSize;
-import org.apache.james.mailbox.model.QuotaRoot;
-import org.apache.james.mailbox.store.SessionProvider;
-import org.apache.james.mailbox.store.quota.CurrentQuotaCalculator;
-import org.junit.Before;
-import org.junit.Test;
+    CurrentQuotaManager testee;
 
-public class InMemoryCurrentQuotaManagerTest {
+    @BeforeEach
+    void setUp() {
+        InMemoryIntegrationResources resources = InMemoryIntegrationResources.defaultResources();
 
-    public static final QuotaRoot QUOTA_ROOT = QuotaRoot.quotaRoot("benwa", Optional.empty());
-
-    private InMemoryCurrentQuotaManager testee;
-    private CurrentQuotaCalculator mockedCurrentQuotaCalculator;
-
-    @Before
-    public void setUp() throws Exception {
-        mockedCurrentQuotaCalculator = mock(CurrentQuotaCalculator.class);
-        testee = new InMemoryCurrentQuotaManager(mockedCurrentQuotaCalculator, mock(SessionProvider.class));
+        testee = resources.getCurrentQuotaManager();
     }
 
-    @Test
-    public void getCurrentMessageCountShouldReturnRecalculateMessageCountWhenEntryIsNotInitialized() throws Exception {
-        when(mockedCurrentQuotaCalculator.recalculateCurrentQuotas(QUOTA_ROOT, null))
-            .thenReturn(new CurrentQuotaCalculator.CurrentQuotas(18, 512));
-
-        assertThat(testee.getCurrentMessageCount(QUOTA_ROOT)).isEqualTo(QuotaCount.count(18));
+    @Override
+    public CurrentQuotaManager testee() {
+        return testee;
     }
-
-    @Test
-    public void getCurrentStorageShouldReturnRecalculateSizeWhenEntryIsNotInitialized() throws Exception {
-        when(mockedCurrentQuotaCalculator.recalculateCurrentQuotas(QUOTA_ROOT, null))
-            .thenReturn(new CurrentQuotaCalculator.CurrentQuotas(18, 512));
-
-        assertThat(testee.getCurrentStorage(QUOTA_ROOT)).isEqualTo(QuotaSize.size(512));
-    }
-
-    @Test
-    public void getCurrentStorageShouldReRetrieveStoredQuotasWhenCalculateOnUnknownQuotaIsTrue() throws Exception {
-        when(mockedCurrentQuotaCalculator.recalculateCurrentQuotas(QUOTA_ROOT, null))
-            .thenReturn(new CurrentQuotaCalculator.CurrentQuotas(18, 512));
-
-        testee.increase(QUOTA_ROOT, 10, 100);
-
-        assertThat(testee.getCurrentMessageCount(QUOTA_ROOT)).isEqualTo(QuotaCount.count(28));
-        assertThat(testee.getCurrentStorage(QUOTA_ROOT)).isEqualTo(QuotaSize.size(612));
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void increaseShouldThrowOnZeroCount() throws Exception {
-        testee.increase(QUOTA_ROOT, 0, 5);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void increaseShouldThrowOnNegativeCount() throws Exception {
-        testee.increase(QUOTA_ROOT, -1, 5);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void increaseShouldThrowOnZeroSize() throws Exception {
-        testee.increase(QUOTA_ROOT, 5, 0);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void increaseShouldThrowOnNegativeSize() throws Exception {
-        testee.increase(QUOTA_ROOT, 5, -1);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void decreaseShouldThrowOnZeroCount() throws Exception {
-        testee.decrease(QUOTA_ROOT, 0, 5);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void decreaseShouldThrowOnNegativeCount() throws Exception {
-        testee.decrease(QUOTA_ROOT, -1, 5);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void decreaseShouldThrowOnZeroSize() throws Exception {
-        testee.decrease(QUOTA_ROOT, 5, 0);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void decreaseShouldThrowOnNegativeSize() throws Exception {
-        testee.decrease(QUOTA_ROOT, 5, -1);
-    }
-
 }

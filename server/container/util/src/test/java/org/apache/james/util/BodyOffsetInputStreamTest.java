@@ -23,9 +23,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 
+import org.apache.james.util.io.BodyOffsetInputStream;
 import org.junit.jupiter.api.Test;
 
-public class BodyOffsetInputStreamTest {
+class BodyOffsetInputStreamTest {
     private String mail = "Subject: test\r\n\r\nbody";
     private long expectedOffset = 17;
     private long bytes = mail.length();

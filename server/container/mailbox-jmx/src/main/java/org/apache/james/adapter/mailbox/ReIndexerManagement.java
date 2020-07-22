@@ -26,8 +26,10 @@ import java.time.Duration;
 import javax.inject.Inject;
 import javax.inject.Named;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.indexer.ReIndexer;
+import org.apache.james.mailbox.indexer.ReIndexer.RunningOptions;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.task.TaskId;
 import org.apache.james.task.TaskManager;
@@ -51,7 +53,7 @@ public class ReIndexerManagement implements ReIndexerManagementMBean {
                      .addContext(MDCBuilder.PROTOCOL, "CLI")
                      .addContext(MDCBuilder.ACTION, "reIndex")
                      .build()) {
-            TaskId taskId = taskManager.submit(reIndexer.reIndex(new MailboxPath(namespace, user, name)));
+            TaskId taskId = taskManager.submit(reIndexer.reIndex(new MailboxPath(namespace, Username.of(user), name), RunningOptions.DEFAULT));
             taskManager.await(taskId, Duration.ofMillis(Long.MAX_VALUE));
         } catch (IOException | TaskManager.ReachedTimeoutException e) {
             throw new RuntimeException(e);
@@ -65,7 +67,7 @@ public class ReIndexerManagement implements ReIndexerManagementMBean {
                      .addContext(MDCBuilder.PROTOCOL, "CLI")
                      .addContext(MDCBuilder.ACTION, "reIndex")
                      .build()) {
-            TaskId taskId = taskManager.submit(reIndexer.reIndex());
+            TaskId taskId = taskManager.submit(reIndexer.reIndex(RunningOptions.DEFAULT));
             taskManager.await(taskId, Duration.ofMillis(Long.MAX_VALUE));
         } catch (IOException | TaskManager.ReachedTimeoutException e) {
             throw new RuntimeException(e);

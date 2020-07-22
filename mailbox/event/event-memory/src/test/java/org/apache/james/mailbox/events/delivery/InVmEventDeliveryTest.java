@@ -30,13 +30,15 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
+
 import org.apache.james.mailbox.events.MailboxListener;
 import org.apache.james.mailbox.events.MemoryEventDeadLetters;
 import org.apache.james.mailbox.events.RetryBackoffConfiguration;
 import org.apache.james.mailbox.events.delivery.EventDelivery.DeliveryOption;
 import org.apache.james.mailbox.events.delivery.EventDelivery.PermanentFailureHandler;
 import org.apache.james.mailbox.events.delivery.EventDelivery.Retryer.BackoffRetryer;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -49,7 +51,7 @@ class InVmEventDeliveryTest {
     @BeforeEach
     void setUp() {
         listener = newListener();
-        inVmEventDelivery = new InVmEventDelivery(new NoopMetricFactory());
+        inVmEventDelivery = new InVmEventDelivery(new RecordingMetricFactory());
     }
 
     MailboxListenerCountingSuccessfulExecution newListener() {
@@ -63,7 +65,6 @@ class InVmEventDeliveryTest {
         void deliverShouldDeliverEvent() {
             when(listener.getExecutionMode()).thenReturn(MailboxListener.ExecutionMode.SYNCHRONOUS);
             inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                .allListenerFuture()
                 .block();
 
             assertThat(listener.numberOfEventCalls())
@@ -74,7 +75,6 @@ class InVmEventDeliveryTest {
         void deliverShouldReturnSuccessSynchronousMono() {
             when(listener.getExecutionMode()).thenReturn(MailboxListener.ExecutionMode.SYNCHRONOUS);
             assertThatCode(() -> inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                    .synchronousListenerFuture()
                     .block())
                 .doesNotThrowAnyException();
         }
@@ -86,7 +86,6 @@ class InVmEventDeliveryTest {
                 .when(listener).event(EVENT);
 
             assertThatThrownBy(() -> inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                .allListenerFuture()
                 .block())
             .isInstanceOf(RuntimeException.class);
 
@@ -101,7 +100,6 @@ class InVmEventDeliveryTest {
                 .when(listener).event(EVENT);
 
             assertThatThrownBy(() -> inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                .synchronousListenerFuture()
                 .block())
             .isInstanceOf(RuntimeException.class);
         }
@@ -114,7 +112,6 @@ class InVmEventDeliveryTest {
         void deliverShouldDeliverEvent() {
             when(listener.getExecutionMode()).thenReturn(MailboxListener.ExecutionMode.ASYNCHRONOUS);
             inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                .allListenerFuture()
                 .block();
 
             assertThat(listener.numberOfEventCalls())
@@ -125,24 +122,19 @@ class InVmEventDeliveryTest {
         void deliverShouldReturnSuccessSynchronousMono() {
             when(listener.getExecutionMode()).thenReturn(MailboxListener.ExecutionMode.ASYNCHRONOUS);
             assertThatCode(() -> inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                    .synchronousListenerFuture()
                     .block())
                 .doesNotThrowAnyException();
         }
 
         @Test
-        void deliverShouldNotDeliverWhenListenerGetException() {
+        void deliverShouldNotFailWhenListenerGetException() {
             when(listener.getExecutionMode()).thenReturn(MailboxListener.ExecutionMode.ASYNCHRONOUS);
             doThrow(new RuntimeException())
                 .when(listener).event(EVENT);
 
-            assertThatThrownBy(() -> inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                .allListenerFuture()
+            assertThatCode(() -> inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
                 .block())
-            .isInstanceOf(RuntimeException.class);
-
-            assertThat(listener.numberOfEventCalls())
-                .isEqualTo(0);
+            .doesNotThrowAnyException();
         }
 
         @Test
@@ -152,7 +144,6 @@ class InVmEventDeliveryTest {
                 .when(listener).event(EVENT);
 
             assertThatCode(() -> inVmEventDelivery.deliver(listener, EVENT, DeliveryOption.none())
-                .synchronousListenerFuture()
                 .block())
             .doesNotThrowAnyException();
         }
@@ -174,7 +165,6 @@ class InVmEventDeliveryTest {
                 DeliveryOption.of(
                     BackoffRetryer.of(RetryBackoffConfiguration.DEFAULT, listener),
                     PermanentFailureHandler.NO_HANDLER))
-                .allListenerFuture()
                 .block();
 
             assertThat(listener.numberOfEventCalls())
@@ -193,7 +183,6 @@ class InVmEventDeliveryTest {
                 DeliveryOption.of(
                     Retryer.NO_RETRYER,
                     PermanentFailureHandler.StoreToDeadLetters.of(GROUP_A, deadLetter)))
-                .allListenerFuture()
                 .block();
 
             assertThat(deadLetter.groupsWithFailedEvents().toStream())
@@ -214,7 +203,6 @@ class InVmEventDeliveryTest {
                 DeliveryOption.of(
                     BackoffRetryer.of(RetryBackoffConfiguration.DEFAULT, listener),
                     PermanentFailureHandler.StoreToDeadLetters.of(GROUP_A, deadLetter)))
-                .allListenerFuture()
                 .block();
 
             SoftAssertions.assertSoftly(softy -> {
@@ -229,7 +217,13 @@ class InVmEventDeliveryTest {
         @Test
         void failureHandlerShouldWorkWhenRetryFails() {
             MailboxListenerCountingSuccessfulExecution listener = newListener();
+            //do throw  RetryBackoffConfiguration.DEFAULT.DEFAULT_MAX_RETRIES + 1 times
             doThrow(new RuntimeException())
+                .doThrow(new RuntimeException())
+                .doThrow(new RuntimeException())
+                .doThrow(new RuntimeException())
+                .doThrow(new RuntimeException())
+                .doThrow(new RuntimeException())
                 .doThrow(new RuntimeException())
                 .doThrow(new RuntimeException())
                 .doThrow(new RuntimeException())
@@ -240,9 +234,12 @@ class InVmEventDeliveryTest {
 
             inVmEventDelivery.deliver(listener, EVENT,
                 DeliveryOption.of(
-                    BackoffRetryer.of(RetryBackoffConfiguration.DEFAULT, listener),
+                    BackoffRetryer.of(RetryBackoffConfiguration.builder()
+                            .maxRetries(8)
+                            .firstBackoff(Duration.ofMillis(1))
+                            .jitterFactor(0.2)
+                            .build(), listener),
                     PermanentFailureHandler.StoreToDeadLetters.of(GROUP_A, deadLetter)))
-                .allListenerFuture()
                 .block();
 
             SoftAssertions.assertSoftly(softy -> {

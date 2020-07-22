@@ -22,8 +22,6 @@ package org.apache.james.mailbox.events.delivery;
 import static org.apache.james.mailbox.events.delivery.EventDelivery.PermanentFailureHandler.NO_HANDLER;
 import static org.apache.james.mailbox.events.delivery.EventDelivery.Retryer.NO_RETRYER;
 
-import java.time.Duration;
-
 import org.apache.james.mailbox.events.Event;
 import org.apache.james.mailbox.events.EventDeadLetters;
 import org.apache.james.mailbox.events.Group;
@@ -32,9 +30,9 @@ import org.apache.james.mailbox.events.RetryBackoffConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.retry.Retry;
 
 public interface EventDelivery {
 
@@ -76,7 +74,6 @@ public interface EventDelivery {
             }
 
             private static final Logger LOGGER = LoggerFactory.getLogger(BackoffRetryer.class);
-            private static final Duration FOREVER = Duration.ofMillis(Long.MAX_VALUE);
 
             private final RetryBackoffConfiguration retryBackoff;
             private final MailboxListener mailboxListener;
@@ -89,7 +86,7 @@ public interface EventDelivery {
             @Override
             public Mono<Void> doRetry(Mono<Void> executionResult, Event event) {
                 return executionResult
-                    .retryBackoff(retryBackoff.getMaxRetries(), retryBackoff.getFirstBackoff(), FOREVER, retryBackoff.getJitterFactor(), Schedulers.elastic())
+                    .retryWhen(Retry.backoff(retryBackoff.getMaxRetries(), retryBackoff.getFirstBackoff()).jitter(retryBackoff.getJitterFactor()).scheduler(Schedulers.elastic()))
                     .doOnError(throwable -> LOGGER.error("listener {} exceeded maximum retry({}) to handle event {}",
                         mailboxListener.getClass().getCanonicalName(),
                         retryBackoff.getMaxRetries(),
@@ -122,51 +119,16 @@ public interface EventDelivery {
 
             @Override
             public Mono<Void> handle(Event event) {
-                return eventDeadLetters.store(group, event, EventDeadLetters.InsertionId.random());
+                return eventDeadLetters.store(group, event).then();
             }
         }
 
         Mono<Void> handle(Event event);
     }
 
-    class ExecutionStages {
+    Mono<Void> deliver(MailboxListener.ReactiveMailboxListener listener, Event event, DeliveryOption option);
 
-        public static ExecutionStages empty() {
-            return new ExecutionStages(Mono.empty(), Mono.empty());
-        }
-
-        static ExecutionStages synchronous(Mono<Void> synchronousListenerFuture) {
-            return new ExecutionStages(synchronousListenerFuture, Mono.empty());
-        }
-
-        static ExecutionStages asynchronous(Mono<Void> asynchronousListenerFuture) {
-            return new ExecutionStages(Mono.empty(),asynchronousListenerFuture);
-        }
-
-        private final Mono<Void> synchronousListenerFuture;
-        private final Mono<Void> asynchronousListenerFuture;
-
-        private ExecutionStages(Mono<Void> synchronousListenerFuture, Mono<Void> asynchronousListenerFuture) {
-            this.synchronousListenerFuture = synchronousListenerFuture;
-            this.asynchronousListenerFuture = asynchronousListenerFuture;
-        }
-
-        public Mono<Void> synchronousListenerFuture() {
-            return synchronousListenerFuture;
-        }
-
-        public Mono<Void> allListenerFuture() {
-            return synchronousListenerFuture
-                .concatWith(asynchronousListenerFuture)
-                .then();
-        }
-
-        public ExecutionStages combine(ExecutionStages another) {
-            return new ExecutionStages(
-                Flux.concat(this.synchronousListenerFuture, another.synchronousListenerFuture).then(),
-                Flux.concat(this.asynchronousListenerFuture, another.asynchronousListenerFuture).then());
-        }
+    default Mono<Void> deliver(MailboxListener listener, Event event, DeliveryOption option) {
+        return deliver(MailboxListener.wrapReactive(listener), event, option);
     }
-
-    ExecutionStages deliver(MailboxListener listener, Event event, DeliveryOption option);
 }

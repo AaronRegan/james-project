@@ -21,6 +21,7 @@ package org.apache.james.jmap.draft.crypto;
 
 import javax.inject.Inject;
 
+import org.apache.james.core.Username;
 import org.apache.james.jmap.api.access.AccessToken;
 import org.apache.james.jmap.api.access.AccessTokenRepository;
 import org.apache.james.jmap.api.access.exceptions.InvalidAccessToken;
@@ -28,41 +29,44 @@ import org.apache.james.jmap.draft.api.AccessTokenManager;
 
 import com.google.common.base.Preconditions;
 
+import reactor.core.publisher.Mono;
+
 public class AccessTokenManagerImpl implements AccessTokenManager {
 
     private final AccessTokenRepository accessTokenRepository;
 
     @Inject
-    public AccessTokenManagerImpl(AccessTokenRepository accessTokenRepository) {
+    AccessTokenManagerImpl(AccessTokenRepository accessTokenRepository) {
         this.accessTokenRepository = accessTokenRepository;
     }
 
     @Override
-    public AccessToken grantAccessToken(String username) {
+    public Mono<AccessToken> grantAccessToken(Username username) {
         Preconditions.checkNotNull(username);
         AccessToken accessToken = AccessToken.generate();
-        accessTokenRepository.addToken(username, accessToken).block();
-        return accessToken;
+
+        return accessTokenRepository.addToken(username, accessToken)
+            .thenReturn(accessToken);
     }
 
     @Override
-    public String getUsernameFromToken(AccessToken token) throws InvalidAccessToken {
-        return accessTokenRepository.getUsernameFromToken(token).block();
+    public Mono<Username> getUsernameFromToken(AccessToken token) throws InvalidAccessToken {
+        return accessTokenRepository.getUsernameFromToken(token);
     }
     
     @Override
-    public boolean isValid(AccessToken token) throws InvalidAccessToken {
+    public Mono<Boolean> isValid(AccessToken token) throws InvalidAccessToken {
         try {
-            getUsernameFromToken(token);
-            return true;
+            return getUsernameFromToken(token)
+                .thenReturn(true);
         } catch (InvalidAccessToken e) {
-            return false;
+            return Mono.just(false);
         }
     }
 
     @Override
-    public void revoke(AccessToken token) {
-        accessTokenRepository.removeToken(token).block();
+    public Mono<Void> revoke(AccessToken token) {
+        return accessTokenRepository.removeToken(token);
     }
 
 }

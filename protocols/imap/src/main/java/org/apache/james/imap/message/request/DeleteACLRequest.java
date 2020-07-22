@@ -19,7 +19,10 @@
 
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
+
+import com.google.common.base.MoreObjects;
 
 /**
  * DELETEACL Request.
@@ -28,8 +31,8 @@ public class DeleteACLRequest extends AbstractImapRequest {
     private final String identifier;
     private final String mailboxName;
 
-    public DeleteACLRequest(String tag, ImapCommand command, String mailboxName, String identifier) {
-        super(tag, command);
+    public DeleteACLRequest(Tag tag, String mailboxName, String identifier) {
+        super(tag, ImapConstants.DELETEACL_COMMAND);
         this.mailboxName = mailboxName;
         this.identifier = identifier;
     }
@@ -42,4 +45,11 @@ public class DeleteACLRequest extends AbstractImapRequest {
         return mailboxName;
     }
 
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("mailboxName", mailboxName)
+            .add("identifier", identifier)
+            .toString();
+    }
 }

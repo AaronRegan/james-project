@@ -19,7 +19,7 @@
 
 package org.apache.mailbox.tools.indexer;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.indexer.ReIndexer;
@@ -30,22 +30,22 @@ import org.apache.james.task.Task;
 
 public class ThrowsReIndexer implements ReIndexer {
     @Override
-    public Task reIndex(MailboxPath path) throws MailboxException {
+    public Task reIndex(MailboxPath path, RunningOptions runningOptions) throws MailboxException {
         throw new MailboxException("Not implemented");
     }
 
     @Override
-    public Task reIndex(MailboxId mailboxId) throws MailboxException {
+    public Task reIndex(MailboxId mailboxId, RunningOptions runningOptions) throws MailboxException {
         throw new MailboxException("Not implemented");
     }
 
     @Override
-    public Task reIndex() throws MailboxException {
+    public Task reIndex(RunningOptions runningOptions) throws MailboxException {
         throw new MailboxException("Not implemented");
     }
 
     @Override
-    public Task reIndex(User user) throws MailboxException {
+    public Task reIndex(Username username, RunningOptions runningOptions) throws MailboxException {
         throw new MailboxException("Not implemented");
     }
 
@@ -60,7 +60,7 @@ public class ThrowsReIndexer implements ReIndexer {
     }
 
     @Override
-    public Task reIndex(ReIndexingExecutionFailures previousFailures) throws MailboxException {
+    public Task reIndex(ReIndexingExecutionFailures previousFailures, RunningOptions runningOptions) throws MailboxException {
         throw new MailboxException("Not implemented");
     }
 }

@@ -28,22 +28,21 @@ import java.util.stream.LongStream;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.modules.CassandraUidModule;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.util.concurrency.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 import com.github.fge.lambdas.Throwing;
 
-@ExtendWith(CassandraRestartExtension.class)
 class CassandraUidProviderTest {
     private static final CassandraId CASSANDRA_ID = new CassandraId.Factory().fromString("e22b3ac0-a80b-11e7-bb00-777268d65503");
 
@@ -55,21 +54,23 @@ class CassandraUidProviderTest {
 
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
-        uidProvider = new CassandraUidProvider(cassandra.getConf(), CassandraConfiguration.DEFAULT_CONFIGURATION);
-        MailboxPath path = new MailboxPath("gsoc", "ieugen", "Trash");
-        mailbox = new Mailbox(path, 1234);
-        mailbox.setMailboxId(CASSANDRA_ID);
+        uidProvider = new CassandraUidProvider(
+            cassandra.getConf(),
+            CassandraConfiguration.DEFAULT_CONFIGURATION,
+            cassandraCluster.getCassandraConsistenciesConfiguration());
+        MailboxPath path = new MailboxPath("gsoc", Username.of("ieugen"), "Trash");
+        mailbox = new Mailbox(path, UidValidity.of(1234), CASSANDRA_ID);
     }
 
     @Test
     void lastUidShouldRetrieveValueStoredByNextUid() throws Exception {
         int nbEntries = 100;
-        Optional<MessageUid> result = uidProvider.lastUid(null, mailbox);
+        Optional<MessageUid> result = uidProvider.lastUid(mailbox);
         assertThat(result).isEmpty();
         LongStream.range(0, nbEntries)
             .forEach(Throwing.longConsumer(value -> {
-                        MessageUid uid = uidProvider.nextUid(null, mailbox);
-                        assertThat(uid).isEqualTo(uidProvider.lastUid(null, mailbox).get());
+                        MessageUid uid = uidProvider.nextUid(mailbox);
+                        assertThat(uid).isEqualTo(uidProvider.lastUid(mailbox).get());
                 })
             );
     }
@@ -79,7 +80,7 @@ class CassandraUidProviderTest {
         int nbEntries = 100;
         LongStream.range(1, nbEntries)
             .forEach(Throwing.longConsumer(value -> {
-                MessageUid result = uidProvider.nextUid(null, mailbox);
+                MessageUid result = uidProvider.nextUid(mailbox);
                 assertThat(value).isEqualTo(result.asLong());
             }));
     }
@@ -91,7 +92,7 @@ class CassandraUidProviderTest {
 
         ConcurrentSkipListSet<MessageUid> messageUids = new ConcurrentSkipListSet<>();
         ConcurrentTestRunner.builder()
-                .operation((threadNumber, step) -> messageUids.add(uidProvider.nextUid(null, mailbox)))
+                .operation((threadNumber, step) -> messageUids.add(uidProvider.nextUid(mailbox)))
             .threadCount(threadCount)
             .operationCount(nbEntries / threadCount)
             .runSuccessfullyWithin(Duration.ofMinutes(1));

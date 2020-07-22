@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
-public class SizeFormatTest {
+class SizeFormatTest {
 
     @Test
     void formatShouldThrowWhenNegative() {
@@ -84,6 +84,66 @@ public class SizeFormatTest {
     void formatShouldUseTiBWhenExactlyOneTiB() {
         assertThat(SizeFormat.format(1024L * 1024L * 1024L * 1024L))
             .isEqualTo("1 TiB");
+    }
+
+    @Test
+    void parseAsByteCountShouldReturnCountWhenNoUnit() {
+        assertThat(SizeFormat.parseAsByteCount("36"))
+            .isEqualTo(36);
+    }
+
+    @Test
+    void parseAsByteCountShouldAcceptKiB() {
+        assertThat(SizeFormat.parseAsByteCount("36 KiB"))
+            .isEqualTo(36 * 1024);
+    }
+
+    @Test
+    void parseAsByteCountShouldAcceptZero() {
+        assertThat(SizeFormat.parseAsByteCount("0 KiB"))
+            .isEqualTo(0);
+    }
+
+    @Test
+    void parseAsByteCountShouldThrowOnInvalidUnit() {
+        assertThatThrownBy(() -> SizeFormat.parseAsByteCount("0 invalid"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void parseAsByteCountShouldThrowOnMissingAmount() {
+        assertThatThrownBy(() -> SizeFormat.parseAsByteCount("KiB"))
+            .isInstanceOf(NumberFormatException.class);
+    }
+
+    @Test
+    void parseAsByteCountShouldThrowWhenEmpty() {
+        assertThatThrownBy(() -> SizeFormat.parseAsByteCount(""))
+            .isInstanceOf(NumberFormatException.class);
+    }
+
+    @Test
+    void parseAsByteCountShouldThrowWhenUnitDoesNotMatchCase() {
+        assertThatThrownBy(() -> SizeFormat.parseAsByteCount("12 KIB"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void parseAsByteCountShouldAcceptNegativeValue() {
+        assertThat(SizeFormat.parseAsByteCount("-36 KiB"))
+            .isEqualTo(-36 * 1024);
+    }
+
+    @Test
+    void parseAsByteCountShouldAcceptMiB() {
+        assertThat(SizeFormat.parseAsByteCount("36 MiB"))
+            .isEqualTo(36 * 1024 * 1024);
+    }
+
+    @Test
+    void parseAsByteCountShouldAcceptGiB() {
+        assertThat(SizeFormat.parseAsByteCount("36 GiB"))
+            .isEqualTo(36L * 1024L * 1024L * 1024L);
     }
 
 }

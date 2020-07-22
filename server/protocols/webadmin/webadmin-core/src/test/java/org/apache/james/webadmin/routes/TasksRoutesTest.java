@@ -33,11 +33,13 @@ import static org.hamcrest.Matchers.nullValue;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 
+import org.apache.james.json.DTOConverter;
+import org.apache.james.task.Hostname;
+import org.apache.james.task.MemoryReferenceTask;
 import org.apache.james.task.MemoryTaskManager;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskId;
 import org.apache.james.task.TaskManager;
-import org.apache.james.task.eventsourcing.Hostname;
 import org.apache.james.webadmin.WebAdminServer;
 import org.apache.james.webadmin.WebAdminUtils;
 import org.apache.james.webadmin.utils.JsonTransformer;
@@ -49,8 +51,8 @@ import org.junit.jupiter.api.Test;
 import io.restassured.RestAssured;
 
 class TasksRoutesTest {
+    private static final String HOSTNAME = "foo";
 
-    public static final String HOSTNAME = "foo";
     private MemoryTaskManager taskManager;
     private WebAdminServer webAdminServer;
     private CountDownLatch waitingForResultLatch;
@@ -59,7 +61,8 @@ class TasksRoutesTest {
     void setUp() {
         taskManager = new MemoryTaskManager(new Hostname(HOSTNAME));
 
-        webAdminServer = WebAdminUtils.createWebAdminServer(new TasksRoutes(taskManager, new JsonTransformer()))
+        webAdminServer = WebAdminUtils.createWebAdminServer(new TasksRoutes(taskManager, new JsonTransformer(),
+            DTOConverter.of()))
             .start();
 
         RestAssured.requestSpecification = WebAdminUtils.buildRequestSpecification(webAdminServer)
@@ -87,11 +90,11 @@ class TasksRoutesTest {
     @Test
     void listShouldReturnTaskDetailsWhenTaskInProgress() throws Exception {
         CountDownLatch taskInProgressLatch = new CountDownLatch(1);
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             taskInProgressLatch.countDown();
             waitForResult();
             return Task.Result.COMPLETED;
-        });
+        }));
 
         taskInProgressLatch.await();
 
@@ -123,11 +126,11 @@ class TasksRoutesTest {
     @Test
     void listShouldListTaskWhenStatusFilter() throws Exception {
         CountDownLatch inProgressLatch = new CountDownLatch(1);
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             inProgressLatch.countDown();
             waitForResult();
             return Task.Result.COMPLETED;
-        });
+        }));
 
         inProgressLatch.await();
 
@@ -140,17 +143,17 @@ class TasksRoutesTest {
             .body("", hasSize(1))
             .body("[0].status", is(TaskManager.Status.IN_PROGRESS.getValue()))
             .body("[0].taskId", is(taskId.asString()))
-            .body("[0].type", is(Task.UNKNOWN.asString()));
+            .body("[0].type", is(MemoryReferenceTask.TYPE.asString()));
     }
 
     @Test
     void listShouldReturnEmptyWhenNonMatchingStatusFilter() throws Exception {
         CountDownLatch inProgressLatch = new CountDownLatch(1);
-        taskManager.submit(() -> {
+        taskManager.submit(new MemoryReferenceTask(() -> {
             inProgressLatch.countDown();
             waitForResult();
             return Task.Result.COMPLETED;
-        });
+        }));
 
         inProgressLatch.await();
 
@@ -166,11 +169,11 @@ class TasksRoutesTest {
     @Test
     void getShouldReturnTaskDetails() throws Exception {
         CountDownLatch inProgressLatch = new CountDownLatch(1);
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             inProgressLatch.countDown();
             waitForResult();
             return Task.Result.COMPLETED;
-        });
+        }));
 
         inProgressLatch.await();
 
@@ -183,14 +186,14 @@ class TasksRoutesTest {
 
     @Test
     void getAwaitShouldAwaitTaskCompletion() {
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             try {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
             return Task.Result.COMPLETED;
-        });
+        }));
 
         when()
             .get("/" + taskId.getValue() + "/await")
@@ -201,14 +204,14 @@ class TasksRoutesTest {
 
     @Test
     void getAwaitWithTimeoutShouldAwaitTaskCompletion() {
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
             return Task.Result.COMPLETED;
-        });
+        }));
 
         given()
             .queryParam("timeout", "2s")
@@ -221,7 +224,7 @@ class TasksRoutesTest {
 
     @Test
     void getAwaitWithInvalidTimeoutShouldReturnAnError() {
-        TaskId taskId = taskManager.submit(() -> Task.Result.COMPLETED);
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> Task.Result.COMPLETED));
 
         given()
             .queryParam("timeout", "-5")
@@ -235,7 +238,7 @@ class TasksRoutesTest {
 
     @Test
     void getAwaitWithATooBigTimeoutShouldReturnAnError() {
-        TaskId taskId = taskManager.submit(() -> Task.Result.COMPLETED);
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> Task.Result.COMPLETED));
 
         given()
             .queryParam("timeout", "5y")
@@ -249,14 +252,14 @@ class TasksRoutesTest {
 
     @Test
     void getAwaitWithAShorterTimeoutShouldReturnTimeout() {
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             try {
                 Thread.sleep(10000);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
             return Task.Result.COMPLETED;
-        });
+        }));
 
         given()
             .queryParam("timeout", "1")
@@ -279,9 +282,9 @@ class TasksRoutesTest {
 
     @Test
     void getAwaitShouldNotFailUponError() {
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             throw new RuntimeException();
-        });
+        }));
 
         when()
             .get("/" + taskId.getValue() + "/await")
@@ -292,14 +295,14 @@ class TasksRoutesTest {
 
     @Test
     void getAwaitShouldNotFailUponFutureError() {
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             try {
                 Thread.sleep(200);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
             throw new RuntimeException();
-        });
+        }));
 
         when()
             .get("/" + taskId.getValue() + "/await")
@@ -310,10 +313,10 @@ class TasksRoutesTest {
 
     @Test
     void deleteShouldReturnOk() {
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             waitForResult();
             return Task.Result.COMPLETED;
-        });
+        }));
 
         when()
             .delete("/" + taskId.getValue())
@@ -325,14 +328,14 @@ class TasksRoutesTest {
     void deleteShouldCancelMatchingTask() {
         CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        TaskId taskId = taskManager.submit(() -> {
+        TaskId taskId = taskManager.submit(new MemoryReferenceTask(() -> {
             try {
                 inProgressLatch.await();
             } catch (InterruptedException e) {
                 //ignore
             }
             return Task.Result.COMPLETED;
-        });
+        }));
 
         with()
             .delete("/" + taskId.getValue());

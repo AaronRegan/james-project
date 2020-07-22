@@ -71,6 +71,28 @@ public class MessageProperties {
                 .ensureHeadersMessageProperty();
     }
 
+    public ReadProfile computeReadLevel() {
+        Stream<ReadProfile> readLevels = Stream.concat(this.buildOutputMessageProperties()
+                .stream()
+                .map(MessageProperty::getReadProfile),
+            headerPropertiesReadLevel());
+
+        // If `null`, all properties will be fetched (JMAP Draft)
+        // This defer from RFC-8621 behavior (not implemented here)
+        // If omitted, this defaults to: [ "partId", "blobId", "size", "name", "type", "charset", "disposition", "cid",
+        // "language", "location" ]
+        return readLevels.reduce(ReadProfile::combine)
+            .orElse(ReadProfile.Full);
+
+    }
+
+    private Stream<ReadProfile> headerPropertiesReadLevel() {
+        return headersProperties.map(collection ->
+            collection.stream()
+                .map(any -> ReadProfile.Header))
+            .orElse(Stream.of());
+    }
+
     private ImmutableSet<MessageProperty> buildOutputMessageProperties() {
         return this.messageProperties.orElseGet(MessageProperty::allOutputProperties);
     }
@@ -112,56 +134,61 @@ public class MessageProperties {
         return this;
     }
 
-
     private enum PropertyType {
         INPUTONLY,
         INPUTOUTPUT
     }
 
     public enum MessageProperty implements Property {
-        id("id"),
-        blobId("blobId"),
-        threadId("threadId"),
-        mailboxIds("mailboxIds"),
-        inReplyToMessageId("inReplyToMessageId"),
-        isUnread("isUnread"),
-        isFlagged("isFlagged"),
-        isAnswered("isAnswered"),
-        isDraft("isDraft"),
-        isForwarded("isForwarded"),
-        hasAttachment("hasAttachment"),
-        headers("headers"),
-        from("from"),
-        to("to"),
-        cc("cc"),
-        bcc("bcc"),
-        replyTo("replyTo"),
-        subject("subject"),
-        date("date"),
-        size("size"),
-        preview("preview"),
-        textBody("textBody"),
-        htmlBody("htmlBody"),
-        attachments("attachments"),
-        attachedMessages("attachedMessages"),
-        keywords("keywords"),
-        body("body", PropertyType.INPUTONLY);
+        id("id", ReadProfile.Metadata),
+        blobId("blobId", ReadProfile.Metadata),
+        threadId("threadId", ReadProfile.Metadata),
+        mailboxIds("mailboxIds", ReadProfile.Metadata),
+        inReplyToMessageId("inReplyToMessageId", ReadProfile.Header),
+        isUnread("isUnread", ReadProfile.Metadata),
+        isFlagged("isFlagged", ReadProfile.Metadata),
+        isAnswered("isAnswered", ReadProfile.Metadata),
+        isDraft("isDraft", ReadProfile.Metadata),
+        isForwarded("isForwarded", ReadProfile.Metadata),
+        hasAttachment("hasAttachment", ReadProfile.Fast),
+        headers("headers", ReadProfile.Header),
+        from("from", ReadProfile.Header),
+        to("to", ReadProfile.Header),
+        cc("cc", ReadProfile.Header),
+        bcc("bcc", ReadProfile.Header),
+        replyTo("replyTo", ReadProfile.Header),
+        subject("subject", ReadProfile.Header),
+        date("date", ReadProfile.Header),
+        size("size", ReadProfile.Metadata),
+        preview("preview", ReadProfile.Fast),
+        textBody("textBody", ReadProfile.Full),
+        htmlBody("htmlBody", ReadProfile.Full),
+        attachments("attachments", ReadProfile.Full),
+        attachedMessages("attachedMessages", ReadProfile.Full),
+        keywords("keywords", ReadProfile.Metadata),
+        body("body", PropertyType.INPUTONLY, ReadProfile.Full);
     
         private final String property;
         private final PropertyType type;
+        private final ReadProfile readProfile;
 
-        MessageProperty(String property) {
-            this(property, PropertyType.INPUTOUTPUT);
+        MessageProperty(String property, ReadProfile readProfile) {
+            this(property, PropertyType.INPUTOUTPUT, readProfile);
         }
 
-        MessageProperty(String property, PropertyType type) {
+        MessageProperty(String property, PropertyType type, ReadProfile readProfile) {
             this.property = property;
             this.type = type;
+            this.readProfile = readProfile;
         }
     
         @Override
         public String asFieldName() {
             return property;
+        }
+
+        public ReadProfile getReadProfile() {
+            return readProfile;
         }
     
         public static Stream<MessageProperty> find(String property) {
@@ -184,7 +211,26 @@ public class MessageProperties {
             }
         }
     }
-    
+
+    public enum ReadProfile {
+        Metadata(0),
+        Header(1),
+        Fast(2),
+        Full(3);
+
+        static ReadProfile combine(ReadProfile readProfile1, ReadProfile readProfile2) {
+            if (readProfile1.priority > readProfile2.priority) {
+                return readProfile1;
+            }
+            return readProfile2;
+        }
+
+        private final int priority;
+
+        ReadProfile(int priority) {
+            this.priority = priority;
+        }
+    }
 
     public static class HeaderProperty implements Property {
     

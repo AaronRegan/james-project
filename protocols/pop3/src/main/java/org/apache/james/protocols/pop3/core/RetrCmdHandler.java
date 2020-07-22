@@ -24,8 +24,6 @@ import java.io.InputStream;
 import java.util.Collection;
 import java.util.List;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.protocols.api.ProtocolSession.State;
 import org.apache.james.protocols.api.Request;
 import org.apache.james.protocols.api.Response;
@@ -36,6 +34,7 @@ import org.apache.james.protocols.pop3.POP3StreamResponse;
 import org.apache.james.protocols.pop3.mailbox.MessageMetaData;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 /**
@@ -47,16 +46,6 @@ public class RetrCmdHandler implements CommandHandler<POP3Session> {
     @VisibleForTesting
     static final Response SYNTAX_ERROR = new POP3Response(POP3Response.ERR_RESPONSE, "Usage: RETR [mail number]").immutable();
     private static final Response ERROR_MESSAGE_RETRIEVE = new POP3Response(POP3Response.ERR_RESPONSE, "Error while retrieving message.").immutable();
-
-    @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
-    }
 
     /**
      * Handler method called upon receipt of a RETR command. This command
@@ -82,10 +71,10 @@ public class RetrCmdHandler implements CommandHandler<POP3Session> {
                     response = new POP3Response(POP3Response.ERR_RESPONSE, responseBuffer.toString());
                     return response;
                 }
-                List<String> deletedUidList = (List<String>) session.getAttachment(POP3Session.DELETED_UID_LIST, State.Transaction);
+                List<String> deletedUidList = session.getAttachment(POP3Session.DELETED_UID_LIST, State.Transaction).orElse(ImmutableList.of());
 
                 String uid = data.getUid();
-                if (deletedUidList.contains(uid) == false) {
+                if (!deletedUidList.contains(uid)) {
                     InputStream content = session.getUserMailbox().getMessage(uid);
 
                     if (content != null) {

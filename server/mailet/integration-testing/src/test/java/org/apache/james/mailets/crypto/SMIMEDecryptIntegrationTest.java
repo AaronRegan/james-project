@@ -40,8 +40,8 @@ import org.apache.james.transport.matchers.All;
 import org.apache.james.util.ClassLoaderUtils;
 import org.apache.james.util.date.ZonedDateTimeProvider;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -56,7 +56,7 @@ public class SMIMEDecryptIntegrationTest {
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
     @Rule
     public SMTPMessageSender messageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
 
@@ -85,6 +85,7 @@ public class SMIMEDecryptIntegrationTest {
             .withOverrides(binder -> binder.bind(ZonedDateTimeProvider.class).toInstance(() -> DATE_2015))
             .withMailetContainer(mailetContainer)
             .build(workingDir);
+        jamesServer.start();
 
         jamesServer.getProbe(DataProbeImpl.class)
             .fluent()
@@ -104,11 +105,11 @@ public class SMIMEDecryptIntegrationTest {
             .sendMessageWithHeaders(FROM, FROM,
                 ClassLoaderUtils.getSystemResourceAsString("eml/crypted.eml"));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).containsSequence("Crypted content");
+        assertThat(testIMAPClient.readFirstMessage()).containsSequence("Crypted content");
     }
 
     @Test
@@ -118,11 +119,11 @@ public class SMIMEDecryptIntegrationTest {
             .sendMessageWithHeaders(FROM, FROM,
                 ClassLoaderUtils.getSystemResourceAsString("eml/crypted_with_attachment.eml"));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .containsSequence("Crypted Content with attachment");
     }
 
@@ -133,11 +134,11 @@ public class SMIMEDecryptIntegrationTest {
             .sendMessageWithHeaders(FROM, FROM,
                 ClassLoaderUtils.getSystemResourceAsString("eml/bad_crypted.eml"));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(FROM, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage())
+        assertThat(testIMAPClient.readFirstMessage())
             .containsSequence("MIAGCSqGSIb3DQEHA6CAMIACAQAxggKpMIICpQIBADCBjDCBhjELMAkGA1UE");
     }
 

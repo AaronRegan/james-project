@@ -25,10 +25,11 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.james.mailbox.exception.MailboxException;
+import org.apache.james.mailbox.model.Header;
 import org.apache.james.mailbox.model.MessageResult;
-import org.apache.james.mailbox.model.MessageResult.Header;
 import org.apache.james.mailbox.model.MimeDescriptor;
 import org.apache.james.mailbox.store.mail.model.Message;
 import org.apache.james.mailbox.store.mail.model.impl.PropertyBuilder;
@@ -36,8 +37,6 @@ import org.apache.james.mailbox.store.mail.model.impl.PropertyBuilder;
 /**
  * A {@link MimeDescriptor} implementation which tries to optimize the way the data
  * is loading by using it in a lazy fashion whenever possible.
- * 
- *
  */
 public class LazyMimeDescriptor implements MimeDescriptor {
 
@@ -123,12 +122,7 @@ public class LazyMimeDescriptor implements MimeDescriptor {
 
     @Override
     public long getLines() {
-        Long count =  message.getTextualLineCount();
-        if (count == null) {
-            return -1;
-        } else {
-            return count;
-        }
+        return Objects.requireNonNullElse(message.getTextualLineCount(), -1L);
     }
 
     @Override
@@ -138,7 +132,7 @@ public class LazyMimeDescriptor implements MimeDescriptor {
 
     @Override
     public Iterator<MimeDescriptor> parts() {
-        return Collections.<MimeDescriptor>emptyList().iterator();
+        return Collections.emptyIterator();
     }
 
     @Override

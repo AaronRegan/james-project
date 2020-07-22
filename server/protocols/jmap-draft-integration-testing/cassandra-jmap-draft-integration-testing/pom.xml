@@ -23,7 +23,7 @@
     <parent>
         <artifactId>jmap-draft-integration-testing</artifactId>
         <groupId>org.apache.james</groupId>
-        <version>3.5.0-SNAPSHOT</version>
+        <version>3.6.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -33,12 +33,6 @@
     <name>Apache James :: Server :: JMAP (draft) :: Cassandra Integration testing</name>
 
     <dependencies>
-        <dependency>
-            <groupId>${james.groupId}</groupId>
-            <artifactId>apache-james-linshare</artifactId>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>apache-james-backends-es</artifactId>
@@ -85,11 +79,6 @@
             <artifactId>apache-mailet-base</artifactId>
             <type>test-jar</type>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>${james.groupId}</groupId>
-            <artifactId>backup</artifactId>
-            <type>test-jar</type>
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
@@ -151,7 +140,7 @@
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
-            <artifactId>james-server-guice-jmap-draft</artifactId>
+            <artifactId>james-server-guice-jmap</artifactId>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
@@ -166,12 +155,6 @@
             <artifactId>apache-james-spamassassin</artifactId>
             <type>test-jar</type>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>${james.groupId}</groupId>
-            <artifactId>james-server-mailbox-plugin-deleted-messages-vault-guice</artifactId>
-            <scope>test</scope>
-            <type>test-jar</type>
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
@@ -216,6 +199,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>net.javacrumbs.json-unit</groupId>
+            <artifactId>json-unit-assertj</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <scope>test</scope>
@@ -242,7 +230,7 @@
                     <reuseForks>true</reuseForks>
                     <!-- Fail tests longer than 2 hours, prevent form random locking tests -->
                     <forkedProcessTimeoutInSeconds>7200</forkedProcessTimeoutInSeconds>
-                    <groups combine.self="override">org.apache.james.jmap.categories.CassandraAndElasticSearchCategory,org.apache.james.jmap.categories.BasicFeature,org.apache.james.jmap.categories.EnableCucumber</groups>
+                    <groups combine.self="override">org.apache.james.jmap.categories.CassandraAndElasticSearchCategory,org.apache.james.junit.categories.BasicFeature,org.apache.james.jmap.categories.EnableCucumber</groups>
                 </configuration>
             </plugin>
         </plugins>

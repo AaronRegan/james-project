@@ -23,14 +23,14 @@ import static io.restassured.RestAssured.given;
 import static io.restassured.config.EncoderConfig.encoderConfig;
 import static io.restassured.config.RestAssuredConfig.newConfig;
 import static org.apache.james.jmap.HttpJmapAuthentication.authenticateJamesUser;
+import static org.apache.james.jmap.JMAPTestingConstants.ARGUMENTS;
+import static org.apache.james.jmap.JMAPTestingConstants.NAME;
+import static org.apache.james.jmap.JMAPTestingConstants.calmlyAwait;
 import static org.apache.james.jmap.JmapCommonRequests.bodyOfMessage;
 import static org.apache.james.jmap.JmapCommonRequests.getLatestMessageId;
 import static org.apache.james.jmap.JmapCommonRequests.getOutboxId;
 import static org.apache.james.jmap.JmapCommonRequests.receiversOfMessage;
 import static org.apache.james.jmap.JmapURIBuilder.baseUri;
-import static org.apache.james.jmap.TestingConstants.ARGUMENTS;
-import static org.apache.james.jmap.TestingConstants.NAME;
-import static org.apache.james.jmap.TestingConstants.calmlyAwait;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.collection.IsMapWithSize.aMapWithSize;
@@ -40,13 +40,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.james.GuiceJamesServer;
-import org.apache.james.jmap.api.access.AccessToken;
+import org.apache.james.core.Username;
+import org.apache.james.jmap.AccessToken;
+import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.apache.james.mailbox.Role;
 import org.apache.james.mailbox.probe.MailboxProbe;
 import org.apache.james.modules.MailboxProbeImpl;
 import org.apache.james.probe.DataProbe;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.awaitility.Duration;
 import org.junit.After;
 import org.junit.Before;
@@ -88,7 +89,7 @@ public abstract class SetMessagesMethodReRoutingTest {
                 .setContentType(ContentType.JSON)
                 .setAccept(ContentType.JSON)
                 .setConfig(newConfig().encoderConfig(encoderConfig().defaultContentCharset(StandardCharsets.UTF_8)))
-                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort())
+                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort().getValue())
                 .build();
         RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
         RestAssured.defaultParser = Parser.JSON;
@@ -97,8 +98,8 @@ public abstract class SetMessagesMethodReRoutingTest {
         dataProbe.addDomain(ALIAS_DOMAIN);
         dataProbe.addUser(RECEIVER_AT_DESTINATION_DOMAIN, PASSWORD);
         dataProbe.addUser(SENDER_AT_DESTINATION_DOMAIN, PASSWORD);
-        receiverAtDestinationDomainToken = authenticateJamesUser(baseUri(jmapServer), RECEIVER_AT_DESTINATION_DOMAIN, PASSWORD);
-        senderAtDestinationDomainToken = authenticateJamesUser(baseUri(jmapServer), SENDER_AT_DESTINATION_DOMAIN, PASSWORD);
+        receiverAtDestinationDomainToken = authenticateJamesUser(baseUri(jmapServer), Username.of(RECEIVER_AT_DESTINATION_DOMAIN), PASSWORD);
+        senderAtDestinationDomainToken = authenticateJamesUser(baseUri(jmapServer), Username.of(SENDER_AT_DESTINATION_DOMAIN), PASSWORD);
     }
 
     @After
@@ -128,7 +129,7 @@ public abstract class SetMessagesMethodReRoutingTest {
             "  ]" +
             "]";
         given()
-            .header("Authorization", senderAtDestinationDomainToken.serialize())
+            .header("Authorization", senderAtDestinationDomainToken.asString())
             .body(sendMessageBody)
         .when()
             .post("/jmap")
@@ -172,7 +173,7 @@ public abstract class SetMessagesMethodReRoutingTest {
             "  ]" +
             "]";
         given()
-            .header("Authorization", senderAtDestinationDomainToken.serialize())
+            .header("Authorization", senderAtDestinationDomainToken.asString())
             .body(sendMessageBody)
         .when()
             .post("/jmap")
@@ -218,7 +219,7 @@ public abstract class SetMessagesMethodReRoutingTest {
             "  ]" +
             "]";
         given()
-            .header("Authorization", senderAtDestinationDomainToken.serialize())
+            .header("Authorization", senderAtDestinationDomainToken.asString())
             .body(sendMessageBody)
         .when()
             .post("/jmap")

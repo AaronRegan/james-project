@@ -20,23 +20,21 @@
 package org.apache.james.mailbox.cassandra.mail;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import javax.mail.Flags;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.CassandraRestartExtension;
 import org.apache.james.mailbox.FlagsBuilder;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.modules.CassandraApplicableFlagsModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 import com.google.common.collect.ImmutableSet;
 
-@ExtendWith(CassandraRestartExtension.class)
 class CassandraApplicableFlagDAOTest {
 
     private static final String USER_FLAG = "User Flag";
@@ -73,6 +71,22 @@ class CassandraApplicableFlagDAOTest {
 
         assertThat(testee.retrieveApplicableFlag(CASSANDRA_ID).block())
             .isEqualTo(new Flags(USER_FLAG));
+    }
+
+    @Test
+    void retrieveApplicableFlagsShouldReturnEmptyWhenDeleted() {
+        testee.updateApplicableFlags(CASSANDRA_ID, ImmutableSet.of(USER_FLAG)).block();
+
+        testee.delete(CASSANDRA_ID).block();
+
+        assertThat(testee.retrieveApplicableFlag(CASSANDRA_ID).blockOptional())
+            .isEmpty();
+    }
+
+    @Test
+    void deleteShouldNotThrowWhenEmpty() {
+        assertThatCode(() -> testee.delete(CASSANDRA_ID).block())
+            .doesNotThrowAnyException();
     }
 
     @Test

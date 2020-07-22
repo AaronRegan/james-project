@@ -18,17 +18,18 @@
  ****************************************************************/
 package org.apache.james.imap.message.request;
 
-import org.apache.james.imap.api.ImapCommand;
+import org.apache.james.imap.api.ImapConstants;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.message.request.SearchOperation;
 
+import com.google.common.base.MoreObjects;
+
 public class SearchRequest extends AbstractImapRequest {
-
     private final SearchOperation operation;
-
     private final boolean useUids;
 
-    public SearchRequest(ImapCommand command, SearchOperation operation, boolean useUids, String tag) {
-        super(tag, command);
+    public SearchRequest(SearchOperation operation, boolean useUids, Tag tag) {
+        super(tag, ImapConstants.SEARCH_COMMAND);
         this.operation = operation;
         this.useUids = useUids;
     }
@@ -39,5 +40,13 @@ public class SearchRequest extends AbstractImapRequest {
 
     public final boolean isUseUids() {
         return useUids;
+    }
+
+    @Override
+    public String toString() {
+        return MoreObjects.toStringHelper(this)
+            .add("operation", operation)
+            .add("useUids", useUids)
+            .toString();
     }
 }

@@ -36,11 +36,10 @@ import org.apache.james.mailbox.MailboxSessionUtil;
 import org.apache.james.mailbox.MessageIdManager;
 import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.MessageManager.FlagsUpdateMode;
-import org.apache.james.mailbox.MessageManager.MetaData.FetchGroup;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.fixture.MailboxFixture;
 import org.apache.james.mailbox.model.ComposedMessageId;
-import org.apache.james.mailbox.model.FetchGroupImpl;
+import org.apache.james.mailbox.model.FetchGroup;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
@@ -48,9 +47,12 @@ import org.apache.james.mailbox.model.MessageResult;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mime4j.dom.Message;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableList;
+
+import reactor.core.publisher.Flux;
 
 public abstract class AbstractCombinationManagerTest {
 
@@ -71,9 +73,10 @@ public abstract class AbstractCombinationManagerTest {
     private CombinationManagerTestSystem testingData;
     private Message mailContent;
 
-    public abstract CombinationManagerTestSystem createTestingData() throws Exception;
+    protected abstract CombinationManagerTestSystem createTestingData() throws Exception;
 
-    public void setUp() throws Exception {
+    @BeforeEach
+    void setUp() throws Exception {
         session = MailboxSessionUtil.create(MailboxFixture.ALICE);
         testingData = createTestingData();
 
@@ -93,9 +96,9 @@ public abstract class AbstractCombinationManagerTest {
 
 
     @Test
-    public void getMessageCountFromMessageManagerShouldReturnDataSetInMailboxesFromMessageIdManager() throws Exception {
+    void getMessageCountFromMessageManagerShouldReturnDataSetInMailboxesFromMessageIdManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
@@ -103,12 +106,11 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void searchFromMessageManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManager() throws Exception {
-        SearchQuery query = new SearchQuery();
-        query.andCriteria(SearchQuery.all());
+    void searchFromMessageManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManager() throws Exception {
+        SearchQuery query = SearchQuery.of(SearchQuery.all());
 
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
@@ -116,17 +118,16 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void searchFromMessageManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManagerWhenSearchByMailboxQueryWithMailboxPath() throws Exception {
-        SearchQuery query = new SearchQuery();
-        query.andCriteria(SearchQuery.all());
+    void searchFromMessageManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManagerWhenSearchByMailboxQueryWithMailboxPath() throws Exception {
+        SearchQuery query = SearchQuery.of(SearchQuery.all());
 
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId,
             ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        MessageUid uidInMailbox2 = messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, session)
+        MessageUid uidInMailbox2 = messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, session)
             .get(0)
             .getUid();
 
@@ -135,11 +136,10 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void searchFromMessageManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManagerWhenSearchByMailboxQueryWithUsername() throws Exception {
-        SearchQuery query = new SearchQuery();
-        query.andCriteria(SearchQuery.all());
+    void searchFromMessageManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManagerWhenSearchByMailboxQueryWithUsername() throws Exception {
+        SearchQuery query = SearchQuery.of(SearchQuery.all());
 
-        ComposedMessageId composedMessageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session);
+        ComposedMessageId composedMessageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session).getId();
 
         messageIdManager.setInMailboxes(composedMessageId.getMessageId(),
             ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
@@ -149,38 +149,38 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void searchFromMailboxManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManagerWhenSearchByMultiMailboxes() throws Exception {
-        SearchQuery query = new SearchQuery();
-        query.andCriteria(SearchQuery.all());
+    void searchFromMailboxManagerShouldReturnMessagesUsingSetInMailboxesFromMessageIdManagerWhenSearchByMultiMailboxes() throws Exception {
+        SearchQuery query = SearchQuery.of(SearchQuery.all());
 
         MultimailboxesSearchQuery.Builder builder = MultimailboxesSearchQuery.from(query);
         builder.inMailboxes(mailbox1.getMailboxId(), mailbox2.getMailboxId());
         MultimailboxesSearchQuery multiMailboxesQuery = builder.build();
 
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(mailboxManager.search(multiMailboxesQuery, session, DEFAULT_MAXIMUM_LIMIT)).containsOnly(messageId);
+        assertThat(Flux.from(mailboxManager.search(multiMailboxesQuery, session, DEFAULT_MAXIMUM_LIMIT))
+            .collectList().block()).containsOnly(messageId);
     }
 
     @Test
-    public void setFlagsToDeleteThenExpungeFromMessageManagerThenGetMessageFromMessageIdManagerShouldNotReturnAnything() throws Exception {
+    void setFlagsToDeleteThenExpungeFromMessageManagerThenGetMessageFromMessageIdManagerShouldNotReturnAnything() throws Exception {
         Flags deleted = new Flags(Flag.DELETED);
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageManager1.setFlags(deleted, FlagsUpdateMode.ADD, MessageRange.all(), session);
         messageManager1.expunge(MessageRange.all(), session);
 
-        assertThat(messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, session)).isEmpty();
+        assertThat(messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, session)).isEmpty();
     }
 
     @Test
-    public void expungeFromMessageManagerShouldWorkWhenSetFlagsToDeletedWithMessageIdManager() throws Exception {
+    void expungeFromMessageManagerShouldWorkWhenSetFlagsToDeletedWithMessageIdManager() throws Exception {
         Flags deleted = new Flags(Flag.DELETED);
-        ComposedMessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session);
+        ComposedMessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session).getId();
 
         messageIdManager.setFlags(deleted, FlagsUpdateMode.ADD, messageId.getMessageId(), ImmutableList.of(mailbox1.getMailboxId()), session);
 
@@ -190,12 +190,12 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void expungeFromMessageManagerShouldWorkWhenSetInMailboxesAMessageWithDeletedFlag() throws Exception { //I can mark as DELETED + expunge an mail with setInMbxs
+    void expungeFromMessageManagerShouldWorkWhenSetInMailboxesAMessageWithDeletedFlag() throws Exception { //I can mark as DELETED + expunge an mail with setInMbxs
         Flags deleted = new Flags(Flag.DELETED);
         ComposedMessageId messageId = messageManager1.appendMessage(
             MessageManager.AppendCommand.builder()
                 .withFlags(deleted)
-                .build(mailContent), session);
+                .build(mailContent), session).getId();
 
         messageIdManager.setInMailboxes(messageId.getMessageId(), ImmutableList.of(mailbox1.getMailboxId()), session);
 
@@ -205,21 +205,21 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void getMessageFromMessageIdManagerShouldReturnMessageWhenAppendMessageFromMessageManager() throws Exception {
+    void getMessageFromMessageIdManagerShouldReturnMessageWhenAppendMessageFromMessageManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
-        assertThat(messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, session)).hasSize(1);
+        assertThat(messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, session)).hasSize(1);
     }
 
     @Test
-    public void getMessageFromMessageIdManagerShouldReturnMessageWhenCopyMessageWithMailboxIdFromMailboxManager() throws Exception {
+    void getMessageFromMessageIdManagerShouldReturnMessageWhenCopyMessageWithMailboxIdFromMailboxManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         mailboxManager.copyMessages(MessageRange.all(), mailbox1.getMailboxId(), mailbox2.getMailboxId(), session);
 
-        List<MessageResult> listMessages = messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, session);
+        List<MessageResult> listMessages = messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, session);
 
         assertThat(listMessages).hasSize(2)
             .extractingResultOf("getMailboxId")
@@ -227,13 +227,13 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void getMessageFromMessageIdManagerShouldReturnMessageWhenCopyMessageWithMailboxPathFromMailboxManager() throws Exception {
+    void getMessageFromMessageIdManagerShouldReturnMessageWhenCopyMessageWithMailboxPathFromMailboxManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         mailboxManager.copyMessages(MessageRange.all(), MailboxFixture.INBOX_ALICE, MailboxFixture.OUTBOX_ALICE, session);
 
-        List<MessageResult> listMessages = messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, session);
+        List<MessageResult> listMessages = messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, session);
 
         assertThat(listMessages).hasSize(2)
             .extractingResultOf("getMailboxId")
@@ -241,13 +241,13 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void getMessageFromMessageIdManagerShouldReturnMessageWhenMoveMessageWithMailboxIdFromMailboxManager() throws Exception {
+    void getMessageFromMessageIdManagerShouldReturnMessageWhenMoveMessageWithMailboxIdFromMailboxManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         mailboxManager.moveMessages(MessageRange.all(), MailboxFixture.INBOX_ALICE, MailboxFixture.OUTBOX_ALICE, session);
 
-        List<MessageResult> listMessages = messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, session);
+        List<MessageResult> listMessages = messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, session);
 
         assertThat(listMessages).hasSize(1)
             .extractingResultOf("getMailboxId")
@@ -255,59 +255,59 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void getMessagesFromMessageManagerShouldReturnMessagesCreatedBySetInMailboxesFromMessageIdManager() throws Exception {
+    void getMessagesFromMessageManagerShouldReturnMessagesCreatedBySetInMailboxesFromMessageIdManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager2.getMessages(MessageRange.all(), FetchGroupImpl.MINIMAL, session))
+        assertThat(messageManager2.getMessages(MessageRange.all(), FetchGroup.MINIMAL, session))
             .toIterable()
             .hasSize(1);
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnRecentMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnRecentMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
         Flags recent = new Flags(Flag.RECENT);
         ComposedMessageId messageId = messageManager1.appendMessage(
             MessageManager.AppendCommand.builder()
                 .withFlags(recent)
-                .build(mailContent), session);
+                .build(mailContent), session).getId();
 
-        long mailbox2NextUid = messageManager2.getMetaData(true, session, FetchGroup.UNSEEN_COUNT).getUidNext().asLong();
+        long mailbox2NextUid = messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.UNSEEN_COUNT).getUidNext().asLong();
         messageIdManager.setInMailboxes(messageId.getMessageId(), ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        List<MessageUid> messageUids = messageManager2.getMetaData(true, session, FetchGroup.UNSEEN_COUNT).getRecent();
+        List<MessageUid> messageUids = messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.UNSEEN_COUNT).getRecent();
 
         assertThat(messageUids).hasSize(1);
         assertThat(messageUids.get(0).asLong()).isGreaterThanOrEqualTo(mailbox2NextUid);
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnNumberOfRecentMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnNumberOfRecentMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
         Flags recent = new Flags(Flag.RECENT);
         MessageId messageId = messageManager1.appendMessage(
             MessageManager.AppendCommand.builder()
                 .withFlags(recent)
                 .build(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager2.getMetaData(true, session, FetchGroup.FIRST_UNSEEN).countRecent()).isEqualTo(1);
+        assertThat(messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.FIRST_UNSEEN).countRecent()).isEqualTo(1);
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnUidNextWhenSetInMailboxesFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnUidNextWhenSetInMailboxesFromMessageIdManager() throws Exception {
         Flags recent = new Flags(Flag.RECENT);
         ComposedMessageId messageId = messageManager1.appendMessage(
             MessageManager.AppendCommand.builder()
                 .withFlags(recent)
-                .build(mailContent), session);
+                .build(mailContent), session).getId();
 
         messageIdManager.setInMailboxes(messageId.getMessageId(), ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        List<MessageResult> listMessages = messageIdManager.getMessages(ImmutableList.of(messageId.getMessageId()), FetchGroupImpl.MINIMAL, session);
+        List<MessageResult> listMessages = messageIdManager.getMessage(messageId.getMessageId(), FetchGroup.MINIMAL, session);
 
         long uid2 = listMessages.stream()
             .filter(messageInMailbox2())
@@ -316,81 +316,81 @@ public abstract class AbstractCombinationManagerTest {
             .getUid()
             .asLong();
 
-        assertThat(messageManager2.getMetaData(true, session, FetchGroup.FIRST_UNSEEN).getUidNext().asLong())
+        assertThat(messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.FIRST_UNSEEN).getUidNext().asLong())
             .isGreaterThan(uid2);
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnHighestModSeqWhenSetInMailboxesFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnHighestModSeqWhenSetInMailboxesFromMessageIdManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager2.getMetaData(true, session, FetchGroup.FIRST_UNSEEN).getHighestModSeq()).isNotNegative();
+        assertThat(messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.FIRST_UNSEEN).getHighestModSeq().asLong()).isNotNegative();
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnMessageCountWhenSetInMailboxesFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnMessageCountWhenSetInMailboxesFromMessageIdManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager2.getMetaData(true, session, FetchGroup.FIRST_UNSEEN).getMessageCount()).isEqualTo(1);
+        assertThat(messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.FIRST_UNSEEN).getMessageCount()).isEqualTo(1);
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnNumberOfUnseenMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnNumberOfUnseenMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager2.getMetaData(true, session, FetchGroup.UNSEEN_COUNT).getUnseenCount()).isEqualTo(1);
+        assertThat(messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.UNSEEN_COUNT).getUnseenCount()).isEqualTo(1);
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnFirstUnseenMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
-        ComposedMessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session);
+    void getMetadataFromMessageManagerShouldReturnFirstUnseenMessageWhenSetInMailboxesFromMessageIdManager() throws Exception {
+        ComposedMessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session).getId();
 
         messageIdManager.setInMailboxes(messageId.getMessageId(), ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager2.getMetaData(true, session, FetchGroup.FIRST_UNSEEN).getFirstUnseen()).isEqualTo(messageId.getUid());
+        assertThat(messageManager2.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.FIRST_UNSEEN).getFirstUnseen()).isEqualTo(messageId.getUid());
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnNumberOfUnseenMessageWhenSetFlagsFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnNumberOfUnseenMessageWhenSetFlagsFromMessageIdManager() throws Exception {
         Flags newFlag = new Flags(Flag.RECENT);
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setFlags(newFlag, FlagsUpdateMode.ADD, messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager1.getMetaData(true, session, FetchGroup.UNSEEN_COUNT).getUnseenCount()).isEqualTo(1);
+        assertThat(messageManager1.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.UNSEEN_COUNT).getUnseenCount()).isEqualTo(1);
     }
 
     @Test
-    public void getMetadataFromMessageManagerShouldReturnFirstUnseenMessageWhenSetFlagsFromMessageIdManager() throws Exception {
+    void getMetadataFromMessageManagerShouldReturnFirstUnseenMessageWhenSetFlagsFromMessageIdManager() throws Exception {
         Flags newFlag = new Flags(Flag.USER);
-        ComposedMessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session);
+        ComposedMessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session).getId();
 
         messageIdManager.setFlags(newFlag, FlagsUpdateMode.ADD, messageId.getMessageId(), ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager1.getMetaData(true, session, FetchGroup.FIRST_UNSEEN).getFirstUnseen()).isEqualTo(messageId.getUid());
+        assertThat(messageManager1.getMetaData(true, session, MessageManager.MailboxMetaData.FetchGroup.FIRST_UNSEEN).getFirstUnseen()).isEqualTo(messageId.getUid());
     }
 
     @Test
-    public void setInMailboxesFromMessageIdManagerShouldMoveMessage() throws Exception {
+    void setInMailboxesFromMessageIdManagerShouldMoveMessage() throws Exception {
         MessageId messageId = messageManager1.appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox2.getMailboxId()), session);
 
-        assertThat(messageManager1.getMessages(MessageRange.all(), FetchGroupImpl.MINIMAL, session))
+        assertThat(messageManager1.getMessages(MessageRange.all(), FetchGroup.MINIMAL, session))
             .toIterable()
             .isEmpty();
-        assertThat(messageManager2.getMessages(MessageRange.all(), FetchGroupImpl.MINIMAL, session))
+        assertThat(messageManager2.getMessages(MessageRange.all(), FetchGroup.MINIMAL, session))
             .toIterable()
             .hasSize(1)
             .extracting(MessageResult::getMessageId)
@@ -398,7 +398,7 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void appendMessageFromMessageManagerAndSetInMailboxFromMessageIdManagerShouldUpdateApplicableFlag() throws Exception {
+    void appendMessageFromMessageManagerAndSetInMailboxFromMessageIdManagerShouldUpdateApplicableFlag() throws Exception {
         Flags messageFlag = new FlagsBuilder()
             .add(Flag.ANSWERED)
             .add(USER_FLAGS_VALUE)
@@ -408,7 +408,7 @@ public abstract class AbstractCombinationManagerTest {
             MessageManager.AppendCommand.builder()
                 .withFlags(messageFlag)
                 .build(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
@@ -424,7 +424,7 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void appendMessageFromMessageManagerAndSetFlagsFromMessageIdManagerShouldUnionApplicableFlag() throws Exception {
+    void appendMessageFromMessageManagerAndSetFlagsFromMessageIdManagerShouldUnionApplicableFlag() throws Exception {
         Flags messageFlag = new FlagsBuilder()
             .add(Flag.ANSWERED)
             .add(USER_FLAGS_VALUE)
@@ -439,7 +439,7 @@ public abstract class AbstractCombinationManagerTest {
             MessageManager.AppendCommand.builder()
                 .withFlags(messageFlag)
                 .build(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setFlags(deleted, FlagsUpdateMode.ADD, messageId, ImmutableList.of(mailbox1.getMailboxId()), session);
 
@@ -450,14 +450,14 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void setFlagsFromMessageManagerAndSetFlagsFromMessageIdManagerShouldUpdateSameApplicableFlag() throws Exception {
+    void setFlagsFromMessageManagerAndSetFlagsFromMessageIdManagerShouldUpdateSameApplicableFlag() throws Exception {
         Flags customFlag1 = new Flags(Flag.ANSWERED);
         Flags customFlag2 = new Flags("customFlag2");
         MessageId messageId = messageManager1.appendMessage(
             MessageManager.AppendCommand.builder()
                 .withFlags(customFlag1)
                 .build(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
 
         messageIdManager.setFlags(customFlag2, FlagsUpdateMode.ADD, messageId, ImmutableList.of(mailbox1.getMailboxId()), session);
@@ -472,14 +472,14 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void setInMailboxFromMessageIdManagerAndSetFlagsFromMessageManagerShouldUnionApplicableFlag() throws Exception {
+    void setInMailboxFromMessageIdManagerAndSetFlagsFromMessageManagerShouldUnionApplicableFlag() throws Exception {
         Flags custom1 = new Flags("custom1");
         Flags custom2 = new Flags("custom2");
         MessageId messageId = messageManager1.appendMessage(
             MessageManager.AppendCommand.builder()
                 .withFlags(custom1)
                 .build(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
         messageManager2.setFlags(custom2, FlagsUpdateMode.ADD, MessageRange.all(), session);
@@ -493,50 +493,50 @@ public abstract class AbstractCombinationManagerTest {
     }
 
     @Test
-    public void getUidsShouldInteractWellWithSetInMailboxes() throws Exception {
+    void getUidsShouldInteractWellWithSetInMailboxes() throws Exception {
         MessageId messageId = messageManager1
             .appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.setInMailboxes(messageId, ImmutableList.of(mailbox1.getMailboxId(), mailbox2.getMailboxId()), session);
 
-        MessageUid uid2 = messageIdManager.getMessages(ImmutableList.of(messageId), FetchGroupImpl.MINIMAL, session)
+        MessageUid uid2 = messageIdManager.getMessage(messageId, FetchGroup.MINIMAL, session)
             .stream()
             .filter(messageInMailbox2())
             .findFirst()
             .get()
             .getUid();
 
-        SearchQuery searchQuery = new SearchQuery(SearchQuery.all());
+        SearchQuery searchQuery = SearchQuery.of(SearchQuery.all());
         assertThat(messageManager2.search(searchQuery, session))
             .hasSize(1)
             .containsOnly(uid2);
     }
 
     @Test
-    public void getUidsShouldInteractWellWithDelete() throws Exception {
+    void getUidsShouldInteractWellWithDelete() throws Exception {
         MessageId messageId = messageManager1
             .appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.delete(messageId, ImmutableList.of(mailbox1.getMailboxId()), session);
 
-        SearchQuery searchQuery = new SearchQuery(SearchQuery.all());
+        SearchQuery searchQuery = SearchQuery.of(SearchQuery.all());
         assertThat(messageManager1.search(searchQuery, session)).isEmpty();
     }
 
     @Test
-    public void getUidsShouldInteractWellWithDeletes() throws Exception {
+    void getUidsShouldInteractWellWithDeletes() throws Exception {
         MessageId messageId1 = messageManager1
             .appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
         MessageId messageId2 = messageManager1
             .appendMessage(MessageManager.AppendCommand.from(mailContent), session)
-            .getMessageId();
+            .getId().getMessageId();
 
         messageIdManager.delete(ImmutableList.of(messageId1, messageId2), session);
 
-        SearchQuery searchQuery = new SearchQuery(SearchQuery.all());
+        SearchQuery searchQuery = SearchQuery.of(SearchQuery.all());
         assertThat(messageManager1.search(searchQuery, session)).isEmpty();
     }
 

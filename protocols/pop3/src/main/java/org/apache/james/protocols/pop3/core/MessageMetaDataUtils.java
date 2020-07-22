@@ -19,7 +19,6 @@
 
 package org.apache.james.protocols.pop3.core;
 
-import java.util.List;
 import java.util.stream.IntStream;
 
 import org.apache.james.protocols.api.ProtocolSession.State;
@@ -31,26 +30,16 @@ public class MessageMetaDataUtils {
     /**
      * Returns the {@link MessageMetaData} for the given message number or <code>null</code> if it can not be 
      * found.
-     * 
-     * @param session
-     * @param number
-     * @return data
      */
     public static MessageMetaData getMetaData(POP3Session session, int number) {
-        @SuppressWarnings("unchecked")
-        List<MessageMetaData> uidList = (List<MessageMetaData>) session.getAttachment(POP3Session.UID_LIST, State.Transaction);
-        if (uidList == null || number > uidList.size()) {
-            return null;
-        } else {
-            return uidList.get(number - 1);
-        }
+        return session.getAttachment(POP3Session.UID_LIST, State.Transaction)
+            .filter(uidList -> number <= uidList.size())
+            .map(uidList -> uidList.get(number - 1))
+            .orElse(null);
     }
 
     /**
      * Check whether POP3 UID is compatible with RFC1939
-     * 
-     * @param uid
-     * @return
      */
     public static boolean isRFC1939Compatible(String uid) {
         if (uid == null) {

@@ -22,14 +22,14 @@ package org.apache.james.jmap.draft.methods.integration;
 import static io.restassured.RestAssured.given;
 import static io.restassured.RestAssured.with;
 import static org.apache.james.jmap.HttpJmapAuthentication.authenticateJamesUser;
+import static org.apache.james.jmap.JMAPTestingConstants.ARGUMENTS;
+import static org.apache.james.jmap.JMAPTestingConstants.DOMAIN;
+import static org.apache.james.jmap.JMAPTestingConstants.calmlyAwait;
+import static org.apache.james.jmap.JMAPTestingConstants.jmapRequestSpecBuilder;
 import static org.apache.james.jmap.JmapCommonRequests.concatMessageIds;
 import static org.apache.james.jmap.JmapCommonRequests.getOutboxId;
 import static org.apache.james.jmap.JmapCommonRequests.listMessageIdsForAccount;
 import static org.apache.james.jmap.JmapURIBuilder.baseUri;
-import static org.apache.james.jmap.TestingConstants.ARGUMENTS;
-import static org.apache.james.jmap.TestingConstants.DOMAIN;
-import static org.apache.james.jmap.TestingConstants.calmlyAwait;
-import static org.apache.james.jmap.TestingConstants.jmapRequestSpecBuilder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 
@@ -37,18 +37,18 @@ import java.io.IOException;
 import java.util.List;
 
 import org.apache.james.GuiceJamesServer;
-import org.apache.james.core.quota.QuotaSize;
-import org.apache.james.jmap.api.access.AccessToken;
-import org.apache.james.jmap.categories.BasicFeature;
+import org.apache.james.core.Username;
+import org.apache.james.core.quota.QuotaSizeLimit;
+import org.apache.james.jmap.AccessToken;
+import org.apache.james.jmap.draft.JmapGuiceProbe;
+import org.apache.james.junit.categories.BasicFeature;
 import org.apache.james.mailbox.DefaultMailboxes;
-import org.apache.james.mailbox.model.MailboxConstants;
-import org.apache.james.mailbox.model.SerializableQuotaValue;
+import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.probe.MailboxProbe;
 import org.apache.james.modules.MailboxProbeImpl;
 import org.apache.james.modules.QuotaProbesImpl;
 import org.apache.james.probe.DataProbe;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.awaitility.Duration;
 import org.awaitility.core.ConditionFactory;
 import org.junit.After;
@@ -62,11 +62,12 @@ import io.restassured.RestAssured;
 import io.restassured.parsing.Parser;
 
 public abstract class QuotaMailingTest {
-    private static final String HOMER = "homer@" + DOMAIN;
-    private static final String BART = "bart@" + DOMAIN;
+    private static final Username HOMER = Username.of("homer@" + DOMAIN);
+    private static final Username BART = Username.of("bart@" + DOMAIN);
     private static final String PASSWORD = "password";
     private static final String BOB_PASSWORD = "bobPassword";
     private static final ConditionFactory WAIT_TWO_MINUTES = calmlyAwait.atMost(Duration.TWO_MINUTES);
+    private QuotaProbesImpl quotaProbe;
 
     protected abstract GuiceJamesServer createJmapServer() throws IOException;
 
@@ -80,16 +81,17 @@ public abstract class QuotaMailingTest {
         jmapServer.start();
         MailboxProbe mailboxProbe = jmapServer.getProbe(MailboxProbeImpl.class);
         DataProbe dataProbe = jmapServer.getProbe(DataProbeImpl.class);
+        quotaProbe = jmapServer.getProbe(QuotaProbesImpl.class);
 
         RestAssured.requestSpecification = jmapRequestSpecBuilder
-            .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort())
+            .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort().getValue())
             .build();
         RestAssured.defaultParser = Parser.JSON;
 
         dataProbe.addDomain(DOMAIN);
-        dataProbe.addUser(HOMER, PASSWORD);
-        dataProbe.addUser(BART, BOB_PASSWORD);
-        mailboxProbe.createMailbox("#private", HOMER, DefaultMailboxes.INBOX);
+        dataProbe.addUser(HOMER.asString(), PASSWORD);
+        dataProbe.addUser(BART.asString(), BOB_PASSWORD);
+        mailboxProbe.createMailbox("#private", HOMER.asString(), DefaultMailboxes.INBOX);
         homerAccessToken = authenticateJamesUser(baseUri(jmapServer), HOMER, PASSWORD);
         bartAccessToken = authenticateJamesUser(baseUri(jmapServer), BART, BOB_PASSWORD);
     }
@@ -102,9 +104,7 @@ public abstract class QuotaMailingTest {
     @Category(BasicFeature.class)
     @Test
     public void shouldSendANoticeWhenThresholdExceeded() throws Exception {
-        jmapServer.getProbe(QuotaProbesImpl.class)
-            .setMaxStorage(MailboxConstants.USER_NAMESPACE + "&" + HOMER,
-                new SerializableQuotaValue<>(QuotaSize.size(100 * 1000)));
+        quotaProbe.setMaxStorage(quotaProbe.getQuotaRoot(MailboxPath.inbox(HOMER)), QuotaSizeLimit.size(100 * 1000));
 
         bartSendMessageToHomer();
         // Homer receives a mail big enough to trigger a configured threshold
@@ -115,7 +115,7 @@ public abstract class QuotaMailingTest {
         String idString = concatMessageIds(ids);
 
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"getMessages\", {\"ids\": [" + idString + "]}, \"#0\"]]")
         .when()
             .post("/jmap")
@@ -128,9 +128,7 @@ public abstract class QuotaMailingTest {
 
     @Test
     public void configurationShouldBeWellLoaded() throws Exception {
-        jmapServer.getProbe(QuotaProbesImpl.class)
-            .setMaxStorage(MailboxConstants.USER_NAMESPACE + "&" + HOMER,
-                new SerializableQuotaValue<>(QuotaSize.size(100 * 1000)));
+        quotaProbe.setMaxStorage(quotaProbe.getQuotaRoot(MailboxPath.inbox(HOMER)), QuotaSizeLimit.size(100 * 1000));
 
         bartSendMessageToHomer();
         // Homer receives a mail big enough to trigger a 10% configured threshold
@@ -144,7 +142,7 @@ public abstract class QuotaMailingTest {
         String idString = concatMessageIds(ids);
 
         given()
-            .header("Authorization", homerAccessToken.serialize())
+            .header("Authorization", homerAccessToken.asString())
             .body("[[\"getMessages\", {\"ids\": [" + idString + "]}, \"#0\"]]")
         .when()
             .post("/jmap")
@@ -166,9 +164,9 @@ public abstract class QuotaMailingTest {
             "    \"setMessages\"," +
             "    {" +
             "      \"create\": { \"" + messageCreationId  + "\" : {" +
-            "        \"headers\":{\"Disposition-Notification-To\":\"" + BART + "\"}," +
-            "        \"from\": { \"name\": \"Bob\", \"email\": \"" + BART + "\"}," +
-            "        \"to\": [{ \"name\": \"User\", \"email\": \"" + HOMER + "\"}]," +
+            "        \"headers\":{\"Disposition-Notification-To\":\"" + BART.asString() + "\"}," +
+            "        \"from\": { \"name\": \"Bob\", \"email\": \"" + BART.asString() + "\"}," +
+            "        \"to\": [{ \"name\": \"User\", \"email\": \"" + HOMER.asString() + "\"}]," +
             "        \"subject\": \"Message without an attachment\"," +
             "        \"textBody\": \"" + bigEnoughBody + "\"," +
             "        \"htmlBody\": \"Test <b>body</b>, HTML version\"," +
@@ -180,7 +178,7 @@ public abstract class QuotaMailingTest {
             "]";
 
         with()
-            .header("Authorization", bartAccessToken.serialize())
+            .header("Authorization", bartAccessToken.asString())
             .body(requestBody)
             .post("/jmap")
         .then()

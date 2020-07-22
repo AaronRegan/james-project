@@ -31,7 +31,7 @@ import org.apache.james.modules.data.MemoryDataModule;
 import org.apache.james.modules.eventstore.MemoryEventStoreModule;
 import org.apache.james.modules.mailbox.MemoryMailboxModule;
 import org.apache.james.modules.protocols.IMAPServerModule;
-import org.apache.james.modules.protocols.JMAPDraftServerModule;
+import org.apache.james.modules.protocols.JMAPServerModule;
 import org.apache.james.modules.protocols.LMTPServerModule;
 import org.apache.james.modules.protocols.ManageSieveServerModule;
 import org.apache.james.modules.protocols.POP3ServerModule;
@@ -42,13 +42,16 @@ import org.apache.james.modules.server.DKIMMailetModule;
 import org.apache.james.modules.server.DLPRoutesModule;
 import org.apache.james.modules.server.DataRoutesModules;
 import org.apache.james.modules.server.JMXServerModule;
+import org.apache.james.modules.server.JmapTasksModule;
 import org.apache.james.modules.server.MailQueueRoutesModule;
 import org.apache.james.modules.server.MailRepositoriesRoutesModule;
 import org.apache.james.modules.server.MailboxRoutesModule;
+import org.apache.james.modules.server.MailboxesExportRoutesModule;
 import org.apache.james.modules.server.MemoryMailQueueModule;
 import org.apache.james.modules.server.RawPostDequeueDecoratorModule;
 import org.apache.james.modules.server.SieveRoutesModule;
 import org.apache.james.modules.server.SwaggerRoutesModule;
+import org.apache.james.modules.server.TaskManagerModule;
 import org.apache.james.modules.server.WebAdminServerModule;
 import org.apache.james.modules.spamassassin.SpamAssassinListenerModule;
 import org.apache.james.modules.vault.DeletedMessageVaultModule;
@@ -61,18 +64,19 @@ import org.apache.james.webadmin.authentication.NoAuthenticationFilter;
 import com.google.inject.Module;
 import com.google.inject.util.Modules;
 
-public class MemoryJamesServerMain {
+public class MemoryJamesServerMain implements JamesServerMain {
 
     public static final Module WEBADMIN = Modules.combine(
         new WebAdminServerModule(),
         new DataRoutesModules(),
         new DeletedMessageVaultRoutesModule(),
+        new DLPRoutesModule(),
+        new MailboxesExportRoutesModule(),
         new MailboxRoutesModule(),
         new MailQueueRoutesModule(),
         new MailRepositoriesRoutesModule(),
-        new SwaggerRoutesModule(),
-        new DLPRoutesModule(),
-        new SieveRoutesModule());
+        new SieveRoutesModule(),
+        new SwaggerRoutesModule());
 
 
     public static final JwtConfiguration NO_JWT_CONFIGURATION = new JwtConfiguration(Optional.empty());
@@ -94,8 +98,9 @@ public class MemoryJamesServerMain {
         new SpamAssassinListenerModule());
 
     public static final Module JMAP = Modules.combine(
+        new JmapTasksModule(),
         new MemoryDataJmapModule(),
-        new JMAPDraftServerModule());
+        new JMAPServerModule());
 
     public static final Module IN_MEMORY_SERVER_MODULE = Modules.combine(
         new BlobMemoryModule(),
@@ -105,7 +110,8 @@ public class MemoryJamesServerMain {
         new MemoryDataModule(),
         new MemoryEventStoreModule(),
         new MemoryMailboxModule(),
-        new MemoryMailQueueModule());
+        new MemoryMailQueueModule(),
+        new TaskManagerModule());
 
     public static final Module SMTP_ONLY_MODULE = Modules.combine(
         MemoryJamesServerMain.IN_MEMORY_SERVER_MODULE,
@@ -132,10 +138,16 @@ public class MemoryJamesServerMain {
             .useWorkingDirectoryEnvProperty()
             .build();
 
-        GuiceJamesServer.forConfiguration(configuration)
-            .combineWith(new FakeSearchMailboxModule())
-            .combineWith(IN_MEMORY_SERVER_AGGREGATE_MODULE, new JMXServerModule())
-            .start();
+        LOGGER.info("Loading configuration {}", configuration.toString());
+        GuiceJamesServer server = createServer(configuration)
+            .combineWith(new FakeSearchMailboxModule(), new JMXServerModule());
+
+        JamesServerMain.main(server);
+    }
+
+    public static GuiceJamesServer createServer(Configuration configuration) {
+        return GuiceJamesServer.forConfiguration(configuration)
+            .combineWith(IN_MEMORY_SERVER_AGGREGATE_MODULE);
     }
 
 }

@@ -19,14 +19,12 @@
 
 package org.apache.james.modules;
 
-import javax.inject.Named;
 import javax.inject.Singleton;
 
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.filesystem.api.JamesDirectoriesProvider;
 import org.apache.james.modules.server.DNSServiceModule;
 import org.apache.james.modules.server.DropWizardMetricsModule;
-import org.apache.james.modules.server.TaskManagerModule;
 import org.apache.james.onami.lifecycle.PreDestroyModule;
 import org.apache.james.server.core.configuration.Configuration;
 import org.apache.james.server.core.configuration.ConfigurationProvider;
@@ -41,8 +39,7 @@ import com.google.inject.Provides;
 import com.google.inject.multibindings.Multibinder;
 
 public class CommonServicesModule extends AbstractModule {
-    
-    public static final String CONFIGURATION_PATH = "configurationPath";
+
     private final Configuration configuration;
     private final FileSystemImpl fileSystem;
 
@@ -60,10 +57,10 @@ public class CommonServicesModule extends AbstractModule {
         install(new PreDestroyModule());
         install(new DNSServiceModule());
         install(new DropWizardMetricsModule());
-        install(new TaskManagerModule());
         install(new CleanupTaskModule());
         install(new MimeMessageModule());
         install(new ClockModule());
+        install(new PeriodicalHealthChecksModule());
 
         bind(FileSystem.class).toInstance(fileSystem);
         bind(Configuration.class).toInstance(configuration);
@@ -75,8 +72,7 @@ public class CommonServicesModule extends AbstractModule {
 
     @Provides
     @Singleton
-    @Named(CONFIGURATION_PATH)
-    public String configurationPath() {
+    public Configuration.ConfigurationPath configurationPath() {
         return configuration.configurationPath();
     }
 

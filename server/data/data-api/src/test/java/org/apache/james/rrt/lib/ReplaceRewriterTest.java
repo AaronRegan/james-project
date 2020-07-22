@@ -21,7 +21,7 @@ package org.apache.james.rrt.lib;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.junit.jupiter.api.Test;
 
 public class ReplaceRewriterTest {
@@ -31,8 +31,8 @@ public class ReplaceRewriterTest {
         assertThat(
             new UserRewritter.ReplaceRewriter()
                 .generateUserRewriter(newAddress)
-                .rewrite(User.fromUsername("old@passed")))
-            .contains(User.fromUsername(newAddress));
+                .rewrite(Username.of("old@passed")))
+            .contains(Username.of(newAddress));
     }
     
     @Test
@@ -41,8 +41,8 @@ public class ReplaceRewriterTest {
         assertThat(
             new UserRewritter.ReplaceRewriter()
                 .generateUserRewriter(newAddress)
-                .rewrite(User.fromUsername("old")))
-            .contains(User.fromUsername(newAddress));
+                .rewrite(Username.of("old")))
+            .contains(Username.of(newAddress));
     }
 
     @Test
@@ -51,7 +51,7 @@ public class ReplaceRewriterTest {
         assertThat(
             new UserRewritter.ReplaceRewriter()
                 .generateUserRewriter(newAddress)
-                .rewrite(User.fromUsername("old@passed")))
-            .contains(User.fromUsername(newAddress));
+                .rewrite(Username.of("old@passed")))
+            .contains(Username.of(newAddress));
     }
 }

@@ -26,7 +26,7 @@ import java.util.stream.Stream;
 import javax.inject.Inject;
 
 import org.apache.james.core.MailAddress;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.jmap.api.filtering.FilteringManagement;
 import org.apache.james.jmap.api.filtering.Rule;
 import org.apache.james.user.api.UsersRepository;
@@ -35,6 +35,10 @@ import org.apache.mailet.Mail;
 import org.apache.mailet.base.GenericMailet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.github.steveash.guavate.Guavate;
+
+import reactor.core.publisher.Flux;
 
 /**
  * Mailet for applying JMAP filtering to incoming email.
@@ -45,7 +49,7 @@ import org.slf4j.LoggerFactory;
  *
  * Example:
  *
- *  &lt;mailet matcher="RecipientIsLocal" class="org.apache.james.jmap.mailet.filter.JMAPFiltering"/&gt;
+ *  &lt;mailet match="RecipientIsLocal" class="org.apache.james.jmap.mailet.filter.JMAPFiltering"/&gt;
  */
 public class JMAPFiltering extends GenericMailet {
 
@@ -71,24 +75,26 @@ public class JMAPFiltering extends GenericMailet {
     }
 
     private void filteringForRecipient(Mail mail, MailAddress recipient) {
-        Optional<User> maybeUser = retrieveUser(recipient);
+        Optional<Username> maybeUser = retrieveUser(recipient);
         maybeUser
             .ifPresent(user -> findFirstApplicableRule(user, mail));
     }
 
-    private void findFirstApplicableRule(User user, Mail mail) {
-        List<Rule> filteringRules = filteringManagement.listRulesForUser(user);
+    private void findFirstApplicableRule(Username username, Mail mail) {
+        List<Rule> filteringRules = Flux.from(filteringManagement.listRulesForUser(username))
+            .collect(Guavate.toImmutableList())
+            .block();
         RuleMatcher ruleMatcher = new RuleMatcher(filteringRules);
         Stream<Rule> matchingRules = ruleMatcher.findApplicableRules(mail);
 
         actionApplierFactory.forMail(mail)
-            .forUser(user)
+            .forUser(username)
             .apply(matchingRules.map(Rule::getAction));
     }
 
-    private Optional<User> retrieveUser(MailAddress recipient) {
+    private Optional<Username> retrieveUser(MailAddress recipient) {
         try {
-            return Optional.ofNullable(User.fromUsername(usersRepository.getUser(recipient)));
+            return Optional.ofNullable(usersRepository.getUsername(recipient));
         } catch (UsersRepositoryException e) {
             logger.error("cannot retrieve user " + recipient.asString(), e);
             return Optional.empty();

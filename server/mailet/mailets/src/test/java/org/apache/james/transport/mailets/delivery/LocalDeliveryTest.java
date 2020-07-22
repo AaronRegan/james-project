@@ -31,14 +31,16 @@ import javax.mail.MessagingException;
 import javax.mail.internet.MimeBodyPart;
 
 import org.apache.james.core.MailAddress;
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.core.builder.MimeMessageBuilder;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
+import org.apache.james.mailbox.MessageManager.AppendCommand;
+import org.apache.james.mailbox.MessageManager.AppendResult;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.metrics.api.MetricFactory;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.transport.mailets.LocalDelivery;
 import org.apache.james.user.api.UsersRepository;
 import org.apache.mailet.Mail;
@@ -48,6 +50,8 @@ import org.apache.mailet.base.test.FakeMailetConfig;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
+
+import reactor.core.publisher.Mono;
 
 public class LocalDeliveryTest {
 
@@ -63,12 +67,13 @@ public class LocalDeliveryTest {
         usersRepository = mock(UsersRepository.class);
         mailboxManager = mock(MailboxManager.class);
 
-        MetricFactory metricFactory = new NoopMetricFactory();
+        MetricFactory metricFactory = new RecordingMetricFactory();
         testee = new LocalDelivery(usersRepository, mailboxManager, metricFactory);
 
         session = mock(MailboxSession.class);
         when(session.getPathDelimiter()).thenReturn('.');
-        when(mailboxManager.createSystemSession(any(String.class))).thenReturn(session);
+        when(mailboxManager.createSystemSession(any(Username.class))).thenReturn(session);
+        when(mailboxManager.mailboxExists(any(), any())).thenReturn(Mono.just(true));
 
 
         config = FakeMailetConfig.builder()
@@ -80,14 +85,15 @@ public class LocalDeliveryTest {
     @Test
     public void mailShouldBeWellDeliveredByDefaultToUserWhenVirtualHostingIsTurnedOn() throws Exception {
         // Given
-        String username = "receiver@domain.com";
-        MailboxPath inbox = MailboxPath.forUser(username, "INBOX");
+        Username username = Username.of("receiver@domain.com");
+        MailboxPath inbox = MailboxPath.inbox(username);
         MessageManager messageManager = mock(MessageManager.class);
+        when(messageManager.appendMessage(any(AppendCommand.class), any(MailboxSession.class))).thenReturn(mock(AppendResult.class));
 
         when(usersRepository.supportVirtualHosting()).thenReturn(true);
-        when(usersRepository.getUser(new MailAddress(username))).thenReturn(username);
+        when(usersRepository.getUsername(new MailAddress(username.asString()))).thenReturn(username);
         when(mailboxManager.getMailbox(eq(inbox), any(MailboxSession.class))).thenReturn(messageManager);
-        when(session.getUser()).thenReturn(User.fromUsername(username));
+        when(session.getUser()).thenReturn(username);
 
         // When
         Mail mail = createMail();
@@ -95,20 +101,21 @@ public class LocalDeliveryTest {
         testee.service(mail);
 
         // Then
-        verify(messageManager).appendMessage(any(MessageManager.AppendCommand.class), any(MailboxSession.class));
+        verify(messageManager).appendMessage(any(AppendCommand.class), any(MailboxSession.class));
     }
 
     @Test
     public void mailShouldBeWellDeliveredByDefaultToUserWhenVirtualHostingIsTurnedOff() throws Exception {
         // Given
-        String username = "receiver";
-        MailboxPath inbox = MailboxPath.forUser(username, "INBOX");
+        Username username = Username.of("receiver");
+        MailboxPath inbox = MailboxPath.inbox(username);
         MessageManager messageManager = mock(MessageManager.class);
+        when(messageManager.appendMessage(any(AppendCommand.class), any(MailboxSession.class))).thenReturn(mock(AppendResult.class));
         when(usersRepository.supportVirtualHosting()).thenReturn(false);
-        when(usersRepository.getUser(new MailAddress("receiver@localhost"))).thenReturn(username);
-        when(usersRepository.getUser(new MailAddress(RECEIVER_DOMAIN_COM))).thenReturn(username);
+        when(usersRepository.getUsername(new MailAddress("receiver@localhost"))).thenReturn(username);
+        when(usersRepository.getUsername(new MailAddress(RECEIVER_DOMAIN_COM))).thenReturn(username);
         when(mailboxManager.getMailbox(eq(inbox), any(MailboxSession.class))).thenReturn(messageManager);
-        when(session.getUser()).thenReturn(User.fromUsername(username));
+        when(session.getUser()).thenReturn(username);
 
         // When
         Mail mail = createMail();
@@ -116,7 +123,7 @@ public class LocalDeliveryTest {
         testee.service(mail);
 
         // Then
-        verify(messageManager).appendMessage(any(MessageManager.AppendCommand.class), any(MailboxSession.class));
+        verify(messageManager).appendMessage(any(AppendCommand.class), any(MailboxSession.class));
     }
 
     private Mail createMail() throws MessagingException, IOException {

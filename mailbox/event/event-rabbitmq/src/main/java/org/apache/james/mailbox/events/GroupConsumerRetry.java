@@ -19,9 +19,10 @@
 
 package org.apache.james.mailbox.events;
 
-import static org.apache.james.backend.rabbitmq.Constants.DIRECT_EXCHANGE;
-import static org.apache.james.backend.rabbitmq.Constants.DURABLE;
-import static org.apache.james.backend.rabbitmq.Constants.EMPTY_ROUTING_KEY;
+import static com.rabbitmq.client.MessageProperties.PERSISTENT_TEXT_PLAIN;
+import static org.apache.james.backends.rabbitmq.Constants.DIRECT_EXCHANGE;
+import static org.apache.james.backends.rabbitmq.Constants.DURABLE;
+import static org.apache.james.backends.rabbitmq.Constants.EMPTY_ROUTING_KEY;
 import static org.apache.james.mailbox.events.GroupRegistration.RETRY_COUNT;
 import static org.apache.james.mailbox.events.RabbitMQEventBus.MAILBOX_EVENT;
 
@@ -105,7 +106,7 @@ class GroupConsumerRetry {
 
     Mono<Void> retryOrStoreToDeadLetter(Event event, int currentRetryCount) {
         if (currentRetryCount >= retryBackoff.getMaxRetries()) {
-            return eventDeadLetters.store(group, event, EventDeadLetters.InsertionId.random());
+            return eventDeadLetters.store(group, event).then();
         }
         return sendRetryMessage(event, currentRetryCount);
     }
@@ -118,20 +119,23 @@ class GroupConsumerRetry {
             EMPTY_ROUTING_KEY,
             new AMQP.BasicProperties.Builder()
                 .headers(ImmutableMap.of(RETRY_COUNT, currentRetryCount + 1))
+                .deliveryMode(PERSISTENT_TEXT_PLAIN.getDeliveryMode())
+                .priority(PERSISTENT_TEXT_PLAIN.getPriority())
+                .contentType(PERSISTENT_TEXT_PLAIN.getContentType())
                 .build(),
             eventAsBytes));
 
         return sender.send(retryMessage)
             .doOnError(throwable -> createStructuredLogger(event)
                 .log(logger -> logger.error("Exception happens when publishing event to retry exchange, this event will be stored in deadLetter", throwable)))
-            .onErrorResume(e -> eventDeadLetters.store(group, event, EventDeadLetters.InsertionId.random()));
+            .onErrorResume(e -> eventDeadLetters.store(group, event).then());
     }
 
     private StructuredLogger createStructuredLogger(Event event) {
         return MDCStructuredLogger.forLogger(LOGGER)
             .addField(EventBus.StructuredLoggingFields.EVENT_ID, event.getEventId())
             .addField(EventBus.StructuredLoggingFields.EVENT_CLASS, event.getClass())
-            .addField(EventBus.StructuredLoggingFields.USER, event.getUser())
+            .addField(EventBus.StructuredLoggingFields.USER, event.getUsername())
             .addField(EventBus.StructuredLoggingFields.GROUP, group.asString());
     }
 }

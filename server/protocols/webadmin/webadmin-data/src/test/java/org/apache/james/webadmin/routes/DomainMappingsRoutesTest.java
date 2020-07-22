@@ -28,7 +28,6 @@ import static org.apache.james.webadmin.routes.DomainMappingsRoutes.DOMAIN_MAPPI
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.Matchers.isEmptyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -39,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.james.core.Domain;
 import org.apache.james.domainlist.api.DomainList;
 import org.apache.james.rrt.api.RecipientRewriteTableException;
@@ -108,8 +108,7 @@ class DomainMappingsRoutesTest {
             .when()
                 .put("from.com")
             .then()
-                .statusCode(HttpStatus.NO_CONTENT_204)
-                .body(isEmptyString());
+                .statusCode(HttpStatus.NO_CONTENT_204);
         }
 
         @Test
@@ -123,8 +122,27 @@ class DomainMappingsRoutesTest {
             .when()
                 .put("from.com")
             .then()
-                .statusCode(HttpStatus.NO_CONTENT_204)
-                .body(isEmptyString());
+                .statusCode(HttpStatus.NO_CONTENT_204);
+        }
+
+        @Test
+        void addDomainMappingsShouldReturnOkWhenWithA255LongDomainSource() {
+            given()
+                .body("to.com")
+            .when()
+                .put(StringUtils.repeat('a', 255))
+            .then()
+                .statusCode(HttpStatus.NO_CONTENT_204);
+        }
+
+        @Test
+        void addDomainMappingsShouldReturnOkWhenWithA255LongDomainDestination() {
+            given()
+                .body(StringUtils.repeat('a', 255))
+            .when()
+                .put("from.com")
+            .then()
+                .statusCode(HttpStatus.NO_CONTENT_204);
         }
 
         @Test
@@ -136,9 +154,9 @@ class DomainMappingsRoutesTest {
             Domain expectedDomain = Domain.of("abc.com");
             MappingSource mappingSource = MappingSource.fromDomain(expectedDomain);
 
-            recipientRewriteTable.addAliasDomainMapping(mappingSource, Domain.of(alias1));
-            recipientRewriteTable.addAliasDomainMapping(mappingSource, Domain.of(alias2));
-            recipientRewriteTable.addAliasDomainMapping(mappingSource, Domain.of(alias3));
+            recipientRewriteTable.addDomainMapping(mappingSource, Domain.of(alias1));
+            recipientRewriteTable.addDomainMapping(mappingSource, Domain.of(alias2));
+            recipientRewriteTable.addDomainMapping(mappingSource, Domain.of(alias3));
 
             Map<String, List<String>> map =
                 when()
@@ -219,8 +237,7 @@ class DomainMappingsRoutesTest {
             .when()
                 .delete("from.com")
             .then()
-                .statusCode(HttpStatus.NO_CONTENT_204)
-                .body(isEmptyString());
+                .statusCode(HttpStatus.NO_CONTENT_204);
         }
 
         @Test
@@ -228,7 +245,7 @@ class DomainMappingsRoutesTest {
             MappingSource mappingSource = MappingSource.fromDomain(Domain.of("from.com"));
             String alias = "to.com";
 
-            recipientRewriteTable.addAliasDomainMapping(mappingSource, Domain.of(alias));
+            recipientRewriteTable.addDomainMapping(mappingSource, Domain.of(alias));
 
             Assumptions.assumeTrue(recipientRewriteTable.getStoredMappings(mappingSource) != null);
 
@@ -237,7 +254,7 @@ class DomainMappingsRoutesTest {
             .when()
                 .delete("from.com")
             .then()
-                .body(isEmptyString());
+                .statusCode(HttpStatus.NO_CONTENT_204);
 
             assertThat(recipientRewriteTable.getAllMappings()).isEmpty();
         }
@@ -284,7 +301,7 @@ class DomainMappingsRoutesTest {
             recipientRewriteTable.addGroupMapping(mappingSource, "user@domain.com");
             recipientRewriteTable.addForwardMapping(mappingSource, "user@domain.com");
             recipientRewriteTable.addErrorMapping(mappingSource, "disabled");
-            recipientRewriteTable.addAliasDomainMapping(mappingSource, Domain.of(aliasDomain));
+            recipientRewriteTable.addDomainMapping(mappingSource, Domain.of(aliasDomain));
 
             List<String> body =
                 when()
@@ -308,14 +325,14 @@ class DomainMappingsRoutesTest {
             when(recipientRewriteTable.getStoredMappings(any())).thenReturn(mappings);
 
             List<String> body =
-            when()
-                .get(domain)
-            .then()
-                .contentType(ContentType.JSON)
-                .statusCode(HttpStatus.OK_200)
-                .extract()
-                .jsonPath()
-                .getList(".");
+                when()
+                    .get(domain)
+                .then()
+                    .contentType(ContentType.JSON)
+                    .statusCode(HttpStatus.OK_200)
+                    .extract()
+                    .jsonPath()
+                    .getList(".");
 
             assertThat(body).contains(aliasDomain);
         }
@@ -390,20 +407,52 @@ class DomainMappingsRoutesTest {
         @Test
         void addSpecificDomainMappingWithInvalidDomainInPath() {
             Map<String, Object> errors =
-            when()
-                .get("abc@domain.com")
-            .then()
-                .statusCode(HttpStatus.BAD_REQUEST_400)
-                .contentType(ContentType.JSON)
-            .extract()
-                .body()
-                .jsonPath()
-                .getMap(".");
+                when()
+                    .get("abc@domain.com")
+                .then()
+                    .statusCode(HttpStatus.BAD_REQUEST_400)
+                    .contentType(ContentType.JSON)
+                .extract()
+                    .body()
+                    .jsonPath()
+                    .getMap(".");
 
             assertThat(errors)
                 .containsEntry("statusCode", HttpStatus.BAD_REQUEST_400)
                 .containsEntry("type", "InvalidArgument")
                 .hasEntrySatisfying("message", o -> assertThat((String) o).matches("^The domain .* is invalid\\.$"));
+        }
+
+        @Test
+        void addDomainMappingShouldReturnBadRequestWhenDomainSourceTooLong() {
+            String longDomainName = StringUtils.repeat('a', 256);
+
+            given()
+                .body("destination.tld")
+            .when()
+                .put(longDomainName)
+            .then()
+                .statusCode(HttpStatus.BAD_REQUEST_400)
+                .body("statusCode", is(400))
+                .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+                .body("message", is("The domain " + longDomainName + " is invalid."))
+                .body("details", is("Domain name length should not exceed 255 characters"));
+        }
+
+        @Test
+        void addDomainMappingShouldReturnBadRequestWhenDomainDestinationTooLong() {
+            String longDomainName = StringUtils.repeat('a', 256);
+
+            given()
+                .body(longDomainName)
+            .when()
+                .put("source.tld")
+            .then()
+                .statusCode(HttpStatus.BAD_REQUEST_400)
+                .body("statusCode", is(400))
+                .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+                .body("message", is("The domain " + longDomainName + " is invalid."))
+                .body("details", is("Domain name length should not exceed 255 characters"));
         }
 
         private void assertBadRequest(String toDomain, Function<RequestSpecification, Response> requestingFunction) {

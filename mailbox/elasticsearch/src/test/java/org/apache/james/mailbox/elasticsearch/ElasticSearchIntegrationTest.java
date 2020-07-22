@@ -25,8 +25,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 
-import org.apache.james.backends.es.DockerElasticSearchRule;
+import org.apache.james.backends.es.DockerElasticSearchExtension;
 import org.apache.james.backends.es.ElasticSearchIndexer;
+import org.apache.james.backends.es.ReactorElasticSearchClient;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MailboxSessionUtil;
 import org.apache.james.mailbox.MessageManager;
@@ -43,45 +44,33 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.store.search.AbstractMessageSearchIndexTest;
 import org.apache.james.mailbox.tika.TikaConfiguration;
-import org.apache.james.mailbox.tika.TikaContainerSingletonRule;
+import org.apache.james.mailbox.tika.TikaExtension;
 import org.apache.james.mailbox.tika.TikaHttpClientImpl;
 import org.apache.james.mailbox.tika.TikaTextExtractor;
-import org.apache.james.metrics.api.NoopMetricFactory;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.mime4j.dom.Message;
-import org.elasticsearch.client.RestHighLevelClient;
-import org.junit.After;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 import com.google.common.base.Strings;
 
-public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest {
+class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest {
 
-    private static final int BATCH_SIZE = 1;
-    private static final int SEARCH_SIZE = 1;
+    static final int BATCH_SIZE = 1;
+    static final int SEARCH_SIZE = 1;
 
-    @ClassRule
-    public static TikaContainerSingletonRule tika = TikaContainerSingletonRule.rule;
+    @RegisterExtension
+    static TikaExtension tika = new TikaExtension();
 
-    @Rule
-    public DockerElasticSearchRule elasticSearch = new DockerElasticSearchRule();
-    private TikaTextExtractor textExtractor;
-    private RestHighLevelClient client;
+    @RegisterExtension
+    DockerElasticSearchExtension elasticSearch = new DockerElasticSearchExtension();
 
-    @Override
-    public void setUp() throws Exception {
-        textExtractor = new TikaTextExtractor(new NoopMetricFactory(),
-            new TikaHttpClientImpl(TikaConfiguration.builder()
-                .host(tika.getIp())
-                .port(tika.getPort())
-                .timeoutInMillis(tika.getTimeoutInMillis())
-                .build()));
-        super.setUp();
-    }
+    TikaTextExtractor textExtractor;
+    ReactorElasticSearchClient client;
 
-    @After
-    public void tearDown() throws IOException {
+    @AfterEach
+    void tearDown() throws IOException {
         client.close();
     }
 
@@ -91,12 +80,20 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
     }
 
     @Override
-    protected void initializeMailboxManager() throws IOException {
+    protected void initializeMailboxManager() throws Exception {
+        textExtractor = new TikaTextExtractor(new RecordingMetricFactory(),
+            new TikaHttpClientImpl(TikaConfiguration.builder()
+                .host(tika.getIp())
+                .port(tika.getPort())
+                .timeoutInMillis(tika.getTimeoutInMillis())
+                .build()));
+
         client = MailboxIndexCreationUtil.prepareDefaultClient(
-            elasticSearch.clientProvider().get(),
+            elasticSearch.getDockerElasticSearch().clientProvider().get(),
             elasticSearch.getDockerElasticSearch().configuration());
 
         InMemoryMessageId.Factory messageIdFactory = new InMemoryMessageId.Factory();
+        MailboxIdRoutingKeyFactory routingKeyFactory = new MailboxIdRoutingKeyFactory();
 
         InMemoryIntegrationResources resources = InMemoryIntegrationResources.builder()
             .preProvisionnedFakeAuthenticator()
@@ -111,9 +108,9 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
                     BATCH_SIZE),
                 new ElasticSearchSearcher(client, new QueryConverter(new CriterionConverter()), SEARCH_SIZE,
                     new InMemoryId.Factory(), messageIdFactory,
-                    MailboxElasticSearchConstants.DEFAULT_MAILBOX_READ_ALIAS),
+                    MailboxElasticSearchConstants.DEFAULT_MAILBOX_READ_ALIAS, routingKeyFactory),
                 new MessageToElasticSearchJson(textExtractor, ZoneId.of("Europe/Paris"), IndexAttachments.YES),
-                preInstanciationStage.getSessionProvider()))
+                preInstanciationStage.getSessionProvider(), routingKeyFactory))
             .noPreDeletionHooks()
             .storeQuotaManager()
             .build();
@@ -124,7 +121,7 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
     }
 
     @Test
-    public void termsBetweenElasticSearchAndLuceneLimitDueTuNonAsciiCharsShouldBeTruncated() throws Exception {
+    void termsBetweenElasticSearchAndLuceneLimitDueTuNonAsciiCharsShouldBeTruncated() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
@@ -134,16 +131,16 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
             Message.Builder.of()
                 .setTo(recipient)
                 .setBody(Strings.repeat("0à2345678é", 3200), StandardCharsets.UTF_8)),
-            session);
+            session).getId();
 
         elasticSearch.awaitForElasticSearch();
 
-        assertThat(messageManager.search(new SearchQuery(SearchQuery.address(SearchQuery.AddressType.To, recipient)), session))
+        assertThat(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, recipient)), session))
             .containsExactly(composedMessageId.getUid());
     }
 
     @Test
-    public void tooLongTermsShouldNotMakeIndexingFail() throws Exception {
+    void tooLongTermsShouldNotMakeIndexingFail() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
@@ -153,16 +150,16 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
             Message.Builder.of()
                 .setTo(recipient)
                 .setBody(Strings.repeat("0123456789", 3300), StandardCharsets.UTF_8)),
-            session);
+            session).getId();
 
         elasticSearch.awaitForElasticSearch();
 
-        assertThat(messageManager.search(new SearchQuery(SearchQuery.address(SearchQuery.AddressType.To, recipient)), session))
+        assertThat(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, recipient)), session))
             .containsExactly(composedMessageId.getUid());
     }
 
     @Test
-    public void fieldsExceedingLuceneLimitShouldNotBeIgnored() throws Exception {
+    void fieldsExceedingLuceneLimitShouldNotBeIgnored() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
@@ -172,16 +169,16 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
             Message.Builder.of()
                 .setTo(recipient)
                 .setBody(Strings.repeat("0123456789 ", 5000), StandardCharsets.UTF_8)),
-            session);
+            session).getId();
 
         elasticSearch.awaitForElasticSearch();
 
-        assertThat(messageManager.search(new SearchQuery(SearchQuery.bodyContains("0123456789")), session))
+        assertThat(messageManager.search(SearchQuery.of(SearchQuery.bodyContains("0123456789")), session))
             .containsExactly(composedMessageId.getUid());
     }
 
     @Test
-    public void fieldsWithTooLongTermShouldStillBeIndexed() throws Exception {
+    void fieldsWithTooLongTermShouldStillBeIndexed() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
@@ -191,16 +188,16 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
             Message.Builder.of()
                 .setTo(recipient)
                 .setBody(Strings.repeat("0123456789 ", 5000) + " matchMe", StandardCharsets.UTF_8)),
-            session);
+            session).getId();
 
         elasticSearch.awaitForElasticSearch();
 
-        assertThat(messageManager.search(new SearchQuery(SearchQuery.bodyContains("matchMe")), session))
+        assertThat(messageManager.search(SearchQuery.of(SearchQuery.bodyContains("matchMe")), session))
             .containsExactly(composedMessageId.getUid());
     }
 
     @Test
-    public void reasonableLongTermShouldNotBeIgnored() throws Exception {
+    void reasonableLongTermShouldNotBeIgnored() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
@@ -211,11 +208,59 @@ public class ElasticSearchIntegrationTest extends AbstractMessageSearchIndexTest
             Message.Builder.of()
                 .setTo(recipient)
                 .setBody(reasonableLongTerm, StandardCharsets.UTF_8)),
+            session).getId();
+
+        elasticSearch.awaitForElasticSearch();
+
+        assertThat(messageManager.search(SearchQuery.of(SearchQuery.bodyContains(reasonableLongTerm)), session))
+            .containsExactly(composedMessageId.getUid());
+    }
+
+    @Test
+    void headerSearchShouldIncludeMessageWhenDifferentTypesOnAnIndexedField() throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        ComposedMessageId customDateHeaderMessageId = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder()
+                .build(ClassLoader.getSystemResourceAsStream("eml/mailCustomDateHeader.eml")),
+            session).getId();
+
+        elasticSearch.awaitForElasticSearch();
+
+        ComposedMessageId customStringHeaderMessageId = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder()
+                .build(ClassLoader.getSystemResourceAsStream("eml/mailCustomStringHeader.eml")),
+            session).getId();
+
+        elasticSearch.awaitForElasticSearch();
+
+        assertThat(messageManager.search(SearchQuery.of(SearchQuery.headerExists("Custom-header")), session))
+            .containsExactly(customDateHeaderMessageId.getUid(), customStringHeaderMessageId.getUid());
+    }
+
+    @Test
+    void messageShouldStillBeIndexedEvenAfterOneFieldFailsIndexation() throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        messageManager.appendMessage(
+            MessageManager.AppendCommand.builder()
+                .build(ClassLoader.getSystemResourceAsStream("eml/mailCustomDateHeader.eml")),
             session);
 
         elasticSearch.awaitForElasticSearch();
 
-        assertThat(messageManager.search(new SearchQuery(SearchQuery.bodyContains(reasonableLongTerm)), session))
-            .containsExactly(composedMessageId.getUid());
+        ComposedMessageId customStringHeaderMessageId = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder()
+                .build(ClassLoader.getSystemResourceAsStream("eml/mailCustomStringHeader.eml")),
+            session).getId();
+
+        elasticSearch.awaitForElasticSearch();
+
+        assertThat(messageManager.search(SearchQuery.of(SearchQuery.all()), session))
+            .contains(customStringHeaderMessageId.getUid());
     }
 }

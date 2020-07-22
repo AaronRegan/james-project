@@ -27,7 +27,7 @@ import java.util.function.Predicate;
 
 import javax.inject.Inject;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.DefaultMailboxes;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
@@ -69,18 +69,18 @@ class RestoreService {
         this.mailboxManager = mailboxManager;
     }
 
-    Flux<RestoreResult> restore(User userToRestore, Query searchQuery) throws MailboxException {
-        MailboxSession session = mailboxManager.createSystemSession(userToRestore.asString());
+    Flux<RestoreResult> restore(Username usernameToRestore, Query searchQuery) throws MailboxException {
+        MailboxSession session = mailboxManager.createSystemSession(usernameToRestore);
         MessageManager restoreMessageManager = restoreMailboxManager(session);
 
-        return Flux.from(deletedMessageVault.search(userToRestore, searchQuery))
+        return Flux.from(deletedMessageVault.search(usernameToRestore, searchQuery))
             .flatMap(deletedMessage -> appendToMailbox(restoreMessageManager, deletedMessage, session));
     }
 
     private Mono<RestoreResult> appendToMailbox(MessageManager restoreMailboxManager, DeletedMessage deletedMessage, MailboxSession session) {
         return appendCommand(deletedMessage)
             .map(Throwing.<AppendCommand, ComposedMessageId>function(
-                appendCommand -> restoreMailboxManager.appendMessage(appendCommand, session)).sneakyThrow())
+                appendCommand -> restoreMailboxManager.appendMessage(appendCommand, session).getId()).sneakyThrow())
             .map(any -> RESTORE_SUCCEED)
             .onErrorResume(throwable -> {
                 LOGGER.error("append message {} to restore mailbox of user {} didn't success",
@@ -104,7 +104,7 @@ class RestoreService {
     }
 
     private MessageManager restoreMailboxManager(MailboxSession session) throws MailboxException {
-        MailboxPath restoreMailbox = MailboxPath.forUser(session.getUser().asString(), DefaultMailboxes.RESTORED_MESSAGES);
+        MailboxPath restoreMailbox = MailboxPath.forUser(session.getUser(), DefaultMailboxes.RESTORED_MESSAGES);
         try {
             return mailboxManager.getMailbox(restoreMailbox, session);
         } catch (MailboxNotFoundException e) {

@@ -18,6 +18,8 @@
  ****************************************************************/
 package org.apache.james.mailbox.store.mail;
 
+import static javax.mail.Flags.Flag.RECENT;
+
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -25,8 +27,12 @@ import java.util.Optional;
 
 import javax.mail.Flags;
 
+import org.apache.james.mailbox.MessageManager.FlagsUpdateMode;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.exception.MailboxException;
+import org.apache.james.mailbox.model.ComposedMessageId;
+import org.apache.james.mailbox.model.ComposedMessageIdWithMetaData;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxCounters;
 import org.apache.james.mailbox.model.MessageMetaData;
@@ -36,12 +42,19 @@ import org.apache.james.mailbox.store.FlagsUpdateCalculator;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.apache.james.mailbox.store.mail.model.Property;
 import org.apache.james.mailbox.store.transaction.Mapper;
+import org.apache.james.util.streams.Iterators;
+
+import com.google.common.collect.ImmutableList;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 /**
  * Maps {@link MailboxMessage} in a {@link org.apache.james.mailbox.MessageManager}. A {@link MessageMapper} has a lifecycle from the start of a request
  * to the end of the request.
  */
 public interface MessageMapper extends Mapper {
+    int UNLIMITED = -1;
 
     /**
      * Return a {@link Iterator} which holds the messages for the given criterias
@@ -49,13 +62,30 @@ public interface MessageMapper extends Mapper {
      * 
      * @param mailbox The mailbox to search
      * @param set message range for batch processing
-     * @param type
      * @param limit the maximal limit of returned {@link MailboxMessage}'s. Use -1 to set no limit. In any case the caller MUST not expect the limit to get applied in all cases as the implementation
      *              MAY just ignore it
-     * @throws MailboxException
      */
     Iterator<MailboxMessage> findInMailbox(Mailbox mailbox, MessageRange set, FetchType type, int limit)
             throws MailboxException;
+
+    default Flux<ComposedMessageIdWithMetaData> listMessagesMetadata(Mailbox mailbox, MessageRange set) {
+        return findInMailboxReactive(mailbox, set, FetchType.Metadata, UNLIMITED)
+            .map(message -> new ComposedMessageIdWithMetaData(
+                new ComposedMessageId(
+                    message.getMailboxId(),
+                    message.getMessageId(),
+                    message.getUid()),
+                message.createFlags(),
+                message.getModSeq()));
+    }
+
+    default Flux<MailboxMessage> findInMailboxReactive(Mailbox mailbox, MessageRange set, FetchType type, int limit) {
+        try {
+            return Iterators.toFlux(findInMailbox(mailbox, set, type, limit));
+        } catch (MailboxException e) {
+            return Flux.error(e);
+        }
+    }
 
     /**
      * Returns a list of {@link MessageUid} which are marked as deleted
@@ -64,32 +94,18 @@ public interface MessageMapper extends Mapper {
 
     /**
      * Return the count of messages in the mailbox
-     * 
-     * @param mailbox
-     * @return count
-     * @throws MailboxException
      */
     long countMessagesInMailbox(Mailbox mailbox)
             throws MailboxException;
 
-    /**
-     * Return the count of unseen messages in the mailbox
-     * 
-     * @param mailbox
-     * @return unseenCount
-     * @throws MailboxException
-     */
-    long countUnseenMessagesInMailbox(Mailbox mailbox)
-            throws MailboxException;
-
     MailboxCounters getMailboxCounters(Mailbox mailbox) throws MailboxException;
+
+    default Mono<MailboxCounters> getMailboxCountersReactive(Mailbox mailbox) {
+        return Mono.fromCallable(() -> getMailboxCounters(mailbox));
+    }
 
     /**
      * Delete the given {@link MailboxMessage}
-     * 
-     * @param mailbox
-     * @param message
-     * @throws MailboxException
      */
     void delete(Mailbox mailbox, MailboxMessage message) throws MailboxException;
 
@@ -101,11 +117,6 @@ public interface MessageMapper extends Mapper {
 
     /**
      * Return the uid of the first unseen message. If non can be found null will get returned
-     * 
-     * 
-     * @param mailbox
-     * @return uid or null
-     * @throws MailboxException
      */
     MessageUid findFirstUnseenMessageUid(Mailbox mailbox) throws MailboxException;
 
@@ -119,26 +130,35 @@ public interface MessageMapper extends Mapper {
     /**
      * Add the given {@link MailboxMessage} to the underlying storage. Be aware that implementation may choose to replace the uid of the given message while storing.
      * So you should only depend on the returned uid.
-     * 
-     * 
-     * @param mailbox
-     * @param message
-     * @return uid
-     * @throws MailboxException
      */
     MessageMetaData add(Mailbox mailbox, MailboxMessage message) throws MailboxException;
     
     /**
      * Update flags for the given {@link MessageRange}. Only the flags may be modified after a message was saved to a mailbox.
-     * 
-     * @param mailbox
+     *
      * @param flagsUpdateCalculator How to update flags
-     * @param set
-     * @return updatedFlags
-     * @throws MailboxException
      */
     Iterator<UpdatedFlags> updateFlags(Mailbox mailbox, FlagsUpdateCalculator flagsUpdateCalculator,
             final MessageRange set) throws MailboxException;
+
+    default Optional<UpdatedFlags> updateFlags(Mailbox mailbox, MessageUid uid, FlagsUpdateCalculator flagsUpdateCalculator) throws MailboxException {
+        return Iterators.toStream(updateFlags(mailbox, flagsUpdateCalculator, MessageRange.one(uid)))
+            .findFirst();
+    }
+
+    default List<UpdatedFlags> resetRecent(Mailbox mailbox) throws MailboxException {
+        final List<MessageUid> members = findRecentMessageUidsInMailbox(mailbox);
+        ImmutableList.Builder<UpdatedFlags> result = ImmutableList.builder();
+
+        FlagsUpdateCalculator calculator = new FlagsUpdateCalculator(new Flags(RECENT), FlagsUpdateMode.REMOVE);
+        // Convert to MessageRanges so we may be able to optimize the flag update
+        List<MessageRange> ranges = MessageRange.toRanges(members);
+        for (MessageRange range : ranges) {
+            result.addAll(updateFlags(mailbox, calculator, range));
+        }
+        return result.build();
+    }
+
     
     /**
      * Copy the given {@link MailboxMessage} to a new mailbox and return the uid of the copy. Be aware that the given uid is just a suggestion for the uid of the copied
@@ -146,7 +166,6 @@ public interface MessageMapper extends Mapper {
      * 
      * @param mailbox the Mailbox to copy to
      * @param original the original to copy
-     * @throws MailboxException
      */
     MessageMetaData copy(Mailbox mailbox,MailboxMessage original) throws MailboxException;
     
@@ -156,7 +175,6 @@ public interface MessageMapper extends Mapper {
      * 
      * @param mailbox the Mailbox to move to
      * @param original the original to move
-     * @throws MailboxException
      */
     MessageMetaData move(Mailbox mailbox,MailboxMessage original) throws MailboxException;
     
@@ -170,14 +188,14 @@ public interface MessageMapper extends Mapper {
     /**
      * Return the higest mod-sequence which were used for storing a MailboxMessage in the {@link Mailbox}
      */
-    long getHighestModSeq(Mailbox mailbox) throws MailboxException;
+    ModSeq getHighestModSeq(Mailbox mailbox) throws MailboxException;
 
     Flags getApplicableFlag(Mailbox mailbox) throws MailboxException;
 
     /**
      * Return a list containing all MessageUid of Messages that belongs to given {@link Mailbox}
      */
-    Iterator<MessageUid> listAllMessageUids(Mailbox mailbox) throws MailboxException;
+    Flux<MessageUid> listAllMessageUids(Mailbox mailbox);
 
     /**
      * Specify what data needs to get filled in a {@link MailboxMessage} before returning it
@@ -185,7 +203,6 @@ public interface MessageMapper extends Mapper {
      *
      */
     enum FetchType {
-
         /**
          * Fetch only the meta data of the {@link MailboxMessage} which includes:
          * <p>
@@ -224,7 +241,7 @@ public interface MessageMapper extends Mapper {
          * Fetch the complete {@link MailboxMessage}
          * 
          */
-        Full
+        Full;
     }
 
 }

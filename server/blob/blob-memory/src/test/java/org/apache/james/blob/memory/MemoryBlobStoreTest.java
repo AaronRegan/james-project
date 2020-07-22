@@ -33,7 +33,7 @@ public class MemoryBlobStoreTest implements MetricableBlobStoreContract {
 
     @BeforeEach
     void setUp() {
-        blobStore = new MetricableBlobStore(metricsTestExtension.getMetricFactory(), new MemoryBlobStore(BLOB_ID_FACTORY));
+        blobStore = new MetricableBlobStore(metricsTestExtension.getMetricFactory(), new MemoryBlobStore(BLOB_ID_FACTORY, new MemoryDumbBlobStore()));
     }
 
     @Override

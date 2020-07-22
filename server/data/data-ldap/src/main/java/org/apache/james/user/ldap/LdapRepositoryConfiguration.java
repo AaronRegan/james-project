@@ -25,13 +25,14 @@ import java.util.Optional;
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
+import org.apache.james.core.Username;
 
 import com.google.common.base.Preconditions;
 
 public class LdapRepositoryConfiguration {
     public static final String SUPPORTS_VIRTUAL_HOSTING = "supportsVirtualHosting";
 
-    private static final boolean USE_CONNECTION_POOL = true;
+    private static final boolean NO_CONNECTION_POOL = false;
     private static final int NO_CONNECTION_TIMEOUT = -1;
     private static final int NO_READ_TIME_OUT = -1;
     private static final boolean ENABLE_VIRTUAL_HOSTING = true;
@@ -133,7 +134,7 @@ public class LdapRepositoryConfiguration {
                 userBase.get(),
                 userIdAttribute.get(),
                 userObjectClass.get(),
-                USE_CONNECTION_POOL,
+                NO_CONNECTION_POOL,
                 NO_CONNECTION_TIMEOUT,
                 NO_READ_TIME_OUT,
                 maxRetries.get(),
@@ -159,7 +160,7 @@ public class LdapRepositoryConfiguration {
         String userIdAttribute = configuration.getString("[@userIdAttribute]");
         String userObjectClass = configuration.getString("[@userObjectClass]");
         // Default is to use connection pooling
-        boolean useConnectionPool = configuration.getBoolean("[@useConnectionPool]", USE_CONNECTION_POOL);
+        boolean useConnectionPool = configuration.getBoolean("[@useConnectionPool]", NO_CONNECTION_POOL);
         int connectionTimeout = configuration.getInt("[@connectionTimeout]", NO_CONNECTION_TIMEOUT);
         int readTimeout = configuration.getInt("[@readTimeout]", NO_READ_TIME_OUT);
         // Default maximum retries is 1, which allows an alternate connection to
@@ -286,7 +287,7 @@ public class LdapRepositoryConfiguration {
      * UserId of the administrator
      * The administrator is allowed to log in as other users
      */
-    private final Optional<String> administratorId;
+    private final Optional<Username> administratorId;
 
     private LdapRepositoryConfiguration(String ldapHost, String principal, String credentials, String userBase, String userIdAttribute,
                                        String userObjectClass, boolean useConnectionPool, int connectionTimeout, int readTimeout,
@@ -309,7 +310,7 @@ public class LdapRepositoryConfiguration {
         this.scale = scale;
         this.restriction = restriction;
         this.filter = filter;
-        this.administratorId = administratorId;
+        this.administratorId = administratorId.map(Username::of);
 
         checkState();
     }
@@ -390,7 +391,7 @@ public class LdapRepositoryConfiguration {
         return filter;
     }
 
-    public Optional<String> getAdministratorId() {
+    public Optional<Username> getAdministratorId() {
         return administratorId;
     }
 

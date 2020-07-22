@@ -18,43 +18,57 @@
  ****************************************************************/
 package org.apache.james.imap.decode.parser;
 
-import java.util.List;
+import static org.apache.james.imap.api.message.FetchData.Item.BODY;
+import static org.apache.james.imap.api.message.FetchData.Item.BODY_STRUCTURE;
+import static org.apache.james.imap.api.message.FetchData.Item.ENVELOPE;
+import static org.apache.james.imap.api.message.FetchData.Item.FLAGS;
+import static org.apache.james.imap.api.message.FetchData.Item.INTERNAL_DATE;
+import static org.apache.james.imap.api.message.FetchData.Item.MODSEQ;
+import static org.apache.james.imap.api.message.FetchData.Item.SIZE;
+import static org.apache.james.imap.api.message.FetchData.Item.UID;
 
-import org.apache.james.imap.api.ImapCommand;
+import java.util.List;
+import java.util.Locale;
+
 import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.api.ImapMessage;
+import org.apache.james.imap.api.Tag;
 import org.apache.james.imap.api.display.HumanReadableText;
 import org.apache.james.imap.api.message.BodyFetchElement;
 import org.apache.james.imap.api.message.FetchData;
 import org.apache.james.imap.api.message.IdRange;
+import org.apache.james.imap.api.message.SectionType;
+import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapSession;
+import org.apache.james.imap.decode.DecodingException;
 import org.apache.james.imap.decode.FetchPartPathDecoder;
 import org.apache.james.imap.decode.ImapRequestLineReader;
-import org.apache.james.imap.decode.ImapRequestLineReader.CharacterValidator;
+import org.apache.james.imap.decode.ImapRequestLineReader.StringMatcherCharacterValidator;
 import org.apache.james.imap.message.request.FetchRequest;
-import org.apache.james.protocols.imap.DecodingException;
 
 /**
  * Parse FETCH commands
  */
 public class FetchCommandParser extends AbstractUidCommandParser {
-    private static final byte[] CHANGEDSINCE = "CHANGEDSINCE".getBytes();
-    private static final byte[] VANISHED = "VANISHED".getBytes();
+    private static final String CHANGEDSINCE = "CHANGEDSINCE";
+    private static final String VANISHED = "VANISHED";
 
-    public FetchCommandParser() {
-        super(ImapCommand.selectedStateCommand(ImapConstants.FETCH_COMMAND_NAME));
+    public FetchCommandParser(StatusResponseFactory statusResponseFactory) {
+        super(ImapConstants.FETCH_COMMAND, statusResponseFactory);
     }
 
     /**
      * Create a {@link FetchData} by reading from the
      * {@link ImapRequestLineReader}
-     * 
-     * @param request
+     *
      * @return fetchData
-     * @throws DecodingException
      */
-    protected FetchData fetchRequest(ImapRequestLineReader request) throws DecodingException {
-        FetchData fetch = new FetchData();
+    private FetchData fetchRequest(ImapRequestLineReader request, boolean useUid) throws DecodingException {
+        FetchData.Builder fetch = FetchData.builder();
+
+        if (useUid) {
+            fetch.fetch(UID);
+        }
 
         char next = nextNonSpaceChar(request);
         if (request.nextChar() == '(') {
@@ -76,35 +90,13 @@ public class FetchCommandParser extends AbstractUidCommandParser {
                 switch (next) {
                 case 'C':
                     // Now check for the CHANGEDSINCE option which is part of CONDSTORE
-                    request.consumeWord(new CharacterValidator() {
-                        int pos = 0;
-                        @Override
-                        public boolean isValid(char chr) {
-                            if (pos > CHANGEDSINCE.length) {
-                                return false;
-                            } else {
-                                return CHANGEDSINCE[pos++] == ImapRequestLineReader.cap(chr);
-                            }
-                        }
-                    });
-                    fetch.setChangedSince(request.number(true));
-                    
+                    request.consumeWord(StringMatcherCharacterValidator.ignoreCase(CHANGEDSINCE));
+                    fetch.changedSince(request.number(true));
                     break;
-                
                 case 'V':
                     // Check for the VANISHED option which is part of QRESYNC
-                    request.consumeWord(new CharacterValidator() {
-                        int pos = 0;
-                        @Override
-                        public boolean isValid(char chr) {
-                            if (pos > VANISHED.length) {
-                                return false;
-                            } else {
-                                return VANISHED[pos++] == ImapRequestLineReader.cap(chr);
-                            }
-                        }
-                    });
-                    fetch.setVanished(true);
+                    request.consumeWord(StringMatcherCharacterValidator.ignoreCase(VANISHED));
+                    fetch.vanished(true);
                     break;
                 default:
                     break;
@@ -119,55 +111,16 @@ public class FetchCommandParser extends AbstractUidCommandParser {
 
         }
 
-        return fetch;
+        return fetch.build();
     }
 
-    private void addNextElement(ImapRequestLineReader reader, FetchData fetch) throws DecodingException {
+    private void addNextElement(ImapRequestLineReader reader, FetchData.Builder fetch) throws DecodingException {
         // String name = element.toString();
         String name = readWord(reader, " [)\r\n");
         char next = reader.nextChar();
         // Simple elements with no '[]' parameters.
         if (next != '[') {
-            if ("FAST".equalsIgnoreCase(name)) {
-                fetch.setFlags(true);
-                fetch.setInternalDate(true);
-                fetch.setSize(true);
-            } else if ("FULL".equalsIgnoreCase(name)) {
-                fetch.setFlags(true);
-                fetch.setInternalDate(true);
-                fetch.setSize(true);
-                fetch.setEnvelope(true);
-                fetch.setBody(true);
-            } else if ("ALL".equalsIgnoreCase(name)) {
-                fetch.setFlags(true);
-                fetch.setInternalDate(true);
-                fetch.setSize(true);
-                fetch.setEnvelope(true);
-            } else if ("FLAGS".equalsIgnoreCase(name)) {
-                fetch.setFlags(true);
-            } else if ("RFC822.SIZE".equalsIgnoreCase(name)) {
-                fetch.setSize(true);
-            } else if ("ENVELOPE".equalsIgnoreCase(name)) {
-                fetch.setEnvelope(true);
-            } else if ("INTERNALDATE".equalsIgnoreCase(name)) {
-                fetch.setInternalDate(true);
-            } else if ("BODY".equalsIgnoreCase(name)) {
-                fetch.setBody(true);
-            } else if ("BODYSTRUCTURE".equalsIgnoreCase(name)) {
-                fetch.setBodyStructure(true);
-            } else if ("UID".equalsIgnoreCase(name)) {
-                fetch.setUid(true);
-            } else if ("RFC822".equalsIgnoreCase(name)) {
-                fetch.add(BodyFetchElement.createRFC822(), false);
-            } else if ("RFC822.HEADER".equalsIgnoreCase(name)) {
-                fetch.add(BodyFetchElement.createRFC822Header(), true);
-            } else if ("RFC822.TEXT".equalsIgnoreCase(name)) {
-                fetch.add(BodyFetchElement.createRFC822Text(), false);
-            } else if ("MODSEQ".equalsIgnoreCase(name)) {
-                fetch.setModSeq(true);
-            } else {
-                throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Invalid fetch attribute: " + name);
-            }
+            addNextName(fetch, name);
         } else {
             reader.consumeChar('[');
 
@@ -175,8 +128,8 @@ public class FetchCommandParser extends AbstractUidCommandParser {
 
             reader.consumeChar(']');
 
-            final Long firstOctet;
-            final Long numberOfOctets;
+            Long firstOctet;
+            Long numberOfOctets;
             if (reader.nextChar() == '<') {
                 reader.consumeChar('<');
                 firstOctet = reader.number();
@@ -192,61 +145,68 @@ public class FetchCommandParser extends AbstractUidCommandParser {
                 numberOfOctets = null;
             }
 
-            final BodyFetchElement bodyFetchElement = createBodyElement(parameter, firstOctet, numberOfOctets);
-            final boolean isPeek = isPeek(name);
+            BodyFetchElement bodyFetchElement = createBodyElement(parameter, firstOctet, numberOfOctets);
+            boolean isPeek = isPeek(name);
             fetch.add(bodyFetchElement, isPeek);
         }
     }
 
-    private boolean isPeek(String name) throws DecodingException {
-        final boolean isPeek;
-        if ("BODY".equalsIgnoreCase(name)) {
-            isPeek = false;
-        } else if ("BODY.PEEK".equalsIgnoreCase(name)) {
-            isPeek = true;
-        } else {
-            throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Invalid fetch attibute: " + name + "[]");
+    private FetchData.Builder addNextName(FetchData.Builder fetch, String name) throws DecodingException {
+        String capitalizedName = name.toUpperCase(Locale.US);
+        switch (capitalizedName) {
+            case "FAST":
+                return fetch.fetch(FLAGS, INTERNAL_DATE, SIZE);
+            case "FULL":
+                return fetch.fetch(FLAGS, INTERNAL_DATE, SIZE, ENVELOPE, BODY);
+            case "ALL":
+                return fetch.fetch(FLAGS, INTERNAL_DATE, SIZE, ENVELOPE);
+            case "FLAGS":
+                return fetch.fetch(FLAGS);
+            case "RFC822.SIZE":
+                return fetch.fetch(SIZE);
+            case "ENVELOPE":
+                return fetch.fetch(ENVELOPE);
+            case "INTERNALDATE":
+                return fetch.fetch(INTERNAL_DATE);
+            case "BODY":
+                return fetch.fetch(BODY);
+            case "BODYSTRUCTURE":
+                return fetch.fetch(BODY_STRUCTURE);
+            case "UID":
+                return fetch.fetch(UID);
+            case "RFC822":
+                return fetch.add(BodyFetchElement.createRFC822(), false);
+            case "RFC822.HEADER":
+                return fetch.add(BodyFetchElement.createRFC822Header(), true);
+            case "RFC822.TEXT":
+                return fetch.add(BodyFetchElement.createRFC822Text(), false);
+            case "MODSEQ":
+                return fetch.fetch(MODSEQ);
+            default:
+                throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Invalid fetch attribute: " + name);
         }
-        return isPeek;
+    }
+
+    private boolean isPeek(String name) throws DecodingException {
+        switch (name.toUpperCase(Locale.US)) {
+            case "BODY":
+                return false;
+            case "BODY.PEEK":
+                return true;
+            default:
+                throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Invalid fetch attibute: " + name + "[]");
+        }
     }
 
     private BodyFetchElement createBodyElement(String parameter, Long firstOctet, Long numberOfOctets) throws DecodingException {
-        final String responseName = "BODY[" + parameter + "]";
+        String responseName = "BODY[" + parameter + "]";
         FetchPartPathDecoder decoder = new FetchPartPathDecoder();
         decoder.decode(parameter);
-        final int sectionType = getSectionType(decoder);
+        SectionType sectionType = decoder.getSpecifier();
 
-        final List<String> names = decoder.getNames();
-        final int[] path = decoder.getPath();
+        List<String> names = decoder.getNames();
+        int[] path = decoder.getPath();
         return new BodyFetchElement(responseName, sectionType, path, names, firstOctet, numberOfOctets);
-    }
-
-    private int getSectionType(FetchPartPathDecoder decoder) throws DecodingException {
-        final int specifier = decoder.getSpecifier();
-        final int sectionType;
-        switch (specifier) {
-        case FetchPartPathDecoder.CONTENT:
-            sectionType = BodyFetchElement.CONTENT;
-            break;
-        case FetchPartPathDecoder.HEADER:
-            sectionType = BodyFetchElement.HEADER;
-            break;
-        case FetchPartPathDecoder.HEADER_FIELDS:
-            sectionType = BodyFetchElement.HEADER_FIELDS;
-            break;
-        case FetchPartPathDecoder.HEADER_NOT_FIELDS:
-            sectionType = BodyFetchElement.HEADER_NOT_FIELDS;
-            break;
-        case FetchPartPathDecoder.MIME:
-            sectionType = BodyFetchElement.MIME;
-            break;
-        case FetchPartPathDecoder.TEXT:
-            sectionType = BodyFetchElement.TEXT;
-            break;
-        default:
-            throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Section type is unsupported.");
-        }
-        return sectionType;
     }
 
     private String readWord(ImapRequestLineReader request, String terminator) throws DecodingException {
@@ -270,9 +230,9 @@ public class FetchCommandParser extends AbstractUidCommandParser {
     }
 
     @Override
-    protected ImapMessage decode(ImapCommand command, ImapRequestLineReader request, String tag, boolean useUids, ImapSession session) throws DecodingException {
+    protected ImapMessage decode(ImapRequestLineReader request, Tag tag, boolean useUids, ImapSession session) throws DecodingException {
         IdRange[] idSet = request.parseIdRange(session);
-        FetchData fetch = fetchRequest(request);
+        FetchData fetch = fetchRequest(request, useUids);
 
         // Check if we have VANISHED and and UID FETCH as its only allowed there
         //
@@ -283,7 +243,7 @@ public class FetchCommandParser extends AbstractUidCommandParser {
         
         request.eol();
 
-        return new FetchRequest(command, useUids, idSet, fetch, tag);
+        return new FetchRequest(useUids, idSet, fetch, tag);
     }
 
 }

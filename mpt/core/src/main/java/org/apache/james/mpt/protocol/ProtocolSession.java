@@ -21,6 +21,7 @@ package org.apache.james.mpt.protocol;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -508,7 +509,7 @@ public class ProtocolSession implements ProtocolInteractor {
         }
     }
 
-    private class ReinitElement implements ProtocolElement {
+    private static class ReinitElement implements ProtocolElement {
 
         private final int sessionNumber;
 
@@ -602,7 +603,7 @@ public class ProtocolSession implements ProtocolInteractor {
     /**
      * Allow you to wait a given time at a given point of the test script
      */
-    private class WaitElement implements ProtocolElement {
+    private static class WaitElement implements ProtocolElement {
 
         private final long timeToWaitInMs;
 
@@ -621,7 +622,7 @@ public class ProtocolSession implements ProtocolInteractor {
         }
     }
 
-    private class AwaitElement implements ProtocolElement {
+    private static class AwaitElement implements ProtocolElement {
         private final int sessionNumber;
 
         private AwaitElement(int sessionNumber) {
@@ -642,7 +643,7 @@ public class ProtocolSession implements ProtocolInteractor {
     /**
      * Allow you to wait a given time at a given point of the test script
      */
-    private class LogElement implements ProtocolElement {
+    private static class LogElement implements ProtocolElement {
 
         private final LolLevel level;
         private final String message;
@@ -717,7 +718,7 @@ public class ProtocolSession implements ProtocolInteractor {
         String result = "ProtocolSession ( " + "continued = " + this.continued + TAB + "continuationExpected = "
                 + this.continuationExpected + TAB + "maxSessionNumber = " + this.maxSessionNumber + TAB
                 + "testElements = " + this.testElements + TAB + "elementsIterator = " + this.elementsIterator + TAB
-                + "sessions = " + this.sessions + TAB + "nextTest = " + this.nextTest + TAB + "continueAfterFailure = "
+                + "sessions = " + Arrays.toString(this.sessions) + TAB + "nextTest = " + this.nextTest + TAB + "continueAfterFailure = "
                 + this.continueAfterFailure + TAB + " )";
 
         return result;

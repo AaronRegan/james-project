@@ -22,13 +22,13 @@ package org.apache.james.imap.processor;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.james.imap.api.ImapCommand;
 import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.api.ImapMessage;
-import org.apache.james.imap.api.ImapSessionUtils;
 import org.apache.james.imap.api.display.HumanReadableText;
+import org.apache.james.imap.api.message.Capability;
 import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.UidRange;
+import org.apache.james.imap.api.message.request.ImapRequest;
 import org.apache.james.imap.api.message.response.StatusResponse;
 import org.apache.james.imap.api.message.response.StatusResponse.ResponseCode;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
@@ -38,36 +38,39 @@ import org.apache.james.imap.api.process.SearchResUtil;
 import org.apache.james.imap.api.process.SelectedMailbox;
 import org.apache.james.imap.main.PathConverter;
 import org.apache.james.imap.message.request.AbstractMailboxSelectionRequest;
+import org.apache.james.imap.message.request.AbstractMailboxSelectionRequest.ClientSpecifiedUidValidity;
 import org.apache.james.imap.message.response.ExistsResponse;
 import org.apache.james.imap.message.response.RecentResponse;
 import org.apache.james.imap.processor.base.SelectedMailboxImpl;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
-import org.apache.james.mailbox.MessageManager.MetaData;
-import org.apache.james.mailbox.MessageManager.MetaData.FetchGroup;
+import org.apache.james.mailbox.MessageManager.MailboxMetaData;
+import org.apache.james.mailbox.MessageManager.MailboxMetaData.FetchGroup;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.events.EventBus;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxNotFoundException;
 import org.apache.james.mailbox.exception.MessageRangeException;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageRange;
+import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.metrics.api.MetricFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.ImmutableList;
 
-abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequest> extends AbstractMailboxProcessor<M> implements PermitEnableCapabilityProcessor {
+abstract class AbstractSelectionProcessor<R extends AbstractMailboxSelectionRequest> extends AbstractMailboxProcessor<R> implements PermitEnableCapabilityProcessor {
     private static final Logger LOGGER = LoggerFactory.getLogger(AbstractSelectionProcessor.class);
-    private static final List<String> CAPS = ImmutableList.of(ImapConstants.SUPPORTS_QRESYNC, ImapConstants.SUPPORTS_CONDSTORE);
+    private static final List<Capability> CAPS = ImmutableList.of(ImapConstants.SUPPORTS_QRESYNC, ImapConstants.SUPPORTS_CONDSTORE);
 
     private final StatusResponseFactory statusResponseFactory;
     private final boolean openReadOnly;
     private final EventBus eventBus;
     
-    public AbstractSelectionProcessor(Class<M> acceptableClass, ImapProcessor next, MailboxManager mailboxManager, StatusResponseFactory statusResponseFactory, boolean openReadOnly,
+    public AbstractSelectionProcessor(Class<R> acceptableClass, ImapProcessor next, MailboxManager mailboxManager, StatusResponseFactory statusResponseFactory, boolean openReadOnly,
                                       MetricFactory metricFactory, EventBus eventBus) {
         super(acceptableClass, next, mailboxManager, statusResponseFactory, metricFactory);
         this.statusResponseFactory = statusResponseFactory;
@@ -77,26 +80,26 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
     }
 
     @Override
-    protected void doProcess(M request, ImapSession session, String tag, ImapCommand command, Responder responder) {
+    protected void processRequest(R request, ImapSession session, Responder responder) {
         final String mailboxName = request.getMailboxName();
         try {
             final MailboxPath fullMailboxPath = PathConverter.forSession(session).buildFullPath(mailboxName);
 
-            respond(tag, command, session, fullMailboxPath, request, responder);
+            respond(session, fullMailboxPath, request, responder);
            
             
         } catch (MailboxNotFoundException e) {
             LOGGER.debug("Select failed as mailbox does not exist {}", mailboxName, e);
-            responder.respond(statusResponseFactory.taggedNo(tag, command, HumanReadableText.FAILURE_NO_SUCH_MAILBOX));
+            responder.respond(statusResponseFactory.taggedNo(request.getTag(), request.getCommand(), HumanReadableText.FAILURE_NO_SUCH_MAILBOX));
         } catch (MailboxException e) {
             LOGGER.error("Select failed for mailbox {}", mailboxName, e);
-            no(command, tag, responder, HumanReadableText.SELECT);
+            no(request, responder, HumanReadableText.SELECT);
         } 
     }
 
-    private void respond(String tag, ImapCommand command, ImapSession session, MailboxPath fullMailboxPath, AbstractMailboxSelectionRequest request, Responder responder) throws MailboxException, MessageRangeException {
-        
-        Long lastKnownUidValidity = request.getLastKnownUidValidity();
+    private void respond(ImapSession session, MailboxPath fullMailboxPath, AbstractMailboxSelectionRequest request, Responder responder) throws MailboxException, MessageRangeException {
+
+        ClientSpecifiedUidValidity lastKnownUidValidity = request.getLastKnownUidValidity();
         Long modSeq = request.getKnownModSeq();
         IdRange[] knownSequences = request.getKnownSequenceSet();
         UidRange[] knownUids = request.getKnownUidSet();
@@ -110,12 +113,12 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
         //    Resynchronization parameter to SELECT/EXAMINE command is specified
         //    and the client hasn't issued "ENABLE QRESYNC" in the current
         //    connection.
-        if (lastKnownUidValidity != null && !EnableProcessor.getEnabledCapabilities(session).contains(ImapConstants.SUPPORTS_QRESYNC)) {
-            taggedBad(command, tag, responder, HumanReadableText.QRESYNC_NOT_ENABLED);
+        if (!lastKnownUidValidity.isUnknown() && !EnableProcessor.getEnabledCapabilities(session).contains(ImapConstants.SUPPORTS_QRESYNC)) {
+            taggedBad(request, responder, HumanReadableText.QRESYNC_NOT_ENABLED);
             return;
         }
 
-        final MessageManager.MetaData metaData = selectMailbox(fullMailboxPath, session);
+        final MailboxMetaData metaData = selectMailbox(fullMailboxPath, session);
         final SelectedMailbox selected = session.getSelected();
         MessageUid firstUnseen = metaData.getFirstUnseen();
         
@@ -132,7 +135,7 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
         while (unseen(responder, firstUnseen, selected) == false) {
             // if we not was able to get find the unseen within 5 retries we should just not send it
             if (retryCount == 5) {
-                LOGGER.info("Unable to uid for unseen message {} in mailbox {}", firstUnseen, selected.getPath());
+                LOGGER.info("Unable to uid for unseen message {} in mailbox {}", firstUnseen, selected.getMailboxId().serialize());
                 break;
             }
             firstUnseen = selectMailbox(fullMailboxPath, session).getFirstUnseen();
@@ -152,11 +155,11 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
         // 
         // If the mailbox does not store the mod-sequence in a permanent way its needed to not process the QRESYNC paramters
         // The same is true if none are given ;)
-        if (metaData.isModSeqPermanent() && lastKnownUidValidity != null) {
-            if (lastKnownUidValidity == metaData.getUidValidity()) {
+        if (metaData.isModSeqPermanent() && !lastKnownUidValidity.isUnknown()) {
+            if (lastKnownUidValidity.correspondsTo(metaData.getUidValidity())) {
                 
                 final MailboxManager mailboxManager = getMailboxManager();
-                final MailboxSession mailboxSession = ImapSessionUtils.getMailboxSession(session);
+                final MailboxSession mailboxSession = session.getMailboxSession();
                 final MessageManager mailbox = mailboxManager.getMailbox(fullMailboxPath, mailboxSession);
 
                 //  If the provided UIDVALIDITY matches that of the selected mailbox, the
@@ -257,7 +260,7 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
                                         filteredUidSet.add(r);
                                     }
                                 }
-                                uidSet = filteredUidSet.toArray(new UidRange[0]);
+                                uidSet = filteredUidSet.toArray(UidRange[]::new);
 
                                 break;
                             }
@@ -298,13 +301,13 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
                     //
                     respondVanished(mailboxSession, mailbox, ranges, modSeq, metaData, responder);
                 }
-                taggedOk(responder, tag, command, metaData, HumanReadableText.SELECT);
+                taggedOk(responder, request, metaData, HumanReadableText.SELECT);
             } else {
                 
-                taggedOk(responder, tag, command, metaData, HumanReadableText.QRESYNC_UIDVALIDITY_MISMATCH);
+                taggedOk(responder, request, metaData, HumanReadableText.QRESYNC_UIDVALIDITY_MISMATCH);
             }
         } else {
-            taggedOk(responder, tag, command, metaData, HumanReadableText.SELECT);
+            taggedOk(responder, request, metaData, HumanReadableText.SELECT);
         }
 
         // Reset the saved sequence-set after successful SELECT / EXAMINE
@@ -314,10 +317,10 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
 
 
 
-    private void highestModSeq(Responder responder, MetaData metaData, SelectedMailbox selected) {
+    private void highestModSeq(Responder responder, MailboxMetaData metaData, SelectedMailbox selected) {
         final StatusResponse untaggedOk;
         if (metaData.isModSeqPermanent()) {
-            final long highestModSeq = metaData.getHighestModSeq();
+            final ModSeq highestModSeq = metaData.getHighestModSeq();
             untaggedOk = statusResponseFactory.untaggedOk(HumanReadableText.HIGHEST_MOD_SEQ, ResponseCode.highestModSeq(highestModSeq));
         } else {
             untaggedOk = statusResponseFactory.untaggedOk(HumanReadableText.NO_MOD_SEQ, ResponseCode.noModSeq());
@@ -325,13 +328,13 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
         responder.respond(untaggedOk);        
     }
 
-    private void uidNext(Responder responder, MessageManager.MetaData metaData) throws MailboxException {
+    private void uidNext(Responder responder, MailboxMetaData metaData) throws MailboxException {
         final MessageUid uid = metaData.getUidNext();
         final StatusResponse untaggedOk = statusResponseFactory.untaggedOk(HumanReadableText.UIDNEXT, ResponseCode.uidNext(uid));
         responder.respond(untaggedOk);
     }
 
-    private void taggedOk(Responder responder, String tag, ImapCommand command, MetaData metaData, HumanReadableText text) {
+    private void taggedOk(Responder responder, ImapRequest request, MailboxMetaData metaData, HumanReadableText text) {
         final boolean writeable = metaData.isWriteable() && !openReadOnly;
         final ResponseCode code;
         if (writeable) {
@@ -339,30 +342,30 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
         } else {
             code = ResponseCode.readOnly();
         }
-        final StatusResponse taggedOk = statusResponseFactory.taggedOk(tag, command, text, code);
+        final StatusResponse taggedOk = statusResponseFactory.taggedOk(request.getTag(), request.getCommand(), text, code);
         responder.respond(taggedOk);
     }
 
     private boolean unseen(Responder responder, MessageUid firstUnseen, SelectedMailbox selected) throws MailboxException {
         if (firstUnseen != null) {
             final MessageUid unseenUid = firstUnseen;
-            int msn = selected.msn(unseenUid);
 
-            if (msn == SelectedMailbox.NO_SUCH_MESSAGE) {
-                LOGGER.debug("No message found with uid {} in mailbox {}", unseenUid, selected.getPath().asString());
+            return selected.msn(unseenUid).fold(() -> {
+                LOGGER.debug("No message found with uid {} in mailbox {}", unseenUid, selected.getMailboxId().serialize());
                 return false;
-            } 
-
-            final StatusResponse untaggedOk = statusResponseFactory.untaggedOk(HumanReadableText.unseen(msn), ResponseCode.unseen(msn));
-            responder.respond(untaggedOk);
+            }, msn -> {
+                final StatusResponse untaggedOk = statusResponseFactory.untaggedOk(HumanReadableText.unseen(msn), ResponseCode.unseen(msn));
+                responder.respond(untaggedOk);
+                return true;
+            });
         }
         return true;
 
 
     }
 
-    private void uidValidity(Responder responder, MessageManager.MetaData metaData) throws MailboxException {
-        final long uidValidity = metaData.getUidValidity();
+    private void uidValidity(Responder responder, MailboxMetaData metaData) throws MailboxException {
+        final UidValidity uidValidity = metaData.getUidValidity();
         final StatusResponse untaggedOk = statusResponseFactory.untaggedOk(HumanReadableText.UID_VALIDITY, ResponseCode.uidValidity(uidValidity));
         responder.respond(untaggedOk);
     }
@@ -373,20 +376,20 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
         responder.respond(recentResponse);
     }
 
-    private void exists(Responder responder, MessageManager.MetaData metaData) throws MailboxException {
+    private void exists(Responder responder, MailboxMetaData metaData) throws MailboxException {
         final long messageCount = metaData.getMessageCount();
         final ExistsResponse existsResponse = new ExistsResponse(messageCount);
         responder.respond(existsResponse);
     }
 
-    private MessageManager.MetaData selectMailbox(MailboxPath mailboxPath, ImapSession session) throws MailboxException {
+    private MailboxMetaData selectMailbox(MailboxPath mailboxPath, ImapSession session) throws MailboxException {
         final MailboxManager mailboxManager = getMailboxManager();
-        final MailboxSession mailboxSession = ImapSessionUtils.getMailboxSession(session);
+        final MailboxSession mailboxSession = session.getMailboxSession();
         final MessageManager mailbox = mailboxManager.getMailbox(mailboxPath, mailboxSession);
 
         final SelectedMailbox sessionMailbox;
         final SelectedMailbox currentMailbox = session.getSelected();
-        if (currentMailbox == null || !currentMailbox.getPath().equals(mailboxPath)) {
+        if (currentMailbox == null || !currentMailbox.getMailboxId().equals(mailbox.getId())) {
             
             // QRESYNC EXTENSION
             //
@@ -396,7 +399,7 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
             if (currentMailbox != null) {
                 getStatusResponseFactory().untaggedOk(HumanReadableText.QRESYNC_CLOSED, ResponseCode.closed());
             }
-            session.selected(new SelectedMailboxImpl(getMailboxManager(), eventBus, session, mailboxPath));
+            session.selected(new SelectedMailboxImpl(getMailboxManager(), eventBus, session, mailbox));
 
             sessionMailbox = session.getSelected();
             
@@ -404,13 +407,13 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
             // TODO: Check if we need to handle CONDSTORE there too 
             sessionMailbox = currentMailbox;
         }
-        final MessageManager.MetaData metaData = mailbox.getMetaData(!openReadOnly, mailboxSession, MessageManager.MetaData.FetchGroup.FIRST_UNSEEN);
+        final MailboxMetaData metaData = mailbox.getMetaData(!openReadOnly, mailboxSession, MailboxMetaData.FetchGroup.FIRST_UNSEEN);
         addRecent(metaData, sessionMailbox);
         return metaData;
     }
 
 
-    private void addRecent(MessageManager.MetaData metaData, SelectedMailbox sessionMailbox) throws MailboxException {
+    private void addRecent(MailboxMetaData metaData, SelectedMailbox sessionMailbox) throws MailboxException {
         final List<MessageUid> recentUids = metaData.getRecent();
         for (MessageUid uid : recentUids) {
             sessionMailbox.addRecent(uid);
@@ -418,17 +421,17 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
     }
 
     @Override
-    public List<String> getImplementedCapabilities(ImapSession session) {
+    public List<Capability> getImplementedCapabilities(ImapSession session) {
         return CAPS;
     }
 
     @Override
-    public List<String> getPermitEnableCapabilities(ImapSession session) {
+    public List<Capability> getPermitEnableCapabilities(ImapSession session) {
         return CAPS;
     }
 
     @Override
-    public void enable(ImapMessage message, Responder responder, ImapSession session, String capability) throws EnableException {
+    public void enable(ImapMessage message, Responder responder, ImapSession session, Capability capability) throws EnableException {
 
         if (EnableProcessor.getEnabledCapabilities(session).contains(capability) == false) {
             SelectedMailbox sm = session.getSelected();
@@ -436,18 +439,19 @@ abstract class AbstractSelectionProcessor<M extends AbstractMailboxSelectionRequ
             // QRESYNC or CONDSTORE
             //
             // See http://www.dovecot.org/list/dovecot/2008-March/029561.html
-            if (capability.equalsIgnoreCase(ImapConstants.SUPPORTS_CONDSTORE) || capability.equalsIgnoreCase(ImapConstants.SUPPORTS_QRESYNC)) {
+            if (capability.equals(ImapConstants.SUPPORTS_CONDSTORE) || capability.equals(ImapConstants.SUPPORTS_QRESYNC)) {
                 try {
-                    MetaData metaData  = null;
+                    MailboxMetaData metaData  = null;
                     boolean send = false;
                     if (sm != null) {
-                        MessageManager mailbox = getSelectedMailbox(session);
-                        metaData = mailbox.getMetaData(false, ImapSessionUtils.getMailboxSession(session), FetchGroup.NO_COUNT);
+                        MessageManager mailbox = getSelectedMailbox(session)
+                            .orElseThrow(() -> new MailboxException("Session not in SELECTED state"));
+                        metaData = mailbox.getMetaData(false, session.getMailboxSession(), FetchGroup.NO_COUNT);
                         send = true;
                     }
                     condstoreEnablingCommand(session, responder, metaData, send);
                 } catch (MailboxException e) {
-                    throw new EnableException("Unable to enable " + capability, e);
+                    throw new EnableException("Unable to enable " + capability.asString(), e);
                 }
             }
             

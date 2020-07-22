@@ -19,6 +19,7 @@
 
 package org.apache.james.imapserver.netty;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -27,7 +28,6 @@ import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.james.imap.api.ImapMessage;
 import org.apache.james.imap.api.ImapSessionState;
 import org.apache.james.imap.api.process.ImapSession;
@@ -42,6 +42,8 @@ import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.handler.codec.frame.FrameDecoder;
 
+import com.google.common.annotations.VisibleForTesting;
+
 /**
  * {@link FrameDecoder} which will decode via and {@link ImapDecoder} instance
  */
@@ -50,7 +52,8 @@ public class ImapRequestFrameDecoder extends FrameDecoder implements NettyConsta
     private final ImapDecoder decoder;
     private final int inMemorySizeLimit;
     private final int literalSizeLimit;
-    private static final String NEEDED_DATA = "NEEDED_DATA";
+    @VisibleForTesting
+    static final String NEEDED_DATA = "NEEDED_DATA";
     private static final String STORED_DATA = "STORED_DATA";
     private static final String WRITTEN_DATA = "WRITTEN_DATA";
     private static final String OUTPUT_STREAM = "OUTPUT_STREAM";
@@ -137,8 +140,11 @@ public class ImapRequestFrameDecoder extends FrameDecoder implements NettyConsta
                              */
                             @Override
                             public void close() throws IOException {
-                                super.close();
-                                FileUtils.forceDelete(f);
+                                try {
+                                    super.close();
+                                } finally {
+                                    f.delete();
+                                }
                             }
 
                         }, retry);
@@ -208,6 +214,14 @@ public class ImapRequestFrameDecoder extends FrameDecoder implements NettyConsta
                 
                 buffer.resetReaderIndex();
                 return null;
+            } finally {
+                if (reader instanceof Closeable) {
+                    try {
+                        ((Closeable) reader).close();
+                    } catch (IOException ignored) {
+                        // Nothing to do
+                    }
+                }
             }
         } else {
             // The session was null so may be the case because the channel was already closed but there were still bytes in the buffer.
@@ -221,19 +235,20 @@ public class ImapRequestFrameDecoder extends FrameDecoder implements NettyConsta
 
     @Override
     protected synchronized ChannelBuffer newCumulationBuffer(ChannelHandlerContext ctx, int minimumCapacity) {
-        @SuppressWarnings("unchecked")
         Map<String, Object> attachment = (Map<String, Object>) ctx.getAttachment();
-        int size = (Integer) attachment.get(NEEDED_DATA);
-        
-        if (inMemorySizeLimit > 0) {
-            return ChannelBuffers.dynamicBuffer(Math.min(size, inMemorySizeLimit), ctx.getChannel().getConfig().getBufferFactory());
-        } else {
+        Object sizeAsObject = attachment.get(NEEDED_DATA);
+        if (sizeAsObject != null) {
+            @SuppressWarnings("unchecked")
+            int size = (Integer) sizeAsObject;
 
             if (size > 0) {
-                return ChannelBuffers.dynamicBuffer(size, ctx.getChannel().getConfig().getBufferFactory());
+                int sanitizedInMemorySizeLimit = Math.max(0, inMemorySizeLimit);
+                int sanitizedSize = Math.min(sanitizedInMemorySizeLimit, size);
+
+                return ChannelBuffers.dynamicBuffer(sanitizedSize, ctx.getChannel().getConfig().getBufferFactory());
             }
-            return super.newCumulationBuffer(ctx, minimumCapacity);
         }
+        return super.newCumulationBuffer(ctx, minimumCapacity);
     }
 
 }

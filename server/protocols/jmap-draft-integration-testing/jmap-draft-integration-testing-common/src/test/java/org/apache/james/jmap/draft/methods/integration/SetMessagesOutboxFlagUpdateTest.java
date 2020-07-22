@@ -23,13 +23,13 @@ import static io.restassured.RestAssured.given;
 import static io.restassured.RestAssured.with;
 import static io.restassured.config.EncoderConfig.encoderConfig;
 import static io.restassured.config.RestAssuredConfig.newConfig;
+import static org.apache.james.jmap.JMAPTestingConstants.ARGUMENTS;
+import static org.apache.james.jmap.JMAPTestingConstants.BOB;
+import static org.apache.james.jmap.JMAPTestingConstants.BOB_PASSWORD;
+import static org.apache.james.jmap.JMAPTestingConstants.DOMAIN;
 import static org.apache.james.jmap.JmapCommonRequests.getOutboxId;
 import static org.apache.james.jmap.JmapCommonRequests.getSetMessagesUpdateOKResponseAssertions;
 import static org.apache.james.jmap.JmapURIBuilder.baseUri;
-import static org.apache.james.jmap.TestingConstants.ARGUMENTS;
-import static org.apache.james.jmap.TestingConstants.BOB;
-import static org.apache.james.jmap.TestingConstants.BOB_PASSWORD;
-import static org.apache.james.jmap.TestingConstants.DOMAIN;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -39,16 +39,18 @@ import java.util.Set;
 
 import org.apache.commons.lang3.NotImplementedException;
 import org.apache.james.GuiceJamesServer;
+import org.apache.james.core.Username;
+import org.apache.james.jmap.AccessToken;
 import org.apache.james.jmap.HttpJmapAuthentication;
-import org.apache.james.jmap.api.access.AccessToken;
+import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.apache.james.mailbox.DefaultMailboxes;
 import org.apache.james.mailbox.probe.MailboxProbe;
 import org.apache.james.modules.MailboxProbeImpl;
 import org.apache.james.probe.DataProbe;
 import org.apache.james.queue.api.MailQueue;
 import org.apache.james.queue.api.MailQueueFactory;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.jmap.draft.JmapGuiceProbe;
 import org.apache.mailet.Mail;
 import org.junit.After;
 import org.junit.Before;
@@ -61,7 +63,7 @@ import io.restassured.parsing.Parser;
 import reactor.core.publisher.Flux;
 
 public abstract class SetMessagesOutboxFlagUpdateTest {
-    private static final String USERNAME = "username@" + DOMAIN;
+    private static final Username USERNAME = Username.of("username@" + DOMAIN);
     private static final String PASSWORD = "password";
 
     protected abstract GuiceJamesServer createJmapServer() throws IOException;
@@ -71,15 +73,19 @@ public abstract class SetMessagesOutboxFlagUpdateTest {
 
     protected MailQueueFactory<MailQueue> noopMailQueueFactory = new MailQueueFactory<MailQueue>() {
         @Override
-        public Optional<MailQueue> getQueue(String name) {
+        public Optional<MailQueue> getQueue(MailQueueName name, PrefetchCount prefetchCount) {
             return Optional.of(createQueue(name));
         }
 
         @Override
-        public MailQueue createQueue(String name) {
+        public MailQueue createQueue(MailQueueName name, PrefetchCount prefetchCount) {
             return new MailQueue() {
                 @Override
-                public String getName() {
+                public void close() throws IOException {
+                }
+
+                @Override
+                public MailQueueName getName() {
                     return name;
                 }
 
@@ -100,7 +106,7 @@ public abstract class SetMessagesOutboxFlagUpdateTest {
         }
 
         @Override
-        public Set<MailQueue> listCreatedMailQueues() {
+        public Set<MailQueueName> listCreatedMailQueues() {
             throw new NotImplementedException("Minimalistic implementation. Please do not list queues");
         }
     };
@@ -116,15 +122,15 @@ public abstract class SetMessagesOutboxFlagUpdateTest {
                 .setContentType(ContentType.JSON)
                 .setAccept(ContentType.JSON)
                 .setConfig(newConfig().encoderConfig(encoderConfig().defaultContentCharset(StandardCharsets.UTF_8)))
-                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort())
+                .setPort(jmapServer.getProbe(JmapGuiceProbe.class).getJmapPort().getValue())
                 .build();
         RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
         RestAssured.defaultParser = Parser.JSON;
 
         dataProbe.addDomain(DOMAIN);
-        dataProbe.addUser(USERNAME, PASSWORD);
-        dataProbe.addUser(BOB, BOB_PASSWORD);
-        mailboxProbe.createMailbox("#private", USERNAME, DefaultMailboxes.INBOX);
+        dataProbe.addUser(USERNAME.asString(), PASSWORD);
+        dataProbe.addUser(BOB.asString(), BOB_PASSWORD);
+        mailboxProbe.createMailbox("#private", USERNAME.asString(), DefaultMailboxes.INBOX);
         accessToken = HttpJmapAuthentication.authenticateJamesUser(baseUri(jmapServer), USERNAME, PASSWORD);
     }
 
@@ -136,8 +142,8 @@ public abstract class SetMessagesOutboxFlagUpdateTest {
     @Test
     public void flagsUpdateShouldBeAllowedInTheOutbox() {
         String messageCreationId = "creationId1337";
-        String fromAddress = USERNAME;
-        String toUsername = USERNAME;
+        String fromAddress = USERNAME.asString();
+        String toUsername = USERNAME.asString();
         String requestBody = "[" +
             "  [" +
             "    \"setMessages\"," +
@@ -155,12 +161,12 @@ public abstract class SetMessagesOutboxFlagUpdateTest {
             "]";
 
         with()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(requestBody)
             .post("/jmap");
 
         String jmapMessageId = with()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body("[[\"getMessageList\", {}, \"#0\"]]")
             .post("/jmap")
         .then()
@@ -181,7 +187,7 @@ public abstract class SetMessagesOutboxFlagUpdateTest {
             "]";
 
         given()
-            .header("Authorization", accessToken.serialize())
+            .header("Authorization", accessToken.asString())
             .body(updateRequestBody)
         .when()
             .post("/jmap")

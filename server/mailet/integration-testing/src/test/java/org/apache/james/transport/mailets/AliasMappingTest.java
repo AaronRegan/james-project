@@ -27,8 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import javax.mail.internet.MimeMessage;
 
+import org.apache.james.core.Username;
 import org.apache.james.core.builder.MimeMessageBuilder;
-import org.apache.james.mailbox.model.MailboxConstants;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailets.TemporaryJamesServer;
 import org.apache.james.mailets.configuration.CommonProcessors;
@@ -39,9 +39,9 @@ import org.apache.james.modules.protocols.ImapGuiceProbe;
 import org.apache.james.modules.protocols.SmtpGuiceProbe;
 import org.apache.james.probe.DataProbe;
 import org.apache.james.utils.DataProbeImpl;
-import org.apache.james.utils.IMAPMessageReader;
 import org.apache.james.utils.MailRepositoryProbeImpl;
 import org.apache.james.utils.SMTPMessageSender;
+import org.apache.james.utils.TestIMAPClient;
 import org.apache.james.utils.WebAdminGuiceProbe;
 import org.apache.james.webadmin.WebAdminUtils;
 import org.apache.james.webadmin.routes.AliasRoutes;
@@ -64,6 +64,7 @@ public class AliasMappingTest {
     private static final String CEDRIC_USER = "cedric";
 
     private static final String BOB_ADDRESS = BOB_USER + "@" + DOMAIN;
+    private static final String UPPER_BOB_ADDRESS = BOB_USER.toUpperCase() + "@" + DOMAIN;
     private static final String ALICE_ADDRESS = ALICE_USER + "@" + DOMAIN;
     private static final String CEDRIC_ADDRESS = CEDRIC_USER + "@" + DOMAIN;
 
@@ -72,10 +73,11 @@ public class AliasMappingTest {
 
     private static final String BOB_ALIAS = BOB_USER + "-alias@" + DOMAIN;
     private static final String BOB_ALIAS_2 = BOB_USER + "-alias2@" + DOMAIN;
+    private static final String UPPER_BOB_ALIAS = BOB_USER.toUpperCase() + "-ALIAS@" + DOMAIN;
     private static final String GROUP_ALIAS = GROUP + "-alias@" + DOMAIN;
 
     private static final String MESSAGE_CONTENT = "any text";
-    private static final MailRepositoryUrl RRT_ERROR_REPOSITORY = MailRepositoryUrl.from("file://var/mail/rrt-error/");
+    private static final MailRepositoryUrl RRT_ERROR_REPOSITORY = MailRepositoryUrl.from("memory://var/mail/rrt-error/");
 
     private TemporaryJamesServer jamesServer;
     private MimeMessage message;
@@ -85,19 +87,20 @@ public class AliasMappingTest {
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
     @Rule
-    public IMAPMessageReader imapMessageReader = new IMAPMessageReader();
+    public TestIMAPClient testIMAPClient = new TestIMAPClient();
     @Rule
     public SMTPMessageSender messageSender = new SMTPMessageSender(DEFAULT_DOMAIN);
 
     @Before
     public void setup() throws Exception {
-        MailetContainer.Builder mailetContainer = TemporaryJamesServer.SIMPLE_MAILET_CONTAINER_CONFIGURATION
+        MailetContainer.Builder mailetContainer = TemporaryJamesServer.simpleMailetContainerConfiguration()
             .putProcessor(CommonProcessors.rrtErrorEnabledTransport())
             .putProcessor(CommonProcessors.rrtErrorProcessor());
 
         jamesServer = TemporaryJamesServer.builder()
             .withMailetContainer(mailetContainer)
             .build(temporaryFolder.newFolder());
+        jamesServer.start();
 
         dataProbe = jamesServer.getProbe(DataProbeImpl.class);
         dataProbe.addDomain(DOMAIN);
@@ -106,9 +109,9 @@ public class AliasMappingTest {
         dataProbe.addUser(ALICE_ADDRESS, PASSWORD);
         dataProbe.addUser(CEDRIC_ADDRESS, PASSWORD);
 
-        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.forUser(BOB_ADDRESS, MailboxConstants.INBOX));
-        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.forUser(ALICE_ADDRESS, MailboxConstants.INBOX));
-        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.forUser(CEDRIC_ADDRESS, MailboxConstants.INBOX));
+        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.inbox(Username.of(BOB_ADDRESS)));
+        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.inbox(Username.of(ALICE_ADDRESS)));
+        jamesServer.getProbe(MailboxProbeImpl.class).createMailbox(MailboxPath.inbox(Username.of(CEDRIC_ADDRESS)));
 
         webAdminApi = WebAdminUtils.spec(jamesServer.getProbe(WebAdminGuiceProbe.class).getWebAdminPort());
 
@@ -134,11 +137,65 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(BOB_ALIAS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
+    }
+
+    @Test
+    public void messageShouldRedirectToUserWhenSentToHisUpperCaseAlias() throws Exception {
+        webAdminApi.put(AliasRoutes.ROOT_PATH + "/" + BOB_ADDRESS + "/sources/" + BOB_ALIAS);
+
+        messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .sendMessage(FakeMail.builder()
+                .name("name")
+                .mimeMessage(message)
+                .sender(ALICE_ADDRESS)
+                .recipient(UPPER_BOB_ALIAS));
+
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+            .login(BOB_ADDRESS, PASSWORD)
+            .select(TestIMAPClient.INBOX)
+            .awaitMessage(awaitAtMostOneMinute);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
+    }
+
+    @Test
+    public void messageShouldRedirectToUserWhenLowerCaseAliasMappedToUpperCaseUser() throws Exception {
+        webAdminApi.put(AliasRoutes.ROOT_PATH + "/" + UPPER_BOB_ADDRESS + "/sources/" + BOB_ALIAS);
+
+        messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .sendMessage(FakeMail.builder()
+                .name("name")
+                .mimeMessage(message)
+                .sender(ALICE_ADDRESS)
+                .recipient(BOB_ALIAS));
+
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+            .login(BOB_ADDRESS, PASSWORD)
+            .select(TestIMAPClient.INBOX)
+            .awaitMessage(awaitAtMostOneMinute);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
+    }
+
+    @Test
+    public void messageShouldRedirectToUserWithUpperCaseDefinedAliasWhenSentToHisLowerCaseAlias() throws Exception {
+        webAdminApi.put(AliasRoutes.ROOT_PATH + "/" + BOB_ADDRESS + "/sources/" + UPPER_BOB_ALIAS);
+
+        messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .sendMessage(FakeMail.builder()
+                .name("name")
+                .mimeMessage(message)
+                .sender(ALICE_ADDRESS)
+                .recipient(BOB_ALIAS));
+
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+            .login(BOB_ADDRESS, PASSWORD)
+            .select(TestIMAPClient.INBOX)
+            .awaitMessage(awaitAtMostOneMinute);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -153,11 +210,11 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(BOB_ALIAS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(CEDRIC_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -172,11 +229,11 @@ public class AliasMappingTest {
                 .sender(CEDRIC_ADDRESS)
                 .recipient(ALICE_ADDRESS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -191,11 +248,11 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(GROUP_ADDRESS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -210,11 +267,11 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(GROUP_ALIAS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -229,11 +286,11 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(BOB_ALIAS_2));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
     @Test
@@ -248,17 +305,17 @@ public class AliasMappingTest {
                 .sender(CEDRIC_ADDRESS)
                 .recipient(BOB_ALIAS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(ALICE_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
-        assertThat(imapMessageReader.readFirstMessage()).contains(MESSAGE_CONTENT);
+        assertThat(testIMAPClient.readFirstMessage()).contains(MESSAGE_CONTENT);
     }
 
 
@@ -275,9 +332,9 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(aliasWithSlash));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -295,9 +352,9 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(BOB_ALIAS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(userWithSlash, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -314,9 +371,9 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(BOB_ALIAS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessage(awaitAtMostOneMinute);
     }
 
@@ -355,9 +412,9 @@ public class AliasMappingTest {
                 .sender(ALICE_ADDRESS)
                 .recipient(GROUP_ADDRESS));
 
-        imapMessageReader.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
+        testIMAPClient.connect(LOCALHOST_IP, jamesServer.getProbe(ImapGuiceProbe.class).getImapPort())
             .login(BOB_ADDRESS, PASSWORD)
-            .select(IMAPMessageReader.INBOX)
+            .select(TestIMAPClient.INBOX)
             .awaitMessageCount(awaitAtMostOneMinute, 1);
     }
 

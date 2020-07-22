@@ -23,116 +23,113 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.util.List;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
-import org.apache.james.mailbox.MessageManager.MetaData.FetchGroup;
+import org.apache.james.mailbox.MessageManager.MailboxMetaData.FetchGroup;
 import org.apache.james.mailbox.exception.BadCredentialsException;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
 import org.apache.james.mailbox.mock.DataProvisioner;
 import org.apache.james.mailbox.model.MailboxPath;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Test class for the {@link MailboxCopierImpl} implementation.
- * 
+ *
  * The InMemoryMailboxManager will be used as source and destination
  * Mailbox Manager.
  *
  */
-public class MailboxCopierTest {
+class MailboxCopierTest {
     /**
      * The instance for the test mailboxCopier.
      */
-    private MailboxCopierImpl mailboxCopier;
-    
+    MailboxCopierImpl mailboxCopier;
+
     /**
      * The instance for the source Mailbox Manager.
      */
-    private MailboxManager srcMemMailboxManager;
-    
+    MailboxManager srcMemMailboxManager;
+
     /**
      * The instance for the destination Mailbox Manager.
      */
-    private MailboxManager dstMemMailboxManager;
-    
+    MailboxManager dstMemMailboxManager;
+
     /**
      * Setup the mailboxCopier and the source and destination
      * Mailbox Manager.
-     * 
+     *
      * We use a InMemoryMailboxManager implementation.
-     * 
-     * @throws BadCredentialsException
-     * @throws MailboxException
      */
-    @Before
-    public void setup() throws BadCredentialsException, MailboxException {
+    @BeforeEach
+    void setup() {
         mailboxCopier = new MailboxCopierImpl();
 
         srcMemMailboxManager = newInMemoryMailboxManager();
         dstMemMailboxManager = newInMemoryMailboxManager();
-        
+
     }
-    
+
     /**
      * Feed the source MailboxManager with the number of mailboxes and
      * messages per mailbox.
-     * 
-     * Copy the mailboxes to the destination Mailbox Manager, and assert the number 
+     *
+     * Copy the mailboxes to the destination Mailbox Manager, and assert the number
      * of mailboxes and messages per mailbox is the same as in the source
      * Mailbox Manager.
-     * 
-     * @throws MailboxException 
-     * @throws IOException 
+     *
+     * @throws MailboxException
+     * @throws IOException
      */
     @Test
-    public void testMailboxCopy() throws MailboxException, IOException {
+    void testMailboxCopy() throws MailboxException, IOException {
         DataProvisioner.feedMailboxManager(srcMemMailboxManager);
-       
+
         assertMailboxManagerSize(srcMemMailboxManager, 1);
-        
+
         mailboxCopier.copyMailboxes(srcMemMailboxManager, dstMemMailboxManager);
         assertMailboxManagerSize(dstMemMailboxManager, 1);
-        
+
         // We copy a second time to assert existing mailboxes does not give issue.
         mailboxCopier.copyMailboxes(srcMemMailboxManager, dstMemMailboxManager);
         assertMailboxManagerSize(dstMemMailboxManager, 2);
-        
+
     }
-    
+
     /**
      * Utility method to assert the number of mailboxes and messages per mailbox
      * are the ones expected.
-     * 
-     * @throws MailboxException 
-     * @throws BadCredentialsException 
+     *
+     * @throws MailboxException
+     * @throws BadCredentialsException
      */
     private void assertMailboxManagerSize(MailboxManager mailboxManager, int multiplicationFactor) throws BadCredentialsException, MailboxException {
-        MailboxSession mailboxSession = mailboxManager.createSystemSession("manager");
+        MailboxSession mailboxSession = mailboxManager.createSystemSession(Username.of("manager"));
         mailboxManager.startProcessingRequest(mailboxSession);
 
         List<MailboxPath> mailboxPathList = mailboxManager.list(mailboxSession);
-        
+
         assertThat(mailboxPathList).hasSize(DataProvisioner.EXPECTED_MAILBOXES_COUNT);
-        
+
         for (MailboxPath mailboxPath: mailboxPathList) {
             MailboxSession userSession = mailboxManager.createSystemSession(mailboxPath.getUser());
             mailboxManager.startProcessingRequest(mailboxSession);
             MessageManager messageManager = mailboxManager.getMailbox(mailboxPath, userSession);
             assertThat(messageManager.getMetaData(false, userSession, FetchGroup.NO_UNSEEN).getMessageCount()).isEqualTo(DataProvisioner.MESSAGE_PER_MAILBOX_COUNT * multiplicationFactor);
         }
-        
+
         mailboxManager.endProcessingRequest(mailboxSession);
-        mailboxManager.logout(mailboxSession, true);
-        
+        mailboxManager.logout(mailboxSession);
     }
-    
+
     /**
-     * Utility method to instanciate a new InMemoryMailboxManger with 
+     * Utility method to instantiate a new InMemoryMailboxManger with
      * the needed MailboxSessionMapperFactory, Authenticator and UidProvider.
-     * 
+     *
      * @return a new InMemoryMailboxManager
      */
     private MailboxManager newInMemoryMailboxManager() {

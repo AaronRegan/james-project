@@ -25,6 +25,7 @@ import static org.apache.james.mailbox.events.EventBusTestFixture.KEY_2;
 import static org.apache.james.mailbox.events.EventBusTestFixture.KEY_3;
 import static org.apache.james.mailbox.events.EventBusTestFixture.NO_KEYS;
 import static org.apache.james.mailbox.events.EventDeadLettersContract.GROUP_A;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
@@ -37,6 +38,8 @@ import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+
+import reactor.core.publisher.Mono;
 
 public interface EventBusConcurrentTestContract {
 
@@ -55,7 +58,7 @@ public interface EventBusConcurrentTestContract {
 
     static int totalEventsReceived(ImmutableList<EventBusTestFixture.MailboxListenerCountingSuccessfulExecution> allListeners) {
         return allListeners.stream()
-            .mapToInt(listener -> listener.numberOfEventCalls())
+            .mapToInt(EventBusTestFixture.MailboxListenerCountingSuccessfulExecution::numberOfEventCalls)
             .sum();
     }
 
@@ -78,9 +81,9 @@ public interface EventBusConcurrentTestContract {
                 .operationCount(OPERATION_COUNT)
                 .runSuccessfullyWithin(FIVE_SECONDS);
 
-            AWAIT_CONDITION.until(() ->
-                totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3))
-                    == (totalGlobalRegistrations * TOTAL_DISPATCH_OPERATIONS));
+            AWAIT_CONDITION.untilAsserted(() ->
+                assertThat(totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3)))
+                    .isEqualTo(totalGlobalRegistrations * TOTAL_DISPATCH_OPERATIONS));
         }
 
         @Test
@@ -88,9 +91,9 @@ public interface EventBusConcurrentTestContract {
             EventBusTestFixture.MailboxListenerCountingSuccessfulExecution countingListener1 = newCountingListener();
             EventBusTestFixture.MailboxListenerCountingSuccessfulExecution countingListener2 = newCountingListener();
             EventBusTestFixture.MailboxListenerCountingSuccessfulExecution countingListener3 = newCountingListener();
-            eventBus().register(countingListener1, KEY_1);
-            eventBus().register(countingListener2, KEY_2);
-            eventBus().register(countingListener3, KEY_3);
+            Mono.from(eventBus().register(countingListener1, KEY_1)).block();
+            Mono.from(eventBus().register(countingListener2, KEY_2)).block();
+            Mono.from(eventBus().register(countingListener3, KEY_3)).block();
 
             int totalKeyListenerRegistrations = 3; // KEY1 + KEY2 + KEY3
             int totalEventBus = 1;
@@ -101,9 +104,9 @@ public interface EventBusConcurrentTestContract {
                 .operationCount(OPERATION_COUNT)
                 .runSuccessfullyWithin(FIVE_SECONDS);
 
-            AWAIT_CONDITION.until(() ->
-                totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3))
-                    == (totalKeyListenerRegistrations * totalEventBus * TOTAL_DISPATCH_OPERATIONS));
+            AWAIT_CONDITION.untilAsserted(() ->
+                assertThat(totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3)))
+                    .isEqualTo(totalKeyListenerRegistrations * totalEventBus * TOTAL_DISPATCH_OPERATIONS));
         }
 
         @Test
@@ -119,9 +122,9 @@ public interface EventBusConcurrentTestContract {
             int totalGlobalRegistrations = 3; // GroupA + GroupB + GroupC
             int totalEventDeliveredGlobally = totalGlobalRegistrations * TOTAL_DISPATCH_OPERATIONS;
 
-            eventBus().register(countingListener1, KEY_1);
-            eventBus().register(countingListener2, KEY_2);
-            eventBus().register(countingListener3, KEY_3);
+            Mono.from(eventBus().register(countingListener1, KEY_1)).block();
+            Mono.from(eventBus().register(countingListener2, KEY_2)).block();
+            Mono.from(eventBus().register(countingListener3, KEY_3)).block();
             int totalKeyListenerRegistrations = 3; // KEY1 + KEY2 + KEY3
             int totalEventDeliveredByKeys = totalKeyListenerRegistrations * TOTAL_DISPATCH_OPERATIONS;
 
@@ -131,9 +134,9 @@ public interface EventBusConcurrentTestContract {
                 .operationCount(OPERATION_COUNT)
                 .runSuccessfullyWithin(FIVE_SECONDS);
 
-            AWAIT_CONDITION.until(() ->
-                totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3))
-                    == (totalEventDeliveredGlobally + totalEventDeliveredByKeys));
+            AWAIT_CONDITION.untilAsserted(() ->
+                assertThat(totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3)))
+                    .isEqualTo(totalEventDeliveredGlobally + totalEventDeliveredByKeys));
         }
     }
 
@@ -163,9 +166,9 @@ public interface EventBusConcurrentTestContract {
                 .operationCount(OPERATION_COUNT)
                 .runSuccessfullyWithin(FIVE_SECONDS);
 
-            AWAIT_CONDITION.until(() ->
-                totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3))
-                    == (totalGlobalRegistrations * TOTAL_DISPATCH_OPERATIONS));
+            AWAIT_CONDITION.untilAsserted(() ->
+                assertThat(totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3)))
+                    .isEqualTo(totalGlobalRegistrations * TOTAL_DISPATCH_OPERATIONS));
         }
 
         @Test
@@ -174,13 +177,13 @@ public interface EventBusConcurrentTestContract {
             EventBusTestFixture.MailboxListenerCountingSuccessfulExecution countingListener2 = newCountingListener();
             EventBusTestFixture.MailboxListenerCountingSuccessfulExecution countingListener3 = newCountingListener();
 
-            eventBus().register(countingListener1, KEY_1);
-            eventBus().register(countingListener2, KEY_2);
-            eventBus().register(countingListener3, KEY_3);
+            Mono.from(eventBus().register(countingListener1, KEY_1)).block();
+            Mono.from(eventBus().register(countingListener2, KEY_2)).block();
+            Mono.from(eventBus().register(countingListener3, KEY_3)).block();
 
-            eventBus2().register(countingListener1, KEY_1);
-            eventBus2().register(countingListener2, KEY_2);
-            eventBus2().register(countingListener3, KEY_3);
+            Mono.from(eventBus2().register(countingListener1, KEY_1)).block();
+            Mono.from(eventBus2().register(countingListener2, KEY_2)).block();
+            Mono.from(eventBus2().register(countingListener3, KEY_3)).block();
 
             int totalKeyListenerRegistrations = 3; // KEY1 + KEY2 + KEY3
             int totalEventBus = 2; // eventBus1 + eventBus2
@@ -191,9 +194,9 @@ public interface EventBusConcurrentTestContract {
                 .operationCount(OPERATION_COUNT)
                 .runSuccessfullyWithin(FIVE_SECONDS);
 
-            AWAIT_CONDITION.until(() ->
-                totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3))
-                    == (totalKeyListenerRegistrations * totalEventBus * TOTAL_DISPATCH_OPERATIONS));
+            AWAIT_CONDITION.untilAsserted(() ->
+                assertThat(totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3)))
+                    .isEqualTo(totalKeyListenerRegistrations * totalEventBus * TOTAL_DISPATCH_OPERATIONS));
         }
 
         @Test
@@ -208,14 +211,14 @@ public interface EventBusConcurrentTestContract {
             int totalGlobalRegistrations = 3; // GroupA + GroupB + GroupC
             int totalEventDeliveredGlobally = totalGlobalRegistrations * TOTAL_DISPATCH_OPERATIONS;
 
-            eventBus().register(countingListener1, KEY_1);
-            eventBus().register(countingListener2, KEY_2);
+            Mono.from(eventBus().register(countingListener1, KEY_1)).block();
+            Mono.from(eventBus().register(countingListener2, KEY_2)).block();
 
-            eventBus2().register(countingListener1, KEY_1);
-            eventBus2().register(countingListener2, KEY_2);
+            Mono.from(eventBus2().register(countingListener1, KEY_1)).block();
+            Mono.from(eventBus2().register(countingListener2, KEY_2)).block();
 
-            eventBus3().register(countingListener3, KEY_1);
-            eventBus3().register(countingListener3, KEY_2);
+            Mono.from(eventBus3().register(countingListener3, KEY_1)).block();
+            Mono.from(eventBus3().register(countingListener3, KEY_2)).block();
 
             int totalKeyListenerRegistrations = 2; // KEY1 + KEY2
             int totalEventBus = 3; // eventBus1 + eventBus2 + eventBus3
@@ -227,9 +230,9 @@ public interface EventBusConcurrentTestContract {
                 .operationCount(OPERATION_COUNT)
                 .runSuccessfullyWithin(FIVE_SECONDS);
 
-            AWAIT_CONDITION.until(() ->
-                totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3))
-                    == (totalEventDeliveredGlobally + totalEventDeliveredByKeys));
+            AWAIT_CONDITION.untilAsserted(() ->
+                assertThat(totalEventsReceived(ImmutableList.of(countingListener1, countingListener2, countingListener3)))
+                    .isEqualTo(totalEventDeliveredGlobally + totalEventDeliveredByKeys));
         }
     }
 }

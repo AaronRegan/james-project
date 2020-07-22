@@ -23,7 +23,9 @@ package org.apache.james.protocols.smtp.utils;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.Map;
+import java.util.Optional;
 
+import org.apache.james.core.Username;
 import org.apache.james.protocols.api.ProtocolSession;
 import org.apache.james.protocols.api.Response;
 import org.apache.james.protocols.api.handler.LineHandler;
@@ -51,7 +53,7 @@ public class BaseFakeSMTPSession implements SMTPSession {
     }
 
     @Override
-    public Map<String, Object> getConnectionState() {
+    public Map<AttachmentKey<?>, Object> getConnectionState() {
         throw new UnsupportedOperationException("Unimplemented Stub Method");
     }
 
@@ -66,12 +68,12 @@ public class BaseFakeSMTPSession implements SMTPSession {
     }
 
     @Override
-    public Map<String, Object> getState() {
+    public Map<AttachmentKey<?>, Object> getState() {
         throw new UnsupportedOperationException("Unimplemented Stub Method");
     }
 
     @Override
-    public String getUser() {
+    public Username getUsername() {
         throw new UnsupportedOperationException("Unimplemented Stub Method");
     }
 
@@ -96,10 +98,9 @@ public class BaseFakeSMTPSession implements SMTPSession {
     }
 
     @Override
-    public void setUser(String user) {
+    public void setUsername(Username username) {
         throw new UnsupportedOperationException("Unimplemented Stub Method");
     }
-
 
     @Override
     public void popLineHandler() {
@@ -147,12 +148,17 @@ public class BaseFakeSMTPSession implements SMTPSession {
     }
 
     @Override
-    public Object setAttachment(String key, Object value, State state) {
+    public <T> Optional<T> setAttachment(AttachmentKey<T> key, T value, State state) {
         throw new UnsupportedOperationException("Unimplemented Stub Method");
     }
 
     @Override
-    public Object getAttachment(String key, State state) {
+    public <T> Optional<T> removeAttachment(AttachmentKey<T> key, State state) {
+        throw new UnsupportedOperationException("Unimplemented Stub Method");
+    }
+
+    @Override
+    public <T> Optional<T> getAttachment(AttachmentKey<T> key, State state) {
         throw new UnsupportedOperationException("Unimplemented Stub Method");
     }
 

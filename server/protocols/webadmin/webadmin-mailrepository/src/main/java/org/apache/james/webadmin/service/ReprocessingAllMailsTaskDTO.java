@@ -19,25 +19,26 @@
 package org.apache.james.webadmin.service;
 
 import java.util.Optional;
-import java.util.function.Function;
 
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.server.task.json.dto.TaskDTO;
 import org.apache.james.server.task.json.dto.TaskDTOModule;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-class ReprocessingAllMailsTaskDTO implements TaskDTO {
+public class ReprocessingAllMailsTaskDTO implements TaskDTO {
 
-    public static final Function<ReprocessingService, TaskDTOModule<ReprocessingAllMailsTask, ReprocessingAllMailsTaskDTO>> MODULE = (reprocessingService) ->
-        DTOModule
+    public static TaskDTOModule<ReprocessingAllMailsTask, ReprocessingAllMailsTaskDTO> module(ReprocessingService reprocessingService) {
+        return DTOModule
             .forDomainObject(ReprocessingAllMailsTask.class)
             .convertToDTO(ReprocessingAllMailsTaskDTO.class)
             .toDomainObjectConverter(dto -> dto.fromDTO(reprocessingService))
             .toDTOConverter(ReprocessingAllMailsTaskDTO::toDTO)
             .typeName(ReprocessingAllMailsTask.TYPE.asString())
             .withFactory(TaskDTOModule::new);
+    }
 
     private static ReprocessingAllMailsTaskDTO toDTO(ReprocessingAllMailsTask domainObject, String typeName) {
         try {
@@ -45,7 +46,7 @@ class ReprocessingAllMailsTaskDTO implements TaskDTO {
                 typeName,
                 domainObject.getRepositorySize(),
                 domainObject.getRepositoryPath().urlEncoded(),
-                domainObject.getTargetQueue(),
+                domainObject.getTargetQueue().asString(),
                 domainObject.getTargetProcessor()
             );
         } catch (Exception e) {
@@ -77,7 +78,7 @@ class ReprocessingAllMailsTaskDTO implements TaskDTO {
                 reprocessingService,
                 repositorySize,
                 MailRepositoryPath.fromEncoded(repositoryPath),
-                targetQueue,
+                MailQueueName.of(targetQueue),
                 targetProcessor
             );
         } catch (Exception e) {

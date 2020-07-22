@@ -19,15 +19,10 @@
 
 package org.apache.james;
 
-import static org.apache.james.CassandraJamesServerMain.ALL_BUT_JMX_CASSANDRA_MODULE;
-
 import java.io.IOException;
 
-import org.apache.james.mailbox.extractor.TextExtractor;
-import org.apache.james.mailbox.store.search.PDFTextExtractor;
 import org.apache.james.modules.TestDockerESMetricReporterModule;
 import org.apache.james.modules.TestJMAPServerModule;
-import org.apache.james.server.core.configuration.Configuration;
 import org.apache.james.webadmin.WebAdminConfiguration;
 import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestRule;
@@ -38,7 +33,6 @@ import com.google.inject.Module;
 
 public class CassandraJmapTestRule implements TestRule {
 
-    private static final int LIMIT_TO_10_MESSAGES = 10;
     private final TemporaryFolder temporaryFolder;
 
     public static CassandraJmapTestRule defaultTestRule() {
@@ -60,15 +54,14 @@ public class CassandraJmapTestRule implements TestRule {
     }
 
     public GuiceJamesServer jmapServer(Module... additionals) throws IOException {
-        Configuration configuration = Configuration.builder()
+        CassandraJamesServerConfiguration configuration = CassandraJamesServerConfiguration.builder()
             .workingDirectory(temporaryFolder.newFolder())
             .configurationFromClasspath()
+            .searchConfiguration(SearchConfiguration.elasticSearch())
             .build();
 
-        return GuiceJamesServer.forConfiguration(configuration)
-            .combineWith(ALL_BUT_JMX_CASSANDRA_MODULE)
-            .overrideWith(binder -> binder.bind(TextExtractor.class).to(PDFTextExtractor.class))
-            .overrideWith(new TestJMAPServerModule(LIMIT_TO_10_MESSAGES))
+        return CassandraJamesServerMain.createServer(configuration)
+            .overrideWith(new TestJMAPServerModule())
             .overrideWith(new TestDockerESMetricReporterModule(dockerElasticSearchRule.getDockerEs().getHttpHost()))
             .overrideWith(guiceModuleTestRule.getModule())
             .overrideWith((binder -> binder.bind(CleanupTasksPerformer.class).asEagerSingleton()))
@@ -83,5 +76,9 @@ public class CassandraJmapTestRule implements TestRule {
 
     public void await() {
         guiceModuleTestRule.await();
+    }
+
+    public DockerElasticSearchRule getDockerElasticSearchRule() {
+        return dockerElasticSearchRule;
     }
 }

@@ -22,39 +22,42 @@ package org.apache.james.mailbox.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 
-import org.junit.Test;
+import org.apache.james.mailbox.model.Blob.InputStreamSupplier;
+import org.junit.jupiter.api.Test;
 
 import nl.jqno.equalsverifier.EqualsVerifier;
 
-public class BlobTest {
-
-    public static final BlobId ID = BlobId.fromString("123");
-    public static final String CONTENT_TYPE = "text/plain";
-    public static final byte[] PAYLOAD = "abc".getBytes(StandardCharsets.UTF_8);
+class BlobTest {
+    static final BlobId ID = BlobId.fromString("123");
+    static final ContentType CONTENT_TYPE = ContentType.of("text/plain");
+    static final InputStreamSupplier PAYLOAD = () -> new ByteArrayInputStream("abc".getBytes(StandardCharsets.UTF_8));
+    static final int LENGTH = 3;
 
     @Test
-    public void shouldMatchBeanContract() {
+    void shouldMatchBeanContract() {
         EqualsVerifier.forClass(Blob.class)
             .withIgnoredFields("payload", "size")
             .verify();
     }
 
     @Test
-    public void buildShouldConstructValidBlob() {
+    void buildShouldConstructValidBlob() {
         assertThat(
             Blob.builder()
                 .id(ID)
                 .contentType(CONTENT_TYPE)
                 .payload(PAYLOAD)
+                .size(LENGTH)
                 .build())
             .isEqualTo(
-                new Blob(ID, PAYLOAD, CONTENT_TYPE));
+                new Blob(ID, PAYLOAD, CONTENT_TYPE, LENGTH));
     }
 
     @Test
-    public void buildShouldThrowOnMissingBlobId() {
+    void buildShouldThrowOnMissingBlobId() {
         assertThatThrownBy(() ->
             Blob.builder()
                 .contentType(CONTENT_TYPE)
@@ -64,7 +67,7 @@ public class BlobTest {
     }
 
     @Test
-    public void buildShouldThrowOnMissingContentType() {
+    void buildShouldThrowOnMissingContentType() {
         assertThatThrownBy(() ->
             Blob.builder()
                 .id(ID)
@@ -74,7 +77,7 @@ public class BlobTest {
     }
 
     @Test
-    public void buildShouldThrowOnMissingPayload() {
+    void buildShouldThrowOnMissingPayload() {
         assertThatThrownBy(() ->
             Blob.builder()
                 .id(ID)

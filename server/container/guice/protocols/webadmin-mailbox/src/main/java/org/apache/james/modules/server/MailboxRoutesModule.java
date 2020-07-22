@@ -19,30 +19,48 @@
 
 package org.apache.james.modules.server;
 
+import static org.apache.james.webadmin.routes.MailboxesRoutes.ALL_MAILBOXES_TASKS;
+import static org.apache.james.webadmin.routes.MailboxesRoutes.ONE_MAILBOX_TASKS;
+import static org.apache.james.webadmin.routes.MailboxesRoutes.ONE_MAIL_TASKS;
+import static org.apache.james.webadmin.routes.UserMailboxesRoutes.USER_MAILBOXES_OPERATIONS_INJECTION_KEY;
+import static org.apache.james.webadmin.routes.UserQuotaRoutes.USER_QUOTAS_OPERATIONS_INJECTION_KEY;
+
 import org.apache.james.webadmin.Routes;
 import org.apache.james.webadmin.jackson.QuotaModule;
 import org.apache.james.webadmin.routes.DomainQuotaRoutes;
 import org.apache.james.webadmin.routes.EventDeadLettersRoutes;
 import org.apache.james.webadmin.routes.GlobalQuotaRoutes;
+import org.apache.james.webadmin.routes.MailboxesRoutes;
 import org.apache.james.webadmin.routes.UserMailboxesRoutes;
 import org.apache.james.webadmin.routes.UserQuotaRoutes;
+import org.apache.james.webadmin.tasks.TaskFromRequestRegistry.TaskRegistration;
 import org.apache.james.webadmin.utils.JsonTransformerModule;
 
 import com.google.inject.AbstractModule;
 import com.google.inject.multibindings.Multibinder;
+import com.google.inject.name.Names;
 
 public class MailboxRoutesModule extends AbstractModule {
 
     @Override
     protected void configure() {
+        install(new WebadminMailboxTaskSerializationModule());
+
         Multibinder<Routes> routesMultibinder = Multibinder.newSetBinder(binder(), Routes.class);
         routesMultibinder.addBinding().to(DomainQuotaRoutes.class);
         routesMultibinder.addBinding().to(EventDeadLettersRoutes.class);
         routesMultibinder.addBinding().to(GlobalQuotaRoutes.class);
         routesMultibinder.addBinding().to(UserQuotaRoutes.class);
         routesMultibinder.addBinding().to(UserMailboxesRoutes.class);
+        routesMultibinder.addBinding().to(MailboxesRoutes.class);
 
         Multibinder<JsonTransformerModule> jsonTransformerModuleMultibinder = Multibinder.newSetBinder(binder(), JsonTransformerModule.class);
         jsonTransformerModuleMultibinder.addBinding().to(QuotaModule.class);
+
+        Multibinder.newSetBinder(binder(), TaskRegistration.class, Names.named(USER_MAILBOXES_OPERATIONS_INJECTION_KEY));
+        Multibinder.newSetBinder(binder(), TaskRegistration.class, Names.named(ALL_MAILBOXES_TASKS));
+        Multibinder.newSetBinder(binder(), TaskRegistration.class, Names.named(ONE_MAILBOX_TASKS));
+        Multibinder.newSetBinder(binder(), TaskRegistration.class, Names.named(ONE_MAIL_TASKS));
+        Multibinder.newSetBinder(binder(), TaskRegistration.class, Names.named(USER_QUOTAS_OPERATIONS_INJECTION_KEY));
     }
 }

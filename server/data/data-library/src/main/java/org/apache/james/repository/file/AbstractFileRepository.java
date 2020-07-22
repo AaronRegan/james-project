@@ -28,7 +28,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
-import java.util.Iterator;
+import java.util.stream.Stream;
 
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
@@ -39,14 +39,13 @@ import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.commons.io.FileUtils;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.lifecycle.api.Configurable;
-import org.apache.james.repository.api.Repository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * This an abstract class implementing functionality for creating a file-store.
  */
-public abstract class AbstractFileRepository implements Repository, Configurable {
+public abstract class AbstractFileRepository implements Configurable {
     private static final Logger LOGGER = LoggerFactory.getLogger(AbstractFileRepository.class);
 
     protected static final boolean DEBUG = false;
@@ -155,49 +154,6 @@ public abstract class AbstractFileRepository implements Repository, Configurable
     }
 
     /**
-     * Return a new instance of this class
-     * 
-     * @return class a new instance of AbstractFileRepository
-     * @throws Exception
-     *             get thrown if an error is detected while create the new
-     *             instance
-     */
-    protected AbstractFileRepository createChildRepository() throws Exception {
-        return getClass().newInstance();
-    }
-
-    @Override
-    public Repository getChildRepository(String childName) {
-        AbstractFileRepository child;
-
-        try {
-            child = createChildRepository();
-        } catch (Exception e) {
-            throw new RuntimeException("Cannot create child repository " + childName, e);
-        }
-
-        child.setFileSystem(fileSystem);
-
-        try {
-            child.setDestination(baseDirectory.getAbsolutePath() + File.pathSeparatorChar + childName + File.pathSeparator);
-        } catch (ConfigurationException ce) {
-            throw new RuntimeException("Cannot set destination for child child " + "repository " + childName + " : " + ce);
-        }
-
-        try {
-            child.init();
-        } catch (Exception e) {
-            throw new RuntimeException("Cannot initialize child " + "repository " + childName, e);
-        }
-
-        if (LOGGER.isDebugEnabled()) {
-            LOGGER.debug("Child repository of " + name + " created in " + baseDirectory + File.pathSeparatorChar + childName + File.pathSeparator);
-        }
-
-        return child;
-    }
-
-    /**
      * Return the File Object which belongs to the given key
      * 
      * @param key
@@ -283,13 +239,11 @@ public abstract class AbstractFileRepository implements Repository, Configurable
     /**
      * Returns the list of used keys.
      */
-    public Iterator<String> list() {
+    public Stream<String> list() {
         final File storeDir = new File(baseDirectory.getAbsolutePath());
         final String[] names = storeDir.list(filter);
 
-        return Arrays.stream(names)
-            .map(this::decode)
-            .iterator();
+        return Arrays.stream(names).map(this::decode);
     }
 
     /**

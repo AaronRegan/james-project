@@ -18,48 +18,63 @@
  ****************************************************************/
 package org.apache.james.webadmin.service;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
+import org.apache.james.queue.api.MailQueueName;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTOModule;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class ReprocessingOneMailTaskAdditionalInformationDTO implements AdditionalInformationDTO {
-
-    static final AdditionalInformationDTOModule<ReprocessingOneMailTask.AdditionalInformation, ReprocessingOneMailTaskAdditionalInformationDTO> SERIALIZATION_MODULE =
-        DTOModule.forDomainObject(ReprocessingOneMailTask.AdditionalInformation.class)
+    public static AdditionalInformationDTOModule<ReprocessingOneMailTask.AdditionalInformation, ReprocessingOneMailTaskAdditionalInformationDTO> module() {
+        return DTOModule.forDomainObject(ReprocessingOneMailTask.AdditionalInformation.class)
             .convertToDTO(ReprocessingOneMailTaskAdditionalInformationDTO.class)
             .toDomainObjectConverter(dto -> new ReprocessingOneMailTask.AdditionalInformation(
                 MailRepositoryPath.from(dto.repositoryPath),
-                dto.targetQueue,
+                MailQueueName.of(dto.targetQueue),
                 new MailKey(dto.mailKey),
-                dto.targetProcessor
-            ))
+                dto.targetProcessor,
+                dto.timestamp))
             .toDTOConverter((details, type) -> new ReprocessingOneMailTaskAdditionalInformationDTO(
+                type,
                 details.getRepositoryPath(),
                 details.getTargetQueue(),
                 details.getMailKey(),
-                details.getTargetProcessor()))
+                details.getTargetProcessor(),
+                details.timestamp()))
             .typeName(ReprocessingOneMailTask.TYPE.asString())
             .withFactory(AdditionalInformationDTOModule::new);
+    }
 
+    private final String type;
     private final String repositoryPath;
     private final String targetQueue;
     private final String mailKey;
     private final Optional<String> targetProcessor;
+    private final Instant timestamp;
 
-    public ReprocessingOneMailTaskAdditionalInformationDTO(@JsonProperty("repositoryPath") String repositoryPath,
+    public ReprocessingOneMailTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                           @JsonProperty("repositoryPath") String repositoryPath,
                                                            @JsonProperty("targetQueue") String targetQueue,
                                                            @JsonProperty("mailKey") String mailKey,
-                                                           @JsonProperty("targetProcessor") Optional<String> targetProcessor) {
+                                                           @JsonProperty("targetProcessor") Optional<String> targetProcessor,
+                                                           @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.repositoryPath = repositoryPath;
         this.targetQueue = targetQueue;
         this.mailKey = mailKey;
         this.targetProcessor = targetProcessor;
+        this.timestamp = timestamp;
+    }
+
+    @Override
+    public String getType() {
+        return type;
     }
 
     public String getRepositoryPath() {
@@ -72,6 +87,10 @@ public class ReprocessingOneMailTaskAdditionalInformationDTO implements Addition
 
     public String getMailKey() {
         return mailKey;
+    }
+
+    public Instant getTimestamp() {
+        return timestamp;
     }
 
     public Optional<String> getTargetProcessor() {

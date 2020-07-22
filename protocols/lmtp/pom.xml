@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james.protocols</groupId>
         <artifactId>protocols</artifactId>
-        <version>3.5.0-SNAPSHOT</version>
+        <version>3.6.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -33,6 +33,11 @@
     <name>Apache James :: Protocols :: LMTP</name>
 
     <dependencies>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
+            <artifactId>metrics-tests</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>${james.protocols.groupId}</groupId>
             <artifactId>protocols-api</artifactId>

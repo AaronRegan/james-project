@@ -20,15 +20,11 @@
 package org.apache.james.imap.processor.fetch;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 
-import javax.mail.MessagingException;
-
-import org.apache.james.mailbox.exception.MailboxException;
-import org.apache.james.mailbox.model.MessageResult;
+import org.apache.james.mailbox.model.Header;
 
 public class MessageResultUtils {
 
@@ -36,14 +32,12 @@ public class MessageResultUtils {
      * Gets all header lines.
      * 
      * @param iterator
-     *            {@link org.apache.james.mailbox.MessageResult.Header} <code>Iterator</code>
+     *            {@link Header} <code>Iterator</code>
      * @return <code>List</code> of <code>MessageResult.Header<code>'s,
      * in their natural order
-     * 
-     * @throws MessagingException
      */
-    public static List<MessageResult.Header> getAll(Iterator<MessageResult.Header> iterator) {
-        final List<MessageResult.Header> results = new ArrayList<>();
+    public static List<Header> getAll(Iterator<Header> iterator) {
+        final List<Header> results = new ArrayList<>();
         if (iterator != null) {
             while (iterator.hasNext()) {
                 results.add(iterator.next());
@@ -59,49 +53,19 @@ public class MessageResultUtils {
      * @param names
      *            header names to be matched, not null
      * @param iterator
-     *            {@link org.apache.james.mailbox.MessageResult.Header} <code>Iterator</code>
+     *            {@link Header} <code>Iterator</code>
      * @return <code>List</code> of <code>MessageResult.Header</code>'s, in
      *         their natural order
-     * @throws MessagingException
      */
-    public static List<MessageResult.Header> getMatching(String[] names, Iterator<MessageResult.Header> iterator) throws MailboxException {
-        final List<MessageResult.Header> results = new ArrayList<>(20);
-        if (iterator != null) {
-            while (iterator.hasNext()) {
-                MessageResult.Header header = iterator.next();
-                final String headerName = header.getName();
-                if (headerName != null) {
-                    if (Arrays.stream(names)
-                        .anyMatch(headerName::equalsIgnoreCase)) {
-                        results.add(header);
-                    }
-                }
-            }
-        }
-        return results;
-    }
-
-    /**
-     * Gets header lines whose header names matches (ignoring case) any of those
-     * given.
-     * 
-     * @param names
-     *            header names to be matched, not null
-     * @param iterator
-     *            {@link org.apache.james.mailbox.MessageResult.Header} <code>Iterator</code>
-     * @return <code>List</code> of <code>MessageResult.Header</code>'s, in
-     *         their natural order
-     * @throws MessagingException
-     */
-    public static List<MessageResult.Header> getMatching(Collection<String> names, Iterator<MessageResult.Header> iterator) throws MailboxException {
+    public static List<Header> getMatching(Collection<String> names, Iterator<Header> iterator) {
         return matching(names, iterator, false);
     }
 
-    private static List<MessageResult.Header> matching(Collection<String> names, Iterator<MessageResult.Header> iterator, boolean not) throws MailboxException {
-        final List<MessageResult.Header> results = new ArrayList<>(names.size());
+    private static List<Header> matching(Collection<String> names, Iterator<Header> iterator, boolean not) {
+        final List<Header> results = new ArrayList<>(names.size());
         if (iterator != null) {
             while (iterator.hasNext()) {
-                final MessageResult.Header header = iterator.next();
+                final Header header = iterator.next();
                 final boolean match = contains(names, header);
                 final boolean add = (not && !match) || (!not && match);
                 if (add) {
@@ -112,7 +76,7 @@ public class MessageResultUtils {
         return results;
     }
 
-    private static boolean contains(Collection<String> names, MessageResult.Header header) throws MailboxException {
+    private static boolean contains(Collection<String> names, Header header) {
         final String headerName = header.getName();
         if (headerName != null) {
             return names.stream().anyMatch(name -> name.equalsIgnoreCase(headerName));
@@ -127,12 +91,11 @@ public class MessageResultUtils {
      * @param names
      *            header names to be matched, not null
      * @param iterator
-     *            {@link org.apache.james.mailbox.MessageResult.Header} <code>Iterator</code>
+     *            {@link Header} <code>Iterator</code>
      * @return <code>List</code> of <code>MessageResult.Header</code>'s, in
      *         their natural order
-     * @throws MessagingException
      */
-    public static List<MessageResult.Header> getNotMatching(Collection<String> names, Iterator<MessageResult.Header> iterator) throws MailboxException {
+    public static List<Header> getNotMatching(Collection<String> names, Iterator<Header> iterator) {
         return matching(names, iterator, true);
     }
 
@@ -146,13 +109,12 @@ public class MessageResultUtils {
      *            not null
      * @return <code>MessageResult.Header</code>, or null if the header does not
      *         exist
-     * @throws MessagingException
      */
-    public static MessageResult.Header getMatching(String name, Iterator<MessageResult.Header> iterator) throws MailboxException {
-        MessageResult.Header result = null;
+    public static Header getMatching(String name, Iterator<Header> iterator) {
+        Header result = null;
         if (name != null) {
             while (iterator.hasNext()) {
-                MessageResult.Header header = iterator.next();
+                Header header = iterator.next();
                 final String headerName = header.getName();
                 if (name.equalsIgnoreCase(headerName)) {
                     result = header;
@@ -161,35 +123,5 @@ public class MessageResultUtils {
             }
         }
         return result;
-    }
-
-    /**
-     * Gets header lines whose header name fails to match (ignoring case) all of
-     * the given names.
-     * 
-     * @param names
-     *            header names, not null
-     * @param iterator
-     *            {@link org.apache.james.mailbox.MessageResult.Header} <code>Iterator</code>
-     * @return <code>List</code> of <code>@MessageResult.Header</code>'s, in
-     *         their natural order
-     * @throws MessagingException
-     */
-    public static List<MessageResult.Header> getNotMatching(String[] names, Iterator<MessageResult.Header> iterator) throws MailboxException {
-        final List<MessageResult.Header> results = new ArrayList<>(20);
-        if (iterator != null) {
-            while (iterator.hasNext()) {
-                MessageResult.Header header = iterator.next();
-                final String headerName = header.getName();
-                if (headerName != null) {
-                    boolean match = Arrays.stream(names)
-                        .anyMatch(headerName::equalsIgnoreCase);
-                    if (!match) {
-                        results.add(header);
-                    }
-                }
-            }
-        }
-        return results;
     }
 }

@@ -28,15 +28,17 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.exception.SubscriptionException;
 import org.apache.james.mailbox.maildir.MaildirStore;
 import org.apache.james.mailbox.store.transaction.NonTransactionalMapper;
 import org.apache.james.mailbox.store.user.SubscriptionMapper;
 import org.apache.james.mailbox.store.user.model.Subscription;
-import org.apache.james.mailbox.store.user.model.impl.SimpleSubscription;
 
 import com.github.steveash.guavate.Guavate;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
@@ -65,26 +67,11 @@ public class MaildirSubscriptionMapper extends NonTransactionalMapper implements
     }
 
     @Override
-    public List<Subscription> findSubscriptionsForUser(String user) throws SubscriptionException {
+    public List<Subscription> findSubscriptionsForUser(Username user) throws SubscriptionException {
         Set<String> subscriptionNames = readSubscriptionsForUser(user);
         return subscriptionNames.stream()
-            .map(subscription -> new SimpleSubscription(user, subscription))
+            .map(subscription -> new Subscription(user, subscription))
             .collect(Guavate.toImmutableList());
-    }
-
-    @Override
-    public Subscription findMailboxSubscriptionForUser(String user, String mailbox) throws SubscriptionException {
-        File userRoot = new File(store.userRoot(user));
-        Set<String> subscriptionNames;
-        try {
-            subscriptionNames = readSubscriptions(userRoot);
-        } catch (IOException e) {
-            throw new SubscriptionException(e);
-        }
-        if (subscriptionNames.contains(mailbox)) {
-            return new SimpleSubscription(user, mailbox);
-        }
-        return null;
     }
 
     @Override
@@ -115,9 +102,8 @@ public class MaildirSubscriptionMapper extends NonTransactionalMapper implements
      * Read the subscriptions for a particular user
      * @param user The user to get the subscriptions for
      * @return A Set of names of subscribed mailboxes of the user
-     * @throws SubscriptionException
      */
-    private Set<String> readSubscriptionsForUser(String user) throws SubscriptionException { 
+    private Set<String> readSubscriptionsForUser(Username user) throws SubscriptionException {
         File userRoot = new File(store.userRoot(user));
         try {
             return readSubscriptions(userRoot);
@@ -130,7 +116,6 @@ public class MaildirSubscriptionMapper extends NonTransactionalMapper implements
      * Read the names of the mailboxes which are subscribed from the specified folder
      * @param mailboxFolder The folder which contains the subscription file
      * @return A Set of names of subscribed mailboxes
-     * @throws IOException
      */
     private Set<String> readSubscriptions(File mailboxFolder) throws IOException {
         File subscriptionFile = new File(mailboxFolder, FILE_SUBSCRIPTION);
@@ -140,7 +125,7 @@ public class MaildirSubscriptionMapper extends NonTransactionalMapper implements
         try (FileReader fileReader = new FileReader(subscriptionFile)) {
             try (BufferedReader reader = new BufferedReader(fileReader)) {
                 return reader.lines()
-                    .filter(subscription -> !subscription.equals(""))
+                    .filter(Predicate.not(Strings::isNullOrEmpty))
                     .collect(Guavate.toImmutableSet());
             }
         }
@@ -150,7 +135,6 @@ public class MaildirSubscriptionMapper extends NonTransactionalMapper implements
      * Write the set of mailbox names into the subscriptions file in the specified folder
      * @param mailboxFolder Folder which contains the subscriptions file
      * @param subscriptions Set of names of subscribed mailboxes
-     * @throws IOException
      */
     private void writeSubscriptions(File mailboxFolder, Set<String> subscriptions) throws IOException {
         List<String> sortedSubscriptions = new ArrayList<>(subscriptions);

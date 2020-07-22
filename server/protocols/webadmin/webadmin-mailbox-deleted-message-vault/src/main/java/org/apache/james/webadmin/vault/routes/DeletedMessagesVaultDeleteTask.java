@@ -19,11 +19,13 @@
 
 package org.apache.james.webadmin.vault.routes;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 
 import javax.inject.Inject;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskExecutionDetails;
@@ -34,7 +36,7 @@ import reactor.core.publisher.Mono;
 
 public class DeletedMessagesVaultDeleteTask implements Task {
 
-    static final TaskType TYPE = TaskType.of("deletedMessages/delete");
+    public static final TaskType TYPE = TaskType.of("deleted-messages-delete");
 
     public static class Factory {
 
@@ -49,44 +51,51 @@ public class DeletedMessagesVaultDeleteTask implements Task {
 
         public DeletedMessagesVaultDeleteTask create(DeletedMessagesVaultDeleteTaskDTO dto) {
             MessageId messageId = messageIdFactory.fromString(dto.getMessageId());
-            User user = User.fromUsername(dto.getUserName());
-            return new DeletedMessagesVaultDeleteTask(deletedMessageVault, user, messageId);
+            Username username = Username.of(dto.getUserName());
+            return new DeletedMessagesVaultDeleteTask(deletedMessageVault, username, messageId);
         }
     }
 
     public static class AdditionalInformation implements TaskExecutionDetails.AdditionalInformation {
 
-        private final User user;
+        private final Username username;
         private final MessageId deleteMessageId;
+        private final Instant timestamp;
 
-        AdditionalInformation(User user, MessageId deleteMessageId) {
-            this.user = user;
+        AdditionalInformation(Username username, MessageId deleteMessageId, Instant timestamp) {
+            this.username = username;
             this.deleteMessageId = deleteMessageId;
+            this.timestamp = timestamp;
         }
 
-        public String getUser() {
-            return user.asString();
+        public String getUsername() {
+            return username.asString();
         }
 
         public String getDeleteMessageId() {
             return deleteMessageId.serialize();
         }
+
+        @Override
+        public Instant timestamp() {
+            return timestamp;
+        }
     }
 
     private final DeletedMessageVault vault;
-    private final User user;
+    private final Username username;
     private final MessageId messageId;
 
-    DeletedMessagesVaultDeleteTask(DeletedMessageVault vault, User user, MessageId messageId) {
+    DeletedMessagesVaultDeleteTask(DeletedMessageVault vault, Username username, MessageId messageId) {
         this.vault = vault;
-        this.user = user;
+        this.username = username;
         this.messageId = messageId;
     }
 
     @Override
     public Result run() {
-        return Mono.from(vault.delete(user, messageId))
-            .doOnError(e -> LOGGER.error("Error while deleting message {} for user {} in DeletedMessageVault: {}", messageId, user, e))
+        return Mono.from(vault.delete(username, messageId))
+            .doOnError(e -> LOGGER.error("Error while deleting message {} for user {} in DeletedMessageVault: {}", messageId, username, e))
             .thenReturn(Result.COMPLETED)
             .blockOptional()
             .orElse(Result.PARTIAL);
@@ -101,13 +110,12 @@ public class DeletedMessagesVaultDeleteTask implements Task {
         return messageId;
     }
 
-    User getUser() {
-        return user;
+    Username getUsername() {
+        return username;
     }
 
     @Override
     public Optional<TaskExecutionDetails.AdditionalInformation> details() {
-        return Optional.of(new AdditionalInformation(user, messageId));
+        return Optional.of(new AdditionalInformation(username, messageId, Clock.systemUTC().instant()));
     }
-
 }

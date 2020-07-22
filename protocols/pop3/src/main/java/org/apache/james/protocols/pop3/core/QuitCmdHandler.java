@@ -23,8 +23,6 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 
-import org.apache.commons.configuration2.Configuration;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.james.protocols.api.ProtocolSession.State;
 import org.apache.james.protocols.api.Request;
 import org.apache.james.protocols.api.Response;
@@ -35,6 +33,7 @@ import org.apache.james.protocols.pop3.mailbox.Mailbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 /**
@@ -56,31 +55,20 @@ public class QuitCmdHandler implements CommandHandler<POP3Session> {
         SIGN_OFF_NOT_CLEAN = response.immutable();
     }
 
-    @Override
-    public void init(Configuration config) throws ConfigurationException {
-
-    }
-
-    @Override
-    public void destroy() {
-
-    }
-
     /**
      * Handler method called upon receipt of a QUIT command. This method handles
      * cleanup of the POP3Handler state.
      */
     @Override
-    @SuppressWarnings("unchecked")
     public Response onCommand(POP3Session session, Request request) {
         Response response = null;
         if (session.getHandlerState() == POP3Session.AUTHENTICATION_READY || session.getHandlerState() == POP3Session.AUTHENTICATION_USERSET) {
             return SIGN_OFF;
         }
-        List<String> toBeRemoved = (List<String>) session.getAttachment(POP3Session.DELETED_UID_LIST, State.Transaction);
+        List<String> toBeRemoved = session.getAttachment(POP3Session.DELETED_UID_LIST, State.Transaction).orElse(ImmutableList.of());
         Mailbox mailbox = session.getUserMailbox();
         try {
-            String[] uids = toBeRemoved.toArray(new String[toBeRemoved.size()]);
+            String[] uids = toBeRemoved.toArray(String[]::new);
             mailbox.remove(uids);
             response = SIGN_OFF;
         } catch (Exception ex) {

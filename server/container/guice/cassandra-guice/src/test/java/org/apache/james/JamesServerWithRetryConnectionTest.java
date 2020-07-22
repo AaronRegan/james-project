@@ -19,7 +19,6 @@
 
 package org.apache.james;
 
-import static org.apache.james.CassandraJamesServerMain.ALL_BUT_JMX_CASSANDRA_MODULE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
@@ -32,8 +31,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.james.mailbox.extractor.TextExtractor;
-import org.apache.james.mailbox.store.search.PDFTextExtractor;
 import org.apache.james.modules.TestJMAPServerModule;
 import org.apache.james.modules.protocols.ImapGuiceProbe;
 import org.apache.james.util.concurrent.NamedThreadFactory;
@@ -43,20 +40,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 class JamesServerWithRetryConnectionTest {
-    private static final int LIMIT_TO_10_MESSAGES = 10;
     private static final long WAITING_TIME = TimeUnit.MILLISECONDS.convert(10, TimeUnit.SECONDS);
 
-    private static final DockerCassandraRule cassandraRule = new DockerCassandraRule();
     private static final DockerElasticSearchExtension dockerElasticSearch = new DockerElasticSearchExtension();
+    private static final CassandraExtension dockerCassandra = new CassandraExtension();
 
     @RegisterExtension
-    static JamesServerExtension testExtension = new JamesServerBuilder()
+    static JamesServerExtension testExtension = TestingDistributedJamesServerBuilder.withSearchConfiguration(SearchConfiguration.elasticSearch())
         .extension(dockerElasticSearch)
-        .extension(new CassandraExtension(cassandraRule))
-        .server(configuration -> GuiceJamesServer.forConfiguration(configuration)
-            .combineWith(ALL_BUT_JMX_CASSANDRA_MODULE)
-            .overrideWith(binder -> binder.bind(TextExtractor.class).to(PDFTextExtractor.class))
-            .overrideWith(new TestJMAPServerModule(LIMIT_TO_10_MESSAGES)))
+        .extension(dockerCassandra)
+        .server(configuration -> CassandraJamesServerMain.createServer(configuration)
+            .overrideWith(new TestJMAPServerModule()))
         .disableAutoStart()
         .build();
 
@@ -83,9 +77,9 @@ class JamesServerWithRetryConnectionTest {
 
     @Test
     void serverShouldRetryToConnectToCassandraWhenStartService(GuiceJamesServer server) throws Exception {
-        cassandraRule.pause();
+        dockerCassandra.getCassandra().pause();
 
-        waitToStartContainer(WAITING_TIME, cassandraRule::unpause);
+        waitToStartContainer(WAITING_TIME, dockerCassandra.getCassandra()::unpause);
 
         assertThatServerStartCorrectly(server);
     }

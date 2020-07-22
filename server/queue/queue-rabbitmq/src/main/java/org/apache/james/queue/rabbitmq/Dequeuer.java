@@ -21,30 +21,38 @@ package org.apache.james.queue.rabbitmq;
 
 import static org.apache.james.queue.api.MailQueue.DEQUEUED_METRIC_NAME_PREFIX;
 
-import java.io.IOException;
+import java.io.Closeable;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
+import org.apache.james.backends.rabbitmq.ReceiverProvider;
+import org.apache.james.blob.api.ObjectNotFoundException;
 import org.apache.james.metrics.api.Metric;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.queue.api.MailQueue;
+import org.apache.james.queue.api.MailQueueFactory;
 import org.apache.james.queue.rabbitmq.view.api.DeleteCondition;
 import org.apache.james.queue.rabbitmq.view.api.MailQueueView;
+import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueBrowser;
 import org.apache.mailet.Mail;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import com.github.fge.lambdas.Throwing;
 import com.github.fge.lambdas.consumers.ThrowingConsumer;
-import com.rabbitmq.client.Delivery;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.rabbitmq.AcknowledgableDelivery;
+import reactor.rabbitmq.ConsumeOptions;
+import reactor.rabbitmq.Receiver;
 
-class Dequeuer {
-
+class Dequeuer implements Closeable {
+    private static final Logger LOGGER = LoggerFactory.getLogger(Dequeuer.class);
     private static final boolean REQUEUE = true;
-    private final Flux<AcknowledgableDelivery> flux;
 
     private static class RabbitMQMailQueueItem implements MailQueue.MailQueueItem {
+
         private final Consumer<Boolean> ack;
         private final EnqueueId enqueueId;
         private final Mail mail;
@@ -68,28 +76,37 @@ class Dequeuer {
         public void done(boolean success) {
             ack.accept(success);
         }
+
     }
 
-    private final Function<MailReferenceDTO, MailWithEnqueueId> mailLoader;
+    private final MailLoader mailLoader;
     private final Metric dequeueMetric;
     private final MailReferenceSerializer mailReferenceSerializer;
-    private final MailQueueView mailQueueView;
+    private final MailQueueView<CassandraMailQueueBrowser.CassandraMailQueueItemView> mailQueueView;
+    private final Receiver receiver;
+    private final Flux<AcknowledgableDelivery> flux;
 
-    Dequeuer(MailQueueName name, RabbitClient rabbitClient, Function<MailReferenceDTO, MailWithEnqueueId> mailLoader,
+    Dequeuer(MailQueueName name, ReceiverProvider receiverProvider, MailLoader mailLoader,
              MailReferenceSerializer serializer, MetricFactory metricFactory,
-             MailQueueView mailQueueView) {
+             MailQueueView<CassandraMailQueueBrowser.CassandraMailQueueItemView> mailQueueView, MailQueueFactory.PrefetchCount prefetchCount) {
         this.mailLoader = mailLoader;
         this.mailReferenceSerializer = serializer;
         this.mailQueueView = mailQueueView;
         this.dequeueMetric = metricFactory.generate(DEQUEUED_METRIC_NAME_PREFIX + name.asString());
-        this.flux = rabbitClient
-            .receive(name)
+        this.receiver = receiverProvider.createReceiver();
+        this.flux = this.receiver
+            .consumeManualAck(name.toWorkQueueName().asString(), new ConsumeOptions().qos(prefetchCount.asInt()))
             .filter(getResponse -> getResponse.getBody() != null);
     }
 
+    @Override
+    public void close() {
+        receiver.close();
+    }
+
     Flux<? extends MailQueue.MailQueueItem> deQueue() {
-        return flux.concatMap(this::loadItem)
-            .concatMap(this::filterIfDeleted);
+        return flux.flatMapSequential(response -> loadItem(response).subscribeOn(Schedulers.elastic()))
+            .concatMap(item -> filterIfDeleted(item).subscribeOn(Schedulers.elastic()));
     }
 
     private Mono<RabbitMQMailQueueItem> filterIfDeleted(RabbitMQMailQueueItem item) {
@@ -106,13 +123,8 @@ class Dequeuer {
     }
 
     private Mono<RabbitMQMailQueueItem> loadItem(AcknowledgableDelivery response) {
-        try {
-            MailWithEnqueueId mailWithEnqueueId = loadMail(response);
-            ThrowingConsumer<Boolean> ack = ack(response, mailWithEnqueueId);
-            return Mono.just(new RabbitMQMailQueueItem(ack, mailWithEnqueueId));
-        } catch (MailQueue.MailQueueException e) {
-            return Mono.error(e);
-        }
+        return loadMail(response)
+            .map(mailWithEnqueueId -> new RabbitMQMailQueueItem(ack(response, mailWithEnqueueId), mailWithEnqueueId));
     }
 
     private ThrowingConsumer<Boolean> ack(AcknowledgableDelivery response, MailWithEnqueueId mailWithEnqueueId) {
@@ -127,17 +139,28 @@ class Dequeuer {
         };
     }
 
-    private MailWithEnqueueId loadMail(Delivery response) throws MailQueue.MailQueueException {
-        MailReferenceDTO mailDTO = toMailReference(response);
-        return mailLoader.apply(mailDTO);
+    private Mono<MailWithEnqueueId> loadMail(AcknowledgableDelivery delivery) {
+        return toMailReference(delivery)
+            .flatMap(reference -> mailLoader.load(reference)
+                .onErrorResume(ObjectNotFoundException.class, e -> {
+                    LOGGER.error("Fail to load mail {} with enqueueId {} as underlying blobs do not exist. Discarding this message to prevent an infinite loop.", reference.getName(), reference.getEnqueueId(), e);
+                    delivery.nack(!REQUEUE);
+                    return Mono.empty();
+                })
+                .onErrorResume(e -> {
+                    LOGGER.error("Fail to load mail {} with enqueueId {}", reference.getName(), reference.getEnqueueId(), e);
+                    delivery.nack(REQUEUE);
+                    return Mono.empty();
+                }));
     }
 
-    private MailReferenceDTO toMailReference(Delivery getResponse) throws MailQueue.MailQueueException {
-        try {
-            return mailReferenceSerializer.read(getResponse.getBody());
-        } catch (IOException e) {
-            throw new MailQueue.MailQueueException("Failed to parse DTO", e);
-        }
+    private Mono<MailReferenceDTO> toMailReference(AcknowledgableDelivery delivery) {
+        return Mono.fromCallable(delivery::getBody)
+            .map(Throwing.function(mailReferenceSerializer::read).sneakyThrow())
+            .onErrorResume(e -> {
+                LOGGER.error("Fail to deserialize MailReferenceDTO. Discarding this message to prevent an infinite loop.", e);
+                delivery.nack(!REQUEUE);
+                return Mono.empty();
+            });
     }
-
 }

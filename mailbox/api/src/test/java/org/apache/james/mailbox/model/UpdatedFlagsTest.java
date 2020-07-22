@@ -24,24 +24,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 import javax.mail.Flags;
 
 import org.apache.james.mailbox.MessageUid;
-import org.junit.Test;
+import org.apache.james.mailbox.ModSeq;
+import org.junit.jupiter.api.Test;
 
 import nl.jqno.equalsverifier.EqualsVerifier;
 
-public class UpdatedFlagsTest {
+class UpdatedFlagsTest {
 
     public static final MessageUid UID = MessageUid.of(45L);
-    public static final long MOD_SEQ = 47L;
+    public static final ModSeq MOD_SEQ = ModSeq.of(47L);
 
     @Test
-    public void shouldMatchBeanContract() {
+    void shouldMatchBeanContract() {
         EqualsVerifier.forClass(UpdatedFlags.class)
             .withIgnoredFields("modifiedFlags")
             .verify();
     }
 
     @Test
-    public void isModifiedToSetShouldReturnTrueWhenFlagOnlyInNewFlag() {
+    void isModifiedToSetShouldReturnTrueWhenFlagOnlyInNewFlag() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags(Flags.Flag.RECENT))
             .oldFlags(new Flags())
@@ -53,7 +54,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isModifiedToSetShouldReturnFalseWhenFlagOnlyInOldFlag() {
+    void isModifiedToSetShouldReturnFalseWhenFlagOnlyInOldFlag() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags())
             .oldFlags(new Flags(Flags.Flag.RECENT))
@@ -65,7 +66,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isModifiedToSetShouldReturnFalseWhenFlagIsOnNone() {
+    void isModifiedToSetShouldReturnFalseWhenFlagIsOnNone() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags())
             .oldFlags(new Flags())
@@ -77,7 +78,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isModifiedToSetShouldReturnFalseWhenFlagIsOnBoth() {
+    void isModifiedToSetShouldReturnFalseWhenFlagIsOnBoth() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags(Flags.Flag.RECENT))
             .oldFlags(new Flags(Flags.Flag.RECENT))
@@ -89,7 +90,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isModifiedToUnsetShouldReturnFalseWhenFlagOnlyInNewFlag() {
+    void isModifiedToUnsetShouldReturnFalseWhenFlagOnlyInNewFlag() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags(Flags.Flag.RECENT))
             .oldFlags(new Flags())
@@ -101,7 +102,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isModifiedToUnsetShouldReturnTrueWhenFlagOnlyInOldFlag() {
+    void isModifiedToUnsetShouldReturnTrueWhenFlagOnlyInOldFlag() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags())
             .oldFlags(new Flags(Flags.Flag.RECENT))
@@ -113,7 +114,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isModifiedToUnsetShouldReturnFalseWhenFlagIsOnNone() {
+    void isModifiedToUnsetShouldReturnFalseWhenFlagIsOnNone() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags())
             .oldFlags(new Flags())
@@ -125,7 +126,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isModifiedToUnsetShouldReturnFalseWhenFlagIsOnBoth() {
+    void isModifiedToUnsetShouldReturnFalseWhenFlagIsOnBoth() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags(Flags.Flag.RECENT))
             .oldFlags(new Flags(Flags.Flag.RECENT))
@@ -137,7 +138,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isUnchangedShouldReturnFalseWhenFlagOnlyInNewFlag() {
+    void isUnchangedShouldReturnFalseWhenFlagOnlyInNewFlag() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags(Flags.Flag.RECENT))
             .oldFlags(new Flags())
@@ -149,7 +150,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isUnchangedShouldReturnFalseWhenFlagOnlyInOldFlag() {
+    void isUnchangedShouldReturnFalseWhenFlagOnlyInOldFlag() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags())
             .oldFlags(new Flags(Flags.Flag.RECENT))
@@ -161,7 +162,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isUnchangedShouldReturnTrueWhenFlagIsOnNone() {
+    void isUnchangedShouldReturnTrueWhenFlagIsOnNone() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags())
             .oldFlags(new Flags())
@@ -173,7 +174,7 @@ public class UpdatedFlagsTest {
     }
 
     @Test
-    public void isUnchangedShouldReturnTrueWhenFlagIsOnBoth() {
+    void isUnchangedShouldReturnTrueWhenFlagIsOnBoth() {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .newFlags(new Flags(Flags.Flag.RECENT))
             .oldFlags(new Flags(Flags.Flag.RECENT))

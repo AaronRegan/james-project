@@ -25,10 +25,13 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
+import javax.mail.Flags;
+
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxManager.SearchCapabilities;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.SessionProvider;
 import org.apache.james.mailbox.events.Group;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.UnsupportedSearchException;
@@ -39,13 +42,15 @@ import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.model.UpdatedFlags;
 import org.apache.james.mailbox.store.MailboxSessionMapperFactory;
-import org.apache.james.mailbox.store.SessionProvider;
 import org.apache.james.mailbox.store.mail.MessageMapper.FetchType;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 /**
  * {@link ListeningMessageSearchIndex} implementation which wraps another {@link ListeningMessageSearchIndex} and will forward all calls to it.
@@ -67,8 +72,7 @@ public class LazyMessageSearchIndex extends ListeningMessageSearchIndex {
     private final ListeningMessageSearchIndex index;
     private final ConcurrentHashMap<MailboxId, Object> indexed = new ConcurrentHashMap<>();
     private final MailboxSessionMapperFactory factory;
-    
-    
+
     public LazyMessageSearchIndex(ListeningMessageSearchIndex index, MailboxSessionMapperFactory factory, SessionProvider sessionProvider) {
         super(factory, sessionProvider);
         this.index = index;
@@ -86,18 +90,18 @@ public class LazyMessageSearchIndex extends ListeningMessageSearchIndex {
     }
 
     @Override
-    public void add(MailboxSession session, Mailbox mailbox, MailboxMessage message) throws Exception {
-        index.add(session, mailbox, message);
+    public Mono<Void> add(MailboxSession session, Mailbox mailbox, MailboxMessage message) {
+        return index.add(session, mailbox, message);
     }
 
     @Override
-    public void delete(MailboxSession session, Mailbox mailbox, Collection<MessageUid> expungedUids) throws Exception {
-        index.delete(session, mailbox, expungedUids);
+    public Mono<Void> delete(MailboxSession session, MailboxId mailboxId, Collection<MessageUid> expungedUids) {
+        return index.delete(session, mailboxId, expungedUids);
     }
 
     @Override
-    public void deleteAll(MailboxSession session, MailboxId mailboxId) throws Exception {
-        index.deleteAll(session, mailboxId);
+    public Mono<Void> deleteAll(MailboxSession session, MailboxId mailboxId) {
+        return index.deleteAll(session, mailboxId);
     }
 
     /**
@@ -123,7 +127,7 @@ public class LazyMessageSearchIndex extends ListeningMessageSearchIndex {
                 while (messages.hasNext()) {
                     final MailboxMessage message = messages.next();
                     try {
-                        add(session, mailbox, message);
+                        add(session, mailbox, message).block();
                     } catch (Exception e) {
                         LOGGER.error("Unable to index message {} in mailbox {}", message.getUid(), mailbox.getName(), e);
                     }
@@ -135,13 +139,18 @@ public class LazyMessageSearchIndex extends ListeningMessageSearchIndex {
     }
 
     @Override
-    public void update(MailboxSession session, Mailbox mailbox, List<UpdatedFlags> updatedFlagsList) throws Exception {
-        index.update(session, mailbox, updatedFlagsList);
+    public Mono<Void> update(MailboxSession session, MailboxId mailboxId, List<UpdatedFlags> updatedFlagsList) {
+        return index.update(session, mailboxId, updatedFlagsList);
     }
     
 
     @Override
-    public List<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, long limit) throws MailboxException {
+    public Flux<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, long limit) throws MailboxException {
         throw new UnsupportedSearchException();
+    }
+
+    @Override
+    public Mono<Flags> retrieveIndexedFlags(Mailbox mailbox, MessageUid uid) {
+        return index.retrieveIndexedFlags(mailbox, uid);
     }
 }

@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 @ExtendWith(DockerCassandraExtension.class)
-public class CassandraHealthCheckTest {
+class CassandraHealthCheckTest {
 
     private CassandraHealthCheck healthCheck;
     private CassandraCluster cassandra;
@@ -49,7 +49,7 @@ public class CassandraHealthCheckTest {
 
     @Test
     void checkShouldReturnHealthyWhenCassandraIsRunning() {
-        Result check = healthCheck.check();
+        Result check = healthCheck.check().block();
 
         assertThat(check.isHealthy()).isTrue();
     }
@@ -58,7 +58,7 @@ public class CassandraHealthCheckTest {
     void checkShouldReturnUnhealthyWhenCassandraIsNotRunning(DockerCassandraExtension.DockerCassandra cassandraServer) {
         try {
             cassandraServer.getContainer().pause();
-            Result check = healthCheck.check();
+            Result check = healthCheck.check().block();
 
             assertThat(check.isUnHealthy()).isTrue();
         } finally {
@@ -72,12 +72,12 @@ public class CassandraHealthCheckTest {
         try {
             cassandraServer.getContainer().pause();
 
-            healthCheck.check();
+            healthCheck.check().block();
         } finally {
             cassandraServer.getContainer().unpause();
         }
 
-        Result check = healthCheck.check();
+        Result check = healthCheck.check().block();
 
         assertThat(check.isHealthy()).isTrue();
     }

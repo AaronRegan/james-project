@@ -23,8 +23,12 @@ import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
+import org.apache.james.core.Username;
 import org.apache.james.protocols.api.handler.LineHandler;
+
+import com.google.common.base.Preconditions;
 
 /**
  * Basic implementation of {@link ProtocolSession}
@@ -33,9 +37,9 @@ import org.apache.james.protocols.api.handler.LineHandler;
  */
 public class ProtocolSessionImpl implements ProtocolSession {
     private final ProtocolTransport transport;
-    private final Map<String, Object> connectionState;
-    private final Map<String, Object> sessionState;
-    private String user;
+    private final Map<AttachmentKey<?>, Object> connectionState;
+    private final Map<AttachmentKey<?>, Object> sessionState;
+    private Username username;
     protected final ProtocolConfiguration config;
     private static final Charset CHARSET = Charset.forName("US-ASCII");
     private static final String DELIMITER = "\r\n";
@@ -58,19 +62,17 @@ public class ProtocolSessionImpl implements ProtocolSession {
     }
 
     @Override
-    public String getUser() {
-        return user;
+    public Username getUsername() {
+        return username;
     }
 
     @Override
-    public void setUser(String user) {
-        this.user = user;
+    public void setUsername(Username username) {
+        this.username = username;
     }
 
     /**
      * Return the wrapped {@link ProtocolTransport} which is used for this {@link ProtocolSession}
-     * 
-     * @return transport
      */
     public ProtocolTransport getProtocolTransport() {
         return transport;
@@ -93,12 +95,12 @@ public class ProtocolSessionImpl implements ProtocolSession {
     
     
     @Override
-    public Map<String, Object> getConnectionState() {
+    public Map<AttachmentKey<?>, Object> getConnectionState() {
         return connectionState;
     }
 
     @Override
-    public Map<String, Object> getState() {
+    public Map<AttachmentKey<?>, Object> getState() {
         return sessionState;
     }
 
@@ -135,28 +137,34 @@ public class ProtocolSessionImpl implements ProtocolSession {
     }
 
     @Override
-    public Object setAttachment(String key, Object value, State state) {
+    public <T> Optional<T> setAttachment(AttachmentKey<T> key, T value, State state) {
+        Preconditions.checkNotNull(key, "key cannot be null");
+        Preconditions.checkNotNull(value, "value cannot be null");
+
         if (state == State.Connection) {
-            if (value == null) {
-                return connectionState.remove(key);
-            } else {
-                return connectionState.put(key, value);
-            }
+            return key.convert(connectionState.put(key, value));
         } else {
-            if (value == null) {
-                return sessionState.remove(key);
-            } else {
-                return sessionState.put(key, value);
-            }
+            return key.convert(sessionState.put(key, value));
         }
     }
 
     @Override
-    public Object getAttachment(String key, State state) {
+    public <T> Optional<T> removeAttachment(AttachmentKey<T> key, State state) {
+        Preconditions.checkNotNull(key, "key cannot be null");
+
         if (state == State.Connection) {
-            return connectionState.get(key);
+            return key.convert(connectionState.remove(key));
         } else {
-            return sessionState.get(key);
+            return key.convert(sessionState.remove(key));
+        }
+    }
+
+    @Override
+    public <T> Optional<T> getAttachment(AttachmentKey<T> key, State state) {
+        if (state == State.Connection) {
+            return key.convert(connectionState.get(key));
+        } else {
+            return key.convert(sessionState.get(key));
         }
     }
 

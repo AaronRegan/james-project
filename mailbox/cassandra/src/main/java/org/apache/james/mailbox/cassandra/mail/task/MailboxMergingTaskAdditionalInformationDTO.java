@@ -20,6 +20,8 @@
 
 package org.apache.james.mailbox.cassandra.mail.task;
 
+import java.time.Instant;
+
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
@@ -32,38 +34,48 @@ public class MailboxMergingTaskAdditionalInformationDTO implements AdditionalInf
 
     private static MailboxMergingTaskAdditionalInformationDTO fromDomainObject(MailboxMergingTask.Details details, String type) {
         return new MailboxMergingTaskAdditionalInformationDTO(
+            type,
             details.getOldMailboxId(),
             details.getNewMailboxId(),
             details.getTotalMessageCount(),
             details.getMessageMovedCount(),
-            details.getMessageFailedCount()
+            details.getMessageFailedCount(),
+            details.timestamp()
         );
     }
 
-    static final AdditionalInformationDTOModule<MailboxMergingTask.Details, MailboxMergingTaskAdditionalInformationDTO> SERIALIZATION_MODULE =
-        DTOModule.forDomainObject(MailboxMergingTask.Details.class)
+    public static AdditionalInformationDTOModule<MailboxMergingTask.Details, MailboxMergingTaskAdditionalInformationDTO> module() {
+        return DTOModule.forDomainObject(MailboxMergingTask.Details.class)
             .convertToDTO(MailboxMergingTaskAdditionalInformationDTO.class)
             .toDomainObjectConverter(MailboxMergingTaskAdditionalInformationDTO::toDomainObject)
             .toDTOConverter(MailboxMergingTaskAdditionalInformationDTO::fromDomainObject)
             .typeName(MailboxMergingTask.MAILBOX_MERGING.asString())
             .withFactory(AdditionalInformationDTOModule::new);
+    }
 
+
+    private final String type;
     private final String oldMailboxId;
     private final String newMailboxId;
     private final long totalMessageCount;
     private final long messageMovedCount;
     private final long messageFailedCount;
+    private final Instant timestamp;
 
-    public MailboxMergingTaskAdditionalInformationDTO(@JsonProperty("oldMailboxId") String oldMailboxId,
+    public MailboxMergingTaskAdditionalInformationDTO(@JsonProperty("type") String type,
+                                                      @JsonProperty("oldMailboxId") String oldMailboxId,
                                                       @JsonProperty("newMailboxId") String newMailboxId,
                                                       @JsonProperty("totalMessageCount") long totalMessageCount,
                                                       @JsonProperty("messageMovedCount") long messageMovedCount,
-                                                      @JsonProperty("messageFailedCount") long messageFailedCount) {
+                                                      @JsonProperty("messageFailedCount") long messageFailedCount,
+                                                      @JsonProperty("timestamp") Instant timestamp) {
+        this.type = type;
         this.oldMailboxId = oldMailboxId;
         this.newMailboxId = newMailboxId;
         this.totalMessageCount = totalMessageCount;
         this.messageMovedCount = messageMovedCount;
         this.messageFailedCount = messageFailedCount;
+        this.timestamp = timestamp;
     }
 
     public String getOldMailboxId() {
@@ -86,13 +98,24 @@ public class MailboxMergingTaskAdditionalInformationDTO implements AdditionalInf
         return messageFailedCount;
     }
 
+    @Override
+    public String getType() {
+        return type;
+    }
+
+    @Override
+    public Instant getTimestamp() {
+        return timestamp;
+    }
+
     private MailboxMergingTask.Details toDomainObject() {
         return new MailboxMergingTask.Details(
             ID_FACTORY.fromString(oldMailboxId),
             ID_FACTORY.fromString(newMailboxId),
             totalMessageCount,
             messageMovedCount,
-            messageFailedCount
+            messageFailedCount,
+            timestamp
         );
     }
 }

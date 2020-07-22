@@ -21,6 +21,7 @@ package org.apache.james.jmap.draft.methods;
 
 import static org.apache.james.jmap.draft.methods.Method.JMAP_PREFIX;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -29,7 +30,7 @@ import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.mail.MessagingException;
 
-import org.apache.james.core.User;
+import org.apache.james.core.Username;
 import org.apache.james.jmap.draft.exceptions.AttachmentsNotFoundException;
 import org.apache.james.jmap.draft.exceptions.InvalidDraftKeywordsException;
 import org.apache.james.jmap.draft.exceptions.InvalidMailboxForCreationException;
@@ -40,9 +41,6 @@ import org.apache.james.jmap.draft.methods.ValueWithId.MessageWithId;
 import org.apache.james.jmap.draft.model.CreationMessage;
 import org.apache.james.jmap.draft.model.CreationMessage.DraftEmailer;
 import org.apache.james.jmap.draft.model.EnvelopeUtils;
-import org.apache.james.jmap.draft.model.Message;
-import org.apache.james.jmap.draft.model.MessageFactory;
-import org.apache.james.jmap.draft.model.MessageFactory.MetaDataWithContent;
 import org.apache.james.jmap.draft.model.MessageProperties;
 import org.apache.james.jmap.draft.model.MessageProperties.MessageProperty;
 import org.apache.james.jmap.draft.model.SetError;
@@ -50,6 +48,9 @@ import org.apache.james.jmap.draft.model.SetMessagesError;
 import org.apache.james.jmap.draft.model.SetMessagesRequest;
 import org.apache.james.jmap.draft.model.SetMessagesResponse;
 import org.apache.james.jmap.draft.model.SetMessagesResponse.Builder;
+import org.apache.james.jmap.draft.model.message.view.MessageFullView;
+import org.apache.james.jmap.draft.model.message.view.MessageFullViewFactory;
+import org.apache.james.jmap.draft.model.message.view.MessageFullViewFactory.MetaDataWithContent;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
@@ -61,6 +62,7 @@ import org.apache.james.mailbox.exception.OverQuotaException;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.metrics.api.TimeMetric;
+import org.apache.james.rrt.api.CanSendFrom;
 import org.apache.james.server.core.Envelope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,7 +78,7 @@ import com.google.common.collect.ImmutableList;
 public class SetMessagesCreationProcessor implements SetMessagesProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(SetMailboxesCreationProcessor.class);
-    private final MessageFactory messageFactory;
+    private final MessageFullViewFactory messageFullViewFactory;
     private final SystemMailboxesProvider systemMailboxesProvider;
     private final AttachmentChecker attachmentChecker;
     private final MetricFactory metricFactory;
@@ -85,10 +87,11 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
     private final MessageAppender messageAppender;
     private final MessageSender messageSender;
     private final ReferenceUpdater referenceUpdater;
-    
+    private final CanSendFrom canSendFrom;
+
     @VisibleForTesting
     @Inject
-    SetMessagesCreationProcessor(MessageFactory messageFactory,
+    SetMessagesCreationProcessor(MessageFullViewFactory messageFullViewFactory,
                                  SystemMailboxesProvider systemMailboxesProvider,
                                  AttachmentChecker attachmentChecker,
                                  MetricFactory metricFactory,
@@ -96,8 +99,9 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
                                  MailboxId.Factory mailboxIdFactory,
                                  MessageAppender messageAppender,
                                  MessageSender messageSender,
-                                 ReferenceUpdater referenceUpdater) {
-        this.messageFactory = messageFactory;
+                                 ReferenceUpdater referenceUpdater,
+                                 CanSendFrom canSendFrom) {
+        this.messageFullViewFactory = messageFullViewFactory;
         this.systemMailboxesProvider = systemMailboxesProvider;
         this.attachmentChecker = attachmentChecker;
         this.metricFactory = metricFactory;
@@ -106,6 +110,7 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
         this.messageAppender = messageAppender;
         this.messageSender = messageSender;
         this.referenceUpdater = referenceUpdater;
+        this.canSendFrom = canSendFrom;
     }
 
     @Override
@@ -127,12 +132,14 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
             assertIsUserOwnerOfMailboxes(mailboxIds, mailboxSession);
             performCreate(create, responseBuilder, mailboxSession);
         } catch (MailboxSendingNotAllowedException e) {
-            responseBuilder.notCreated(create.getCreationId(), 
+            LOG.debug("{} is not allowed to send a mail using {} identity", e.getConnectedUser().asString(), e.getFromField());
+
+            responseBuilder.notCreated(create.getCreationId(),
                     SetError.builder()
                         .type(SetError.Type.INVALID_PROPERTIES)
                         .properties(MessageProperty.from)
-                        .description("Invalid 'from' field. Must be " +
-                                e.getAllowedFrom())
+                        .description("Invalid 'from' field. One accepted value is " +
+                                e.getConnectedUser().asString())
                         .build());
 
         } catch (InvalidDraftKeywordsException e) {
@@ -144,16 +151,16 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
                     .build());
 
         } catch (AttachmentsNotFoundException e) {
-            responseBuilder.notCreated(create.getCreationId(), 
+            responseBuilder.notCreated(create.getCreationId(),
                     SetMessagesError.builder()
                         .type(SetError.Type.INVALID_PROPERTIES)
                         .properties(MessageProperty.attachments)
                         .attachmentsNotFound(e.getAttachmentIds())
                         .description("Attachment not found")
                         .build());
-            
+
         } catch (InvalidMailboxForCreationException e) {
-            responseBuilder.notCreated(create.getCreationId(), 
+            responseBuilder.notCreated(create.getCreationId(),
                     SetError.builder()
                         .type(SetError.Type.INVALID_PROPERTIES)
                         .properties(MessageProperty.mailboxIds)
@@ -173,7 +180,7 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
                     buildSetErrorFromValidationResult(create.getValue().validate()));
 
         } catch (MailboxNotFoundException e) {
-            responseBuilder.notCreated(create.getCreationId(), 
+            responseBuilder.notCreated(create.getCreationId(),
                     SetError.builder()
                         .type(SetError.Type.ERROR)
                         .description(e.getMessage())
@@ -195,9 +202,9 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
                     .description(e.getMessage())
                     .build());
 
-        } catch (MailboxException | MessagingException e) {
+        } catch (MailboxException | MessagingException | IOException e) {
             LOG.error("Unexpected error while creating message", e);
-            responseBuilder.notCreated(create.getCreationId(), 
+            responseBuilder.notCreated(create.getCreationId(),
                     SetError.builder()
                         .type(SetError.Type.ERROR)
                         .description("unexpected error")
@@ -213,7 +220,9 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
             .collect(Guavate.toImmutableList());
     }
 
-    private void performCreate(CreationMessageEntry entry, Builder responseBuilder, MailboxSession session) throws MailboxException, InvalidMailboxForCreationException, MessagingException, AttachmentsNotFoundException {
+    private void performCreate(CreationMessageEntry entry, Builder responseBuilder, MailboxSession session)
+        throws MailboxException, MessagingException, AttachmentsNotFoundException, IOException {
+
         if (isAppendToMailboxWithRole(Role.OUTBOX, entry.getValue(), session)) {
             sendMailViaOutbox(entry, responseBuilder, session);
         } else if (entry.getValue().isDraft()) {
@@ -239,13 +248,17 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
         }
     }
 
-    private void sendMailViaOutbox(CreationMessageEntry entry, Builder responseBuilder, MailboxSession session) throws AttachmentsNotFoundException, MailboxException, MessagingException {
+    private void sendMailViaOutbox(CreationMessageEntry entry, Builder responseBuilder, MailboxSession session)
+        throws AttachmentsNotFoundException, MailboxException, MessagingException, IOException {
+
         validateArguments(entry, session);
         MessageWithId created = handleOutboxMessages(entry, session);
         responseBuilder.created(created.getCreationId(), created.getValue());
     }
 
-    private void saveDraft(CreationMessageEntry entry, Builder responseBuilder, MailboxSession session) throws AttachmentsNotFoundException, MailboxException, MessagingException {
+    private void saveDraft(CreationMessageEntry entry, Builder responseBuilder, MailboxSession session)
+        throws AttachmentsNotFoundException, MailboxException, MessagingException, IOException {
+
         attachmentChecker.assertAttachmentsExist(entry, session);
         MessageWithId created = handleDraftMessages(entry, session);
         responseBuilder.created(created.getCreationId(), created.getValue());
@@ -273,31 +286,42 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
             .allMatch(path -> path.belongsTo(session));
     }
 
-    private MessageWithId handleOutboxMessages(CreationMessageEntry entry, MailboxSession session) throws MailboxException, MessagingException {
-        assertUserIsSender(session, entry.getValue().getFrom());
+    private MessageWithId handleOutboxMessages(CreationMessageEntry entry, MailboxSession session) throws MailboxException, MessagingException, IOException {
+        assertUserCanSendFrom(session.getUser(), entry.getValue().getFrom());
         MetaDataWithContent newMessage = messageAppender.appendMessageInMailboxes(entry, toMailboxIds(entry), session);
-        Message jmapMessage = messageFactory.fromMetaDataWithContent(newMessage);
+        MessageFullView jmapMessage = messageFullViewFactory.fromMetaDataWithContent(newMessage).block();
         Envelope envelope = EnvelopeUtils.fromMessage(jmapMessage);
         messageSender.sendMessage(newMessage, envelope, session);
         referenceUpdater.updateReferences(entry.getValue().getHeaders(), session);
         return new ValueWithId.MessageWithId(entry.getCreationId(), jmapMessage);
     }
 
-    private void assertUserIsSender(MailboxSession session, Optional<DraftEmailer> from) throws MailboxSendingNotAllowedException {
-        if (!from.flatMap(DraftEmailer::getEmail)
-                .filter(email -> session.getUser().equals(User.fromUsername(email)))
-                .isPresent()) {
-            String allowedSender = session.getUser().asString();
-            throw new MailboxSendingNotAllowedException(allowedSender);
+    @VisibleForTesting
+    void assertUserCanSendFrom(Username connectedUser, Optional<DraftEmailer> from) throws MailboxSendingNotAllowedException {
+
+        Optional<Username> maybeFromUser = from.flatMap(DraftEmailer::getEmail)
+            .map(Username::of);
+
+        if (!canSendMailUsingIdentity(connectedUser, maybeFromUser)) {
+            String allowedSender = connectedUser.asString();
+            throw new MailboxSendingNotAllowedException(connectedUser, maybeFromUser);
+        } else {
+            LOG.debug("{} is allowed to send a mail using {} identity", connectedUser.asString(), from);
         }
     }
 
-    private MessageWithId handleDraftMessages(CreationMessageEntry entry, MailboxSession session) throws MailboxException, MessagingException {
+    private boolean canSendMailUsingIdentity(Username connectedUser, Optional<Username> maybeFromUser) {
+        return maybeFromUser
+                .filter(fromUser -> canSendFrom.userCanSendFrom(connectedUser, fromUser))
+                .isPresent();
+    }
+
+    private MessageWithId handleDraftMessages(CreationMessageEntry entry, MailboxSession session) throws MailboxException, MessagingException, IOException {
         MetaDataWithContent newMessage = messageAppender.appendMessageInMailboxes(entry, toMailboxIds(entry), session);
-        Message jmapMessage = messageFactory.fromMetaDataWithContent(newMessage);
+        MessageFullView jmapMessage = messageFullViewFactory.fromMetaDataWithContent(newMessage).block();
         return new ValueWithId.MessageWithId(entry.getCreationId(), jmapMessage);
     }
-    
+
     private boolean isAppendToMailboxWithRole(Role role, CreationMessage entry, MailboxSession mailboxSession) throws MailboxException {
         return getMailboxWithRole(mailboxSession, role)
                 .map(entry::isOnlyIn)
@@ -313,7 +337,7 @@ public class SetMessagesCreationProcessor implements SetMessagesProcessor {
     private Optional<MessageManager> getMailboxWithRole(MailboxSession mailboxSession, Role role) throws MailboxException {
         return systemMailboxesProvider.getMailboxByRole(role, mailboxSession.getUser()).findFirst();
     }
-    
+
     private SetError buildSetErrorFromValidationResult(List<ValidationResult> validationErrors) {
         return SetError.builder()
                 .type(SetError.Type.INVALID_PROPERTIES)
